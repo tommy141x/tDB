@@ -51,7 +51,7 @@ local function displayTestResults()
 end
 
 -- Wait for PocketBase to be ready
-exports['pocket-base']:onReady(function()
+exports['pb']:onReady(function()
     print("^3[PocketBase Demo]^7 Starting comprehensive export tests...")
 
     Citizen.CreateThread(function()
@@ -69,22 +69,22 @@ function RunComprehensiveTests()
 
     -- Test: isReady
     local isReady = testExport("isReady()", function()
-        return exports['pocket-base']:isReady()
+        return exports['pb']:isReady()
     end)
 
     -- Test: isClientAuthenticated
     local isAuth = testExport("isClientAuthenticated()", function()
-        return exports['pocket-base']:isClientAuthenticated()
+        return exports['pb']:isClientAuthenticated()
     end)
 
     -- Test: getUrl
     local pbUrl = testExport("getUrl()", function()
-        return exports['pocket-base']:getUrl()
+        return exports['pb']:getUrl()
     end)
 
     -- Test: healthCheck
     testExport("healthCheck()", function()
-        return exports['pocket-base']:healthCheck()
+        return exports['pb']:healthCheck()
     end)
 
     -- Note: Authentication exports removed - resource auto-authenticates as superuser
@@ -95,7 +95,7 @@ function RunComprehensiveTests()
 
     -- Test: getCollections
     local collections = testExport("getCollections()", function()
-        return exports['pocket-base']:getCollections()
+        return exports['pb']:getCollections()
     end)
 
     -- Check if demo collection exists
@@ -147,7 +147,7 @@ function RunComprehensiveTests()
         }
 
         local result = testExport("createCollection()", function()
-            return exports['pocket-base']:createCollection(collectionSchema)
+            return exports['pb']:createCollection(collectionSchema)
         end)
 
         if result then
@@ -158,7 +158,7 @@ function RunComprehensiveTests()
     -- Test: getCollection
     if collectionId then
         testExport("getCollection()", function()
-            return exports['pocket-base']:getCollection(DEMO_COLLECTION)
+            return exports['pb']:getCollection(DEMO_COLLECTION)
         end)
     end
 
@@ -176,7 +176,7 @@ function RunComprehensiveTests()
     }
 
     local createdRecord = testExport("create()", function()
-        return exports['pocket-base']:create(DEMO_COLLECTION, newPlayer)
+        return exports['pb']:create(DEMO_COLLECTION, newPlayer)
     end)
 
     if createdRecord then
@@ -186,7 +186,7 @@ function RunComprehensiveTests()
     -- Test: getOne
     if createdRecordId then
         testExport("getOne()", function()
-            local record = exports['pocket-base']:getOne(DEMO_COLLECTION, createdRecordId)
+            local record = exports['pb']:getOne(DEMO_COLLECTION, createdRecordId)
             -- Validate we got the correct record back
             if not record or record.id ~= createdRecordId then
                 error("Retrieved record ID doesn't match")
@@ -201,7 +201,7 @@ function RunComprehensiveTests()
     -- Test: update
     if createdRecordId then
         testExport("update()", function()
-            local updated = exports['pocket-base']:update(DEMO_COLLECTION, createdRecordId, {
+            local updated = exports['pb']:update(DEMO_COLLECTION, createdRecordId, {
                 playtime = 120,
                 level = 5
             })
@@ -221,7 +221,7 @@ function RunComprehensiveTests()
 
     -- Test: getList
     testExport("getList()", function()
-        local result = exports['pocket-base']:getList(DEMO_COLLECTION, 1, 10)
+        local result = exports['pb']:getList(DEMO_COLLECTION, 1, 10)
         -- Validate pagination structure
         if not result or not result.items then
             error("getList didn't return proper structure")
@@ -237,7 +237,7 @@ function RunComprehensiveTests()
 
     -- Test: getFullList
     testExport("getFullList()", function()
-        local records = exports['pocket-base']:getFullList(DEMO_COLLECTION)
+        local records = exports['pb']:getFullList(DEMO_COLLECTION)
         -- Validate we got an array of records
         if type(records) ~= "table" then
             error("getFullList didn't return a table")
@@ -250,7 +250,7 @@ function RunComprehensiveTests()
 
     -- Test: filter
     local filterString = testExport("filter()", function()
-        local filter = exports['pocket-base']:filter("playtime > {:minPlaytime}", {minPlaytime = 60})
+        local filter = exports['pb']:filter("playtime > {:minPlaytime}", {minPlaytime = 60})
         -- Validate filter string was generated
         if type(filter) ~= "string" or filter == "" then
             error("filter() didn't return a valid filter string")
@@ -261,7 +261,7 @@ function RunComprehensiveTests()
     -- Test: getFullList with filter
     if filterString then
         testExport("getFullList() with filter", function()
-            local records = exports['pocket-base']:getFullList(DEMO_COLLECTION, {filter = filterString})
+            local records = exports['pb']:getFullList(DEMO_COLLECTION, {filter = filterString})
             -- Validate filtered results
             if type(records) ~= "table" then
                 error("Filtered getFullList didn't return a table")
@@ -283,7 +283,7 @@ function RunComprehensiveTests()
     -- Test: getFirstListItem (with existing record)
     if createdRecordId then
         testExport("getFirstListItem()", function()
-            local record = exports['pocket-base']:getFirstListItem(DEMO_COLLECTION, "level >= 1")
+            local record = exports['pb']:getFirstListItem(DEMO_COLLECTION, "level >= 1")
             -- Validate we got a record that matches the filter
             if not record or not record.id then
                 error("getFirstListItem didn't return a valid record")
@@ -301,7 +301,7 @@ function RunComprehensiveTests()
 
     -- Test: subscribe
     testExport("subscribe()", function()
-        local result = exports['pocket-base']:subscribe(DEMO_COLLECTION, "*")
+        local result = exports['pb']:subscribe(DEMO_COLLECTION, "*")
         -- Validate subscription was successful
         if result ~= true then
             error("subscribe() should return true on success")
@@ -319,7 +319,7 @@ function RunComprehensiveTests()
 
     -- Test: unsubscribe
     testExport("unsubscribe()", function()
-        local result = exports['pocket-base']:unsubscribe(DEMO_COLLECTION, "*")
+        local result = exports['pb']:unsubscribe(DEMO_COLLECTION, "*")
         -- Validate unsubscribe was successful
         if result ~= true then
             error("unsubscribe() should return true on success")
@@ -334,7 +334,7 @@ function RunComprehensiveTests()
     -- Test: getFileUrl (with dummy record)
     if createdRecord then
         testExport("getFileUrl()", function()
-            local url = exports['pocket-base']:getFileUrl(createdRecord, "avatar.png")
+            local url = exports['pb']:getFileUrl(createdRecord, "avatar.png")
             -- Validate URL was generated
             if type(url) ~= "string" or url == "" then
                 error("getFileUrl() didn't return a valid URL string")
@@ -348,7 +348,7 @@ function RunComprehensiveTests()
 
     -- Test: getFileToken
     testExport("getFileToken()", function()
-        local token = exports['pocket-base']:getFileToken()
+        local token = exports['pb']:getFileToken()
         -- Validate token was returned
         if type(token) ~= "string" or token == "" then
             error("getFileToken() didn't return a valid token string")
@@ -363,7 +363,7 @@ function RunComprehensiveTests()
     -- Test: updateCollection (add a field)
     if collectionId then
         testExport("updateCollection()", function()
-            return exports['pocket-base']:updateCollection(DEMO_COLLECTION, {
+            return exports['pb']:updateCollection(DEMO_COLLECTION, {
                 fields = {
                     {
                         name = "name",
@@ -411,7 +411,7 @@ function RunComprehensiveTests()
 
     -- Test: listAuthMethods (expected to fail - not an auth collection)
     testExport("listAuthMethods()", function()
-        return exports['pocket-base']:listAuthMethods(DEMO_COLLECTION)
+        return exports['pb']:listAuthMethods(DEMO_COLLECTION)
     end, true)
 
     -- Note: Other auth methods exist but won't test here since demo_players isn't an auth collection
@@ -426,22 +426,22 @@ function RunComprehensiveTests()
 
     -- Test: batch() API with multiple operations
     local batchResults = testExport("batch() API", function()
-        local batch = exports['pocket-base']:batch()
-        batch = exports['pocket-base']:batchCreate(batch, DEMO_COLLECTION, {
+        local batch = exports['pb']:batch()
+        batch = exports['pb']:batchCreate(batch, DEMO_COLLECTION, {
             name = "Batch Player 1",
             identifier = "batch_" .. os.time() .. "_1",
             playtime = 10,
             level = 1,
             active = true
         })
-        batch = exports['pocket-base']:batchCreate(batch, DEMO_COLLECTION, {
+        batch = exports['pb']:batchCreate(batch, DEMO_COLLECTION, {
             name = "Batch Player 2",
             identifier = "batch_" .. os.time() .. "_2",
             playtime = 20,
             level = 2,
             active = true
         })
-        return exports['pocket-base']:batchSend(batch)
+        return exports['pb']:batchSend(batch)
     end, true) -- Silent errors - batch API may be disabled
 
 
@@ -452,7 +452,7 @@ function RunComprehensiveTests()
 
     -- Test: subscribeToTopic
     testExport("subscribeToTopic()", function()
-        local result = exports['pocket-base']:subscribeToTopic("custom_events")
+        local result = exports['pb']:subscribeToTopic("custom_events")
         -- Validate subscription was successful
         if result ~= true then
             error("subscribeToTopic() should return true on success")
@@ -469,7 +469,7 @@ function RunComprehensiveTests()
 
     -- Test: isRealtimeConnected
     testExport("isRealtimeConnected()", function()
-        local connected = exports['pocket-base']:isRealtimeConnected()
+        local connected = exports['pb']:isRealtimeConnected()
         -- Validate it returns a boolean
         if type(connected) ~= "boolean" then
             error("isRealtimeConnected() should return a boolean")
@@ -479,7 +479,7 @@ function RunComprehensiveTests()
 
     -- Test: unsubscribeFromTopic
     testExport("unsubscribeFromTopic()", function()
-        local result = exports['pocket-base']:unsubscribeFromTopic("custom_events")
+        local result = exports['pb']:unsubscribeFromTopic("custom_events")
         -- Validate unsubscribe was successful
         if result ~= true then
             error("unsubscribeFromTopic() should return true on success")
@@ -489,7 +489,7 @@ function RunComprehensiveTests()
 
     -- Test: unsubscribeByPrefix
     testExport("unsubscribeByPrefix()", function()
-        local result = exports['pocket-base']:unsubscribeByPrefix("custom_")
+        local result = exports['pb']:unsubscribeByPrefix("custom_")
         -- Validate unsubscribe was successful
         if result ~= true then
             error("unsubscribeByPrefix() should return true on success")
@@ -503,7 +503,7 @@ function RunComprehensiveTests()
 
     -- Test: getCollectionScaffolds
     testExport("getCollectionScaffolds()", function()
-        local scaffolds = exports['pocket-base']:getCollectionScaffolds()
+        local scaffolds = exports['pb']:getCollectionScaffolds()
         -- Validate scaffolds structure
         if type(scaffolds) ~= "table" then
             error("getCollectionScaffolds() didn't return a table")
@@ -513,14 +513,14 @@ function RunComprehensiveTests()
 
     -- Test: importCollections with empty array (should succeed with no changes)
     testExport("importCollections()", function()
-        local result = exports['pocket-base']:importCollections(json.encode({}), false)
+        local result = exports['pb']:importCollections(json.encode({}), false)
         -- Should succeed even with empty data
         return true
     end, true) -- Silent - may have validation requirements
 
     -- Test: truncateCollection (commented out to preserve demo data)
     -- testExport("truncateCollection()", function()
-    --     return exports['pocket-base']:truncateCollection(DEMO_COLLECTION)
+    --     return exports['pb']:truncateCollection(DEMO_COLLECTION)
     -- end)
 
     -- ========================================================================
@@ -532,7 +532,7 @@ function RunComprehensiveTests()
         for _, result in ipairs(batchResults) do
             if result and result.id then
                 pcall(function()
-                    exports['pocket-base']:delete(DEMO_COLLECTION, result.id)
+                    exports['pb']:delete(DEMO_COLLECTION, result.id)
                 end)
             end
         end
@@ -541,11 +541,11 @@ function RunComprehensiveTests()
     -- Test: delete (original record)
     if createdRecordId then
         testExport("delete()", function()
-            local result = exports['pocket-base']:delete(DEMO_COLLECTION, createdRecordId)
+            local result = exports['pb']:delete(DEMO_COLLECTION, createdRecordId)
             -- Validate deletion succeeded (returns true or nil)
             -- Try to fetch the record to confirm it's deleted
             local success, error = pcall(function()
-                return exports['pocket-base']:getOne(DEMO_COLLECTION, createdRecordId)
+                return exports['pb']:getOne(DEMO_COLLECTION, createdRecordId)
             end)
             -- If we can still get the record, deletion failed
             if success then
@@ -559,7 +559,7 @@ function RunComprehensiveTests()
     -- If you want to delete it, uncomment the following:
     -- if collectionId then
     --     testExport("deleteCollection()", function()
-    --         return exports['pocket-base']:deleteCollection(DEMO_COLLECTION)
+    --         return exports['pb']:deleteCollection(DEMO_COLLECTION)
     --     end)
     -- end
 
