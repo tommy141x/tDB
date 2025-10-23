@@ -132,6 +132,31 @@ PocketBase automatically generates migration files when you modify collections v
 
 All examples use `exports['pb']:functionName()`
 
+### ⚠️ Wait for Ready
+
+**Important:** PocketBase must be ready before using any exports. Use the callback or check manually:
+
+#### Using Callback (Recommended)
+```lua
+exports['pb']:onReady(function()
+    -- PocketBase is ready, safe to use all exports
+    local players = exports['pb']:getFullList("players")
+end)
+```
+
+#### Manual Check
+```lua
+if exports['pb']:isReady() then
+    local players = exports['pb']:getFullList("players")
+else
+    print("PocketBase not ready yet!")
+end
+```
+
+**Note:** The resource usually takes 1-2 seconds to start. Using `onReady()` ensures your code runs at the right time.
+
+---
+
 ### Collections
 
 #### Get Collections
@@ -371,6 +396,11 @@ local connected = exports['pb']:isRealtimeConnected()
 
 ### Player System
 ```lua
+-- Wait for PocketBase to be ready on resource start
+exports['pb']:onReady(function()
+    print("PocketBase is ready!")
+end)
+
 -- Create player on join
 AddEventHandler('playerJoining', function()
     local source = source
@@ -402,8 +432,10 @@ end)
 
 ### Ban System with Realtime
 ```lua
--- Subscribe to ban updates
-exports['pb']:subscribe("bans", "*")
+-- Subscribe to ban updates when ready
+exports['pb']:onReady(function()
+    exports['pb']:subscribe("bans", "*")
+end)
 
 RegisterNetEvent('pocketbase:bans:*', function(data)
     if data.action == "create" then
