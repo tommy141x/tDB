@@ -468,18 +468,6 @@ end
 
 ---
 
-## 🔒 Security Best Practices
-
-1. **Never expose admin UI in production** unless necessary (`ExposeAdmin = false`)
-2. **Use strong superuser passwords** if admin UI is exposed
-3. **Configure collection rules** in PocketBase admin UI
-4. **Use filter parameters** to prevent SQL injection
-5. **Enable backups** before production deployment
-6. **Protect config.lua** with proper file permissions
-7. **Use HTTPS** with reverse proxy if exposing admin UI
-
----
-
 ## 🐛 Troubleshooting
 
 ### "Batch requests are not allowed"
