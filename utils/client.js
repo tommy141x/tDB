@@ -109,7 +109,10 @@
         }
         return await fn(...args);
       } catch (error) {
-        clientLogger.error(`${fn.name}: ${error.message}`);
+        // Don't log 404 errors - they're expected when checking if records exist
+        if (error.status !== 404) {
+          clientLogger.error(`${fn.name}: ${error.message}`);
+        }
         throw error;
       }
     };
