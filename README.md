@@ -1,6 +1,6 @@
 # PocketBase for FiveM
 
-A production-ready PocketBase instance in one FiveM resource with automatic setup, authentication, backups, and comprehensive exports.
+A production-ready [PocketBase](https://pocketbase.io/) instance in one FiveM resource with automatic setup, realtime events, backups, and comprehensive exports.
 
 ---
 
