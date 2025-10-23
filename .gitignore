@@ -1,6 +1,3 @@
-# Test script (optional, users can enable/disable)
-test.lua
-
 # PocketBase data directory (contains database)
 pb_data/
 

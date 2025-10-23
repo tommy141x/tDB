@@ -17,4 +17,4 @@ server_scripts {
 }
 
 -- Testing script
---server_script 'test.lua'
+--server_script 'tests.lua'
