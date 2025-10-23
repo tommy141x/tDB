@@ -481,6 +481,11 @@ Check `Config.Superuser` credentials in `config.lua`. Delete and restart to rege
 
 ---
 
+## Note
+This resource bundles the Windows AMD64 & Linux AMD64 PocketBase binaries, if you wish to download them yourself you can find them here: https://github.com/pocketbase/pocketbase/releases
+
+---
+
 ## 📖 Documentation
 
 - **PocketBase Docs**: https://pocketbase.io/docs/
