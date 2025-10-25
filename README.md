@@ -1,6 +1,6 @@
 # PocketBase for FiveM
 
-A production-ready [PocketBase](https://pocketbase.io/) instance in one FiveM resource with automatic setup, realtime events, backups, and comprehensive exports.
+A production-ready [PocketBase](https://pocketbase.io/) instance in one FiveM resource with automatic setup, realtime events, backups, SQL queries, transactions, and comprehensive exports.
 
 ---
 
@@ -305,6 +305,99 @@ end)
 -- Unsubscribe
 exports['pb']:unsubscribeFromTopic("server_events")
 exports['pb']:unsubscribeByPrefix("server_")
+```
+
+### Realtime (Server Broadcasts)
+
+Send custom messages from server to connected clients:
+
+```lua
+-- Send message to all clients subscribed to topic
+local sentCount = exports['pb']:sendRealtimeMessage("server_events", {
+    type = "announcement",
+    message = "Server restart in 5 minutes"
+})
+
+-- Get list of connected clients
+local clients = exports['pb']:getRealtimeClients()
+print("Connected clients:", #clients)
+```
+
+---
+
+## 🗄️ SQL Queries
+
+Execute SQL queries directly against the SQLite database:
+
+```lua
+-- Complex queries with JOINs
+local topPlayers = exports['pb']:sqlQuery([[
+    SELECT users.name, COUNT(orders.id) as total
+    FROM users
+    LEFT JOIN orders ON orders.user_id = users.id
+    GROUP BY users.id
+    HAVING total > 5
+    ORDER BY total DESC
+]], {})
+
+-- Get single value (COUNT, SUM, etc.)
+local totalPlayers = exports['pb']:sqlScalar("SELECT COUNT(*) FROM players")
+
+-- Get single row
+local player = exports['pb']:sqlSingle("SELECT * FROM players WHERE id = {:id} LIMIT 1", {id = "abc"})
+
+-- Execute INSERT/UPDATE/DELETE
+local insertId = exports['pb']:sqlExecute("INSERT INTO logs (message) VALUES ({:msg})", {msg = "Player joined"})
+
+-- Transaction (all succeed or all fail)
+local success = exports['pb']:sqlTransaction({
+    {sql = "UPDATE accounts SET balance = balance - 1000 WHERE id = {:from}", params = {from = "acc1"}},
+    {sql = "UPDATE accounts SET balance = balance + 1000 WHERE id = {:to}", params = {to = "acc2"}}
+})
+```
+
+---
+
+## 🔄 Transactions
+
+Execute multiple record operations atomically:
+
+```lua
+-- All operations succeed or all fail together
+local results = exports['pb']:runTransaction({
+    {type = "create", collection = "players", data = {name = "John"}},
+    {type = "update", collection = "stats", id = "stat_id", data = {total = 100}},
+    {type = "delete", collection = "temp_data", id = "temp_id"}
+})
+
+print("Created player:", results[1].id)
+```
+
+---
+
+## 📊 Advanced Record Operations
+
+```lua
+-- Batch fetch by IDs
+local players = exports['pb']:findRecordsByIds("players", {"id1", "id2", "id3"})
+
+-- Count records with filter
+local activeCount = exports['pb']:countRecords("players", "active = true")
+```
+
+---
+
+## 📧 Email Sending
+
+Send emails programmatically (requires SMTP configuration):
+
+```lua
+local success = exports['pb']:sendEmail(
+    "user@example.com",
+    "Welcome!",
+    "<h1>Welcome to the server!</h1>",
+    "Welcome to the server!" -- Plain text fallback
+)
 ```
 
 ---

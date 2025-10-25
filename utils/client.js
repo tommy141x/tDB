@@ -939,6 +939,301 @@
   });
 
   // ============================================================================
+  // Extended API - SQL Queries
+  // ============================================================================
+
+  /**
+   * Execute a raw SQL query
+   * Note: For dynamic queries, provide columns as third parameter
+   * @export
+   */
+  exports(
+    "sqlQuery",
+    wrapAsync(async (sql, params = {}, columns = null) => {
+      // If columns not provided, try to auto-detect from simple SELECT
+      if (!columns) {
+        // Simple parser for "SELECT col1, col2 FROM..." queries
+        const selectMatch = sql.match(/SELECT\s+(.+?)\s+FROM/i);
+        if (selectMatch) {
+          const colStr = selectMatch[1].trim();
+          if (colStr !== "*") {
+            columns = {};
+            const cols = colStr.split(",").map((c) =>
+              c
+                .trim()
+                .split(/\s+as\s+/i)
+                .pop()
+                .trim(),
+            );
+            cols.forEach((col) => {
+              // Clean column name (remove table prefix if exists)
+              const cleanCol = col.includes(".") ? col.split(".").pop() : col;
+              columns[cleanCol] = ""; // Default to string type
+            });
+          }
+        }
+      }
+
+      if (!columns) {
+        // Fallback: assume generic columns
+        columns = { id: "", name: "", value: "" };
+      }
+
+      const result = await pb.send("/api/sql/query", {
+        method: "POST",
+        body: { sql, params, columns },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "SQL query failed");
+      }
+
+      return result.data;
+    }),
+  );
+
+  /**
+   * Execute a SQL query that returns a single value
+   * @export
+   */
+  exports(
+    "sqlScalar",
+    wrapAsync(async (sql, params = {}, columnName = "value") => {
+      const result = await pb.send("/api/sql/scalar", {
+        method: "POST",
+        body: { sql, params, columnName },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "SQL scalar failed");
+      }
+
+      return result.data;
+    }),
+  );
+
+  /**
+   * Execute a SQL query that returns a single row
+   * @export
+   */
+  exports(
+    "sqlSingle",
+    wrapAsync(async (sql, params = {}, columns = null) => {
+      // If columns not provided, try to auto-detect from simple SELECT
+      if (!columns) {
+        const selectMatch = sql.match(/SELECT\s+(.+?)\s+FROM/i);
+        if (selectMatch) {
+          const colStr = selectMatch[1].trim();
+          if (colStr !== "*") {
+            columns = {};
+            const cols = colStr.split(",").map((c) =>
+              c
+                .trim()
+                .split(/\s+as\s+/i)
+                .pop()
+                .trim(),
+            );
+            cols.forEach((col) => {
+              const cleanCol = col.includes(".") ? col.split(".").pop() : col;
+              columns[cleanCol] = "";
+            });
+          }
+        }
+      }
+
+      if (!columns) {
+        columns = { id: "", name: "", value: "" };
+      }
+
+      const result = await pb.send("/api/sql/single", {
+        method: "POST",
+        body: { sql, params, columns },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "SQL single failed");
+      }
+
+      return result.data;
+    }),
+  );
+
+  /**
+   * Execute a SQL INSERT/UPDATE/DELETE query
+   * @export
+   */
+  exports(
+    "sqlExecute",
+    wrapAsync(async (sql, params = {}) => {
+      const result = await pb.send("/api/sql/execute", {
+        method: "POST",
+        body: { sql, params },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "SQL execute failed");
+      }
+
+      return result.insertId;
+    }),
+  );
+
+  /**
+   * Execute multiple SQL queries in a transaction
+   * @export
+   */
+  exports(
+    "sqlTransaction",
+    wrapAsync(async (queries) => {
+      const result = await pb.send("/api/sql/transaction", {
+        method: "POST",
+        body: { queries },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "SQL transaction failed");
+      }
+
+      return result.success;
+    }),
+  );
+
+  // ============================================================================
+  // Extended API - Advanced Record Operations
+  // ============================================================================
+
+  /**
+   * Find multiple records by IDs (batch fetch)
+   * @export
+   */
+  exports(
+    "findRecordsByIds",
+    wrapAsync(async (collection, ids) => {
+      const result = await pb.send("/api/records/findByIds", {
+        method: "POST",
+        body: { collection, ids },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "Find by IDs failed");
+      }
+
+      return result.data;
+    }),
+  );
+
+  /**
+   * Count records with optional filter
+   * @export
+   */
+  exports(
+    "countRecords",
+    wrapAsync(async (collection, filter = null, params = {}) => {
+      const result = await pb.send("/api/records/count", {
+        method: "POST",
+        body: { collection, filter, params },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "Count failed");
+      }
+
+      return result.count;
+    }),
+  );
+
+  // ============================================================================
+  // Extended API - Transactions
+  // ============================================================================
+
+  /**
+   * Run multiple record operations in a transaction
+   * @export
+   */
+  exports(
+    "runTransaction",
+    wrapAsync(async (operations) => {
+      const result = await pb.send("/api/transactions/run", {
+        method: "POST",
+        body: { operations },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "Transaction failed");
+      }
+
+      return result.results;
+    }),
+  );
+
+  // ============================================================================
+  // Extended API - Custom Realtime Messaging
+  // ============================================================================
+
+  /**
+   * Send custom realtime message to subscribed clients
+   * @export
+   */
+  exports(
+    "sendRealtimeMessage",
+    wrapAsync(async (topic, data) => {
+      const result = await pb.send("/api/realtime/send", {
+        method: "POST",
+        body: { topic, data },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "Send realtime message failed");
+      }
+
+      return result.sentCount;
+    }),
+  );
+
+  /**
+   * Get connected realtime clients info
+   * @export
+   */
+  exports(
+    "getRealtimeClients",
+    wrapAsync(async () => {
+      const result = await pb.send("/api/realtime/clients", {
+        method: "GET",
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "Get realtime clients failed");
+      }
+
+      return result.clients;
+    }),
+  );
+
+  // ============================================================================
+  // Extended API - Email Operations
+  // ============================================================================
+
+  /**
+   * Send custom email
+   * @export
+   */
+  exports(
+    "sendEmail",
+    wrapAsync(async (to, subject, html, text = "") => {
+      const result = await pb.send("/api/email/send", {
+        method: "POST",
+        body: { to, subject, html, text },
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "Send email failed");
+      }
+
+      return true;
+    }),
+  );
+
+  // ============================================================================
   // Cleanup
   // ============================================================================
   on("onResourceStop", (resource) => {

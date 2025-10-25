@@ -524,6 +524,208 @@ function RunComprehensiveTests()
     -- end)
 
     -- ========================================================================
+    -- SQL Queries
+    -- ========================================================================
+
+    print("^5[SQL Queries]^7 Testing SQL operations...")
+
+    -- Test: sqlQuery - Select all from collection
+    local sqlQueryResult = testExport("sqlQuery() - SELECT", function()
+        local result = exports['pb']:sqlQuery(
+            "SELECT id, name, type FROM _collections WHERE system = {:system} LIMIT 5",
+            {system = false}
+        )
+        if type(result) ~= "table" then
+            error("sqlQuery() didn't return a table")
+        end
+        return result
+    end)
+
+    -- Test: sqlScalar - Get count
+    testExport("sqlScalar() - COUNT", function()
+        local count = exports['pb']:sqlScalar(
+            "SELECT COUNT(*) FROM _collections",
+            {}
+        )
+        if type(count) ~= "number" then
+            error("sqlScalar() didn't return a number")
+        end
+        print("  Collection count: " .. count)
+        return count
+    end)
+
+    -- Test: sqlSingle - Get one row
+    testExport("sqlSingle() - Get one row", function()
+        local row = exports['pb']:sqlSingle(
+            "SELECT id, name FROM _collections LIMIT 1",
+            {}
+        )
+        if type(row) ~= "table" then
+            error("sqlSingle() didn't return a table")
+        end
+        return row
+    end)
+
+    -- Test: sqlExecute - Create a test table
+    local testTableName = "sql_test_" .. os.time()
+    testExport("sqlExecute() - CREATE TABLE", function()
+        local insertId = exports['pb']:sqlExecute(
+            "CREATE TABLE IF NOT EXISTS " .. testTableName .. " (id INTEGER PRIMARY KEY, value TEXT)",
+            {}
+        )
+        return insertId
+    end)
+
+    -- Test: sqlExecute - Insert into test table
+    testExport("sqlExecute() - INSERT", function()
+        local insertId = exports['pb']:sqlExecute(
+            "INSERT INTO " .. testTableName .. " (value) VALUES ({:val})",
+            {val = "test_value"}
+        )
+        return insertId
+    end)
+
+    -- Test: sqlTransaction - Multiple queries atomically
+    testExport("sqlTransaction() - Atomic operations", function()
+        local success = exports['pb']:sqlTransaction({
+            {sql = "INSERT INTO " .. testTableName .. " (value) VALUES ({:val1})", params = {val1 = "transaction_test_1"}},
+            {sql = "INSERT INTO " .. testTableName .. " (value) VALUES ({:val2})", params = {val2 = "transaction_test_2"}},
+            {sql = "UPDATE " .. testTableName .. " SET value = {:newval} WHERE value = {:oldval}", params = {newval = "updated", oldval = "transaction_test_1"}}
+        })
+        if not success then
+            error("sqlTransaction() failed")
+        end
+        return success
+    end)
+
+    -- Cleanup test table
+    pcall(function()
+        exports['pb']:sqlExecute("DROP TABLE IF EXISTS " .. testTableName, {})
+    end)
+
+    -- ========================================================================
+    -- Advanced Record Operations
+    -- ========================================================================
+
+    print("^5[Advanced Records]^7 Testing batch and count operations...")
+
+    -- Test: findRecordsByIds - Batch fetch
+    if createdRecordId then
+        testExport("findRecordsByIds() - Batch fetch", function()
+            local records = exports['pb']:findRecordsByIds(DEMO_COLLECTION, {createdRecordId})
+            if type(records) ~= "table" or #records == 0 then
+                error("findRecordsByIds() didn't return records")
+            end
+            return records
+        end)
+    end
+
+    -- Test: countRecords - With filter
+    testExport("countRecords() - With filter", function()
+        local count = exports['pb']:countRecords(DEMO_COLLECTION, "name != ''")
+        if type(count) ~= "number" then
+            error("countRecords() didn't return a number")
+        end
+        print("  Records with name: " .. count)
+        return count
+    end)
+
+    -- Test: countRecords - Without filter
+    testExport("countRecords() - No filter", function()
+        local count = exports['pb']:countRecords(DEMO_COLLECTION)
+        if type(count) ~= "number" then
+            error("countRecords() didn't return a number")
+        end
+        print("  Total records: " .. count)
+        return count
+    end)
+
+    -- ========================================================================
+    -- Record Transactions
+    -- ========================================================================
+
+    print("^5[Transactions]^7 Testing atomic record operations...")
+
+    -- Test: runTransaction - Multiple record operations atomically
+    local txRecordIds = {}
+    testExport("runTransaction() - Create, Update, Delete", function()
+        local results = exports['pb']:runTransaction({
+            {type = "create", collection = DEMO_COLLECTION, data = {name = "Transaction Test 1", identifier = "tx_test_1"}},
+            {type = "create", collection = DEMO_COLLECTION, data = {name = "Transaction Test 2", identifier = "tx_test_2"}},
+        })
+
+        if type(results) ~= "table" or #results ~= 2 then
+            error("runTransaction() didn't return expected results")
+        end
+
+        -- Store IDs for cleanup
+        for _, result in ipairs(results) do
+            if result.id then
+                table.insert(txRecordIds, result.id)
+            end
+        end
+
+        return results
+    end)
+
+    -- ========================================================================
+    -- Custom Realtime Messaging
+    -- ========================================================================
+
+    print("^5[Realtime]^7 Testing custom messaging...")
+
+    -- Test: sendRealtimeMessage - Send custom message
+    testExport("sendRealtimeMessage() - Custom topic", function()
+        local sentCount = exports['pb']:sendRealtimeMessage("test_topic", {
+            message = "Hello from tests!",
+            timestamp = os.time()
+        })
+        if type(sentCount) ~= "number" then
+            error("sendRealtimeMessage() didn't return a number")
+        end
+        print("  Messages sent to " .. sentCount .. " clients")
+        return sentCount
+    end)
+
+    -- Test: getRealtimeClients - Get connected clients
+    testExport("getRealtimeClients() - List clients", function()
+        local clients = exports['pb']:getRealtimeClients()
+        if type(clients) ~= "table" then
+            error("getRealtimeClients() didn't return a table")
+        end
+        print("  Connected clients: " .. #clients)
+        return clients
+    end)
+
+    -- ========================================================================
+    -- Email Operations
+    -- ========================================================================
+
+    print("^5[Email]^7 Testing email sending...")
+
+    -- Test: sendEmail (will likely fail without SMTP configured, so silenced)
+    testExport("sendEmail() - Send test email", function()
+        local success = exports['pb']:sendEmail(
+            "test@example.com",
+            "PocketBase Test Email",
+            "<h1>Test Email</h1><p>This is a test email from PocketBase.</p>",
+            "Test Email - This is a test email from PocketBase."
+        )
+        return success
+    end, true) -- Silent - SMTP may not be configured
+
+    -- ========================================================================
+    -- Cleanup Transaction Records
+    -- ========================================================================
+
+    -- Clean up transaction test records
+    for _, recordId in ipairs(txRecordIds) do
+        pcall(function()
+            exports['pb']:delete(DEMO_COLLECTION, recordId)
+        end)
+    end
+
+    -- ========================================================================
     -- Cleanup
     -- ========================================================================
 

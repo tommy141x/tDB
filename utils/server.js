@@ -41,6 +41,7 @@ const startupStatus = {
   exposeAdmin: false,
   healthCheckPassed: false,
   clientAuthenticated: null,
+  hooksHealthy: null,
   errors: [],
   warnings: [],
 };
@@ -182,12 +183,18 @@ function displayStartupStatus() {
   let healthStatus = "";
   let healthColor = colors.green;
 
-  // Priority: Authentication issues first, then network health
+  // Priority: Authentication issues first, then hooks health, then network health
   if (startupStatus.clientAuthenticated === false) {
     healthStatus = "✗ Authentication Failed";
     healthColor = colors.red;
     startupStatus.warnings.push(
       "Client failed to authenticate - check superuser credentials",
+    );
+  } else if (startupStatus.hooksHealthy === false) {
+    healthStatus = "✗ Hooks Failed to Load";
+    healthColor = colors.red;
+    startupStatus.warnings.push(
+      "PocketBase hooks (pb_hooks) failed to initialize",
     );
   } else if (startupStatus.clientAuthenticated === true) {
     // Client is authenticated, now check network health
@@ -280,6 +287,42 @@ async function checkPublicUrlHealth(url) {
       .get(healthUrl, { timeout: 5000 }, (resp) => {
         if (resp.statusCode === 200) {
           resolve(true);
+        } else {
+          resolve(false);
+        }
+      })
+      .on("error", () => {
+        resolve(false);
+      })
+      .on("timeout", () => {
+        resolve(false);
+      });
+  });
+}
+
+// ============================================================================
+async function checkHooksHealth(url) {
+  return new Promise((resolve) => {
+    const urlObj = new URL(url);
+    const protocol = urlObj.protocol === "https:" ? https : require("http");
+
+    const hooksHealthUrl = `${url}/api/extended/health`;
+
+    protocol
+      .get(hooksHealthUrl, { timeout: 5000 }, (resp) => {
+        if (resp.statusCode === 200) {
+          let data = "";
+          resp.on("data", (chunk) => {
+            data += chunk;
+          });
+          resp.on("end", () => {
+            try {
+              const json = JSON.parse(data);
+              resolve(json.status === "ok");
+            } catch (e) {
+              resolve(false);
+            }
+          });
         } else {
           resolve(false);
         }
@@ -866,6 +909,9 @@ async function startPocketBase() {
       });
 
       await clientReadyPromise;
+
+      // Check if hooks are healthy
+      startupStatus.hooksHealthy = await checkHooksHealth(finalUrl);
 
       // Perform health check if admin is exposed
       if (config.ExposeAdmin) {
