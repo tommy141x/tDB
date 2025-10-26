@@ -46,6 +46,8 @@ module.exports = (function () {
           BackupPrefix: "auto_",
         },
         Advanced: {
+          RemoteHost: "",
+          RemotePort: "",
           Dev: false,
           AutoMigrate: true,
           PublicDir: "pb_public",
@@ -152,6 +154,22 @@ module.exports = (function () {
           }
 
           // Parse Advanced config
+          // Match only non-commented lines (not starting with --)
+          // Use negative lookbehind to ensure line doesn't start with --
+          const remoteHostMatch = this.configContent.match(
+            /^(?!\s*--).*RemoteHost\s*=\s*"([^"]*)"/m,
+          );
+          const remoteHost = remoteHostMatch ? remoteHostMatch[1] : null;
+          if (remoteHost !== null && remoteHost !== "")
+            this.config.Advanced.RemoteHost = remoteHost;
+
+          const remotePortMatch = this.configContent.match(
+            /^(?!\s*--).*RemotePort\s*=\s*"([^"]*)"/m,
+          );
+          const remotePort = remotePortMatch ? remotePortMatch[1] : null;
+          if (remotePort !== null && remotePort !== "")
+            this.config.Advanced.RemotePort = remotePort;
+
           const dev = simpleMatch(/Dev\s*=\s*(true|false)/);
           if (dev) this.config.Advanced.Dev = dev === "true";
 

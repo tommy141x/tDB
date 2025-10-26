@@ -39,6 +39,7 @@ const startupStatus = {
   bindAddress: "",
   publicUrl: "",
   exposeAdmin: false,
+  isRemoteMode: false,
   healthCheckPassed: false,
   clientAuthenticated: null,
   hooksHealthy: null,
@@ -169,15 +170,26 @@ function displayStartupStatus() {
   let boxContent = [title, ""];
 
   // Mode
-  const mode = startupStatus.exposeAdmin
-    ? colors.cyan("Public")
-    : colors.green("Internal");
+  let mode;
+  if (startupStatus.isRemoteMode) {
+    mode = colors.magenta("Remote");
+  } else if (startupStatus.exposeAdmin) {
+    mode = colors.cyan("Public");
+  } else {
+    mode = colors.green("Internal");
+  }
   boxContent.push(`${colors.white("Mode:    ")} ${mode}`);
 
-  // Binding address
-  boxContent.push(
-    `${colors.white("Binding: ")} ${colors.magenta(startupStatus.bindAddress)}`,
-  );
+  // Binding address or Remote URL
+  if (startupStatus.isRemoteMode) {
+    boxContent.push(
+      `${colors.white("Remote:  ")} ${colors.magenta(startupStatus.publicUrl)}`,
+    );
+  } else {
+    boxContent.push(
+      `${colors.white("Binding: ")} ${colors.magenta(startupStatus.bindAddress)}`,
+    );
+  }
 
   // Combined Health & Authentication Status
   let healthStatus = "";
@@ -187,8 +199,23 @@ function displayStartupStatus() {
   if (startupStatus.clientAuthenticated === false) {
     healthStatus = "✗ Authentication Failed";
     healthColor = colors.red;
-    startupStatus.warnings.push(
-      "Client failed to authenticate - check superuser credentials",
+    if (startupStatus.isRemoteMode) {
+      startupStatus.errors.push(
+        "Failed to authenticate with remote PocketBase - check superuser credentials",
+      );
+    } else {
+      startupStatus.warnings.push(
+        "Client failed to authenticate - check superuser credentials",
+      );
+    }
+  } else if (
+    startupStatus.isRemoteMode &&
+    startupStatus.healthCheckPassed === false
+  ) {
+    healthStatus = "✗ Connection Failed";
+    healthColor = colors.red;
+    startupStatus.errors.push(
+      "Could not connect to remote PocketBase instance",
     );
   } else if (startupStatus.hooksHealthy === false) {
     healthStatus = "✗ Hooks Failed to Load";
@@ -198,7 +225,10 @@ function displayStartupStatus() {
     );
   } else if (startupStatus.clientAuthenticated === true) {
     // Client is authenticated, now check network health
-    if (startupStatus.exposeAdmin) {
+    if (startupStatus.isRemoteMode) {
+      healthStatus = "✓ Connected";
+      healthColor = colors.green;
+    } else if (startupStatus.exposeAdmin) {
       if (startupStatus.healthCheckPassed === true) {
         healthStatus = "✓ Started";
         healthColor = colors.green;
@@ -214,8 +244,12 @@ function displayStartupStatus() {
     }
   }
 
-  // Public URL (only if exposed)
-  if (startupStatus.exposeAdmin) {
+  // Public URL (only if exposed and not remote)
+  if (startupStatus.exposeAdmin && !startupStatus.isRemoteMode) {
+    boxContent.push(
+      `${colors.white("Admin:   ")} ${colors.cyan(startupStatus.publicUrl + "/_/")}`,
+    );
+  } else if (startupStatus.isRemoteMode) {
     boxContent.push(
       `${colors.white("Admin:   ")} ${colors.cyan(startupStatus.publicUrl + "/_/")}`,
     );
@@ -462,6 +496,29 @@ async function applyPendingMigrations(pbPath) {
 function validateConfig() {
   const errors = [];
 
+  // Check if remote mode is configured
+  const isRemote =
+    config.Advanced.RemoteHost !== "" && config.Advanced.RemotePort !== "";
+
+  // Validate remote mode configuration
+  if (isRemote) {
+    if (!config.Superuser.Email || !config.Superuser.Password) {
+      errors.push(
+        "Remote mode requires Superuser.Email and Superuser.Password to be configured",
+      );
+    }
+    if (config.Superuser.Email && !config.Superuser.Email.includes("@")) {
+      errors.push(`Invalid superuser email format: ${config.Superuser.Email}`);
+    }
+    // Remote mode doesn't need other validations (no local port, no SMTP/S3/Backup)
+    if (errors.length > 0) {
+      startupStatus.errors.push(...errors);
+      return false;
+    }
+    return true;
+  }
+
+  // Local mode validations
   // Validate port
   if (config.Port < 1 || config.Port > 65535) {
     errors.push(`Invalid port: ${config.Port} (must be 1-65535)`);
@@ -740,6 +797,19 @@ async function syncSettingsToConfig() {
 let pocketbaseProcess = null;
 
 async function startPocketBase() {
+  // Check if we're in remote mode
+  const isRemote =
+    config.Advanced.RemoteHost !== "" && config.Advanced.RemotePort !== "";
+
+  startupStatus.isRemoteMode = isRemote;
+
+  if (isRemote) {
+    // Remote mode - connect to existing PocketBase instance
+    await connectToRemotePocketBase();
+    return;
+  }
+
+  // Local mode - start our own PocketBase instance
   // Validate configuration
   if (!validateConfig()) {
     displayStartupStatus();
@@ -932,7 +1002,71 @@ async function startPocketBase() {
   }, 1000);
 }
 
+async function connectToRemotePocketBase() {
+  logger.info("Connecting to remote PocketBase instance...");
+
+  // Build remote URL
+  const remoteUrl = buildSmartUrl(
+    config.Advanced.RemoteHost,
+    config.Advanced.RemotePort,
+  );
+
+  if (!remoteUrl) {
+    startupStatus.errors.push("Invalid remote host configuration");
+    displayStartupStatus();
+    return;
+  }
+
+  startupStatus.publicUrl = remoteUrl;
+  startupStatus.bindAddress = "N/A (Remote)";
+
+  // Check if remote instance is accessible
+  startupStatus.healthCheckPassed = await checkPublicUrlHealth(remoteUrl);
+
+  if (!startupStatus.healthCheckPassed) {
+    startupStatus.clientAuthenticated = false;
+    displayStartupStatus();
+    return;
+  }
+
+  // Emit ready event for client.js to connect
+  emit("pocketbase:server:ready", {
+    url: remoteUrl,
+    port: config.Advanced.RemotePort,
+    exposeAdmin: true, // Remote is always "exposed"
+    isRemote: true,
+  });
+
+  // Wait for client authentication status
+  const clientReadyPromise = new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      startupStatus.clientAuthenticated = false;
+      resolve();
+    }, 5000);
+
+    on("pocketbase:client:ready", (data) => {
+      clearTimeout(timeout);
+      startupStatus.clientAuthenticated = data.authenticated;
+      resolve();
+    });
+  });
+
+  await clientReadyPromise;
+
+  // Check if hooks are healthy
+  startupStatus.hooksHealthy = await checkHooksHealth(remoteUrl);
+
+  // Display connection status
+  displayStartupStatus();
+}
+
 async function stopPocketBase() {
+  // Don't try to sync settings or stop process in remote mode
+  if (startupStatus.isRemoteMode) {
+    logger.info("Disconnecting from remote PocketBase...");
+    return;
+  }
+
   // Sync settings to config before stopping
   try {
     await syncSettingsToConfig();

@@ -33,13 +33,9 @@
   // Load config using shared loader
   const config = configLoader.load(resourcePath);
 
-  // Determine PocketBase URL - always connect to localhost since we're on same machine
-  const pbUrl = `http://127.0.0.1:${config.Port}`;
-
-  // ============================================================================
-  // PocketBase Client Instance
-  // ============================================================================
-  const pb = new PocketBase(pbUrl);
+  // Determine PocketBase URL - will be set based on server mode (local or remote)
+  let pbUrl = null;
+  let pb = null;
 
   // Wait for PocketBase to be ready and authenticate
   let isReady = false;
@@ -84,6 +80,19 @@
 
   // Event-driven startup: Listen for server ready event
   on("pocketbase:server:ready", async (data) => {
+    // Initialize PocketBase client with the correct URL (local or remote)
+    if (data.isRemote) {
+      // Remote mode - connect to remote URL
+      pbUrl = data.url;
+      clientLogger.debug(`Connecting to remote PocketBase at ${pbUrl}`);
+    } else {
+      // Local mode - connect to localhost
+      pbUrl = `http://127.0.0.1:${config.Port}`;
+    }
+
+    // Create PocketBase instance with the determined URL
+    pb = new PocketBase(pbUrl);
+
     await tryAuthenticate();
 
     // Emit client status back to server
@@ -102,7 +111,7 @@
   function wrapAsync(fn) {
     return async (...args) => {
       try {
-        if (!isReady) {
+        if (!isReady || !pb) {
           throw new Error(
             "PocketBase client not ready yet - wait for isReady() to return true",
           );
