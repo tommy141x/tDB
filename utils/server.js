@@ -365,7 +365,7 @@ async function createSuperuser(pbPath, publicIP) {
     pbPath,
     ["superuser", "upsert", email, password, "--dir", config.Advanced.DataDir],
     { cwd: resourcePath },
-    5000,
+    30000, // Increased timeout for first-time database initialization
   );
 
   if (
