@@ -14,8 +14,12 @@ server_scripts {
     'utils/config-loader.js',
     'utils/process-utils.js',
     'utils/server.js',
-    'utils/client.js'
+    'utils/client.js',
 }
 
+provide 'mysql-async'
+provide 'ghmattimysql'
+provide 'oxmysql'
+
 -- Testing script
---server_script 'tests.lua'
+-- server_script 'tests.lua'

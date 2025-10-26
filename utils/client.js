@@ -5,6 +5,80 @@
   const PocketBase = require("./bin/pocketbase.cjs.js");
   const configLoader = require("./utils/config-loader.js");
   const { retryWithBackoff } = require("./utils/process-utils.js");
+  const PocketBaseAdapter = require("./adapters/pocketbase.js");
+  const OxMySQLAdapter = require("./adapters/oxmysql.js");
+
+  // ============================================================================
+  // Export Router - Routes export calls to appropriate adapters
+  // ============================================================================
+
+  class ExportRouter {
+    constructor(exportsFn) {
+      this.adapters = [];
+      this.exportNames = new Set();
+      this.exportsFn = exportsFn;
+    }
+
+    registerAdapter(adapter, priority = 100) {
+      if (!adapter.canHandle || typeof adapter.canHandle !== "function") {
+        throw new Error(
+          "Adapter must implement canHandle(exportName, args) method",
+        );
+      }
+      if (!adapter.handle || typeof adapter.handle !== "function") {
+        throw new Error(
+          "Adapter must implement handle(exportName, args) method",
+        );
+      }
+      if (!adapter.name) {
+        throw new Error("Adapter must have a name property");
+      }
+
+      this.adapters.push({ adapter, priority });
+      this.adapters.sort((a, b) => a.priority - b.priority);
+
+      clientLogger.info(
+        `Registered adapter: ${adapter.name} (priority: ${priority})`,
+      );
+    }
+
+    registerExports(exportNames) {
+      for (const exportName of exportNames) {
+        this.createExport(exportName);
+      }
+    }
+
+    createExport(exportName) {
+      if (this.exportNames.has(exportName)) {
+        clientLogger.warn(
+          `Export '${exportName}' already registered, skipping...`,
+        );
+        return;
+      }
+
+      this.exportNames.add(exportName);
+      const router = this;
+
+      this.exportsFn(exportName, function (...args) {
+        for (const { adapter } of router.adapters) {
+          try {
+            if (adapter.canHandle(exportName, args)) {
+              return adapter.handle(exportName, args);
+            }
+          } catch (error) {
+            clientLogger.error(
+              `Error in adapter '${adapter.name}' for export '${exportName}':`,
+              error,
+            );
+            throw error;
+          }
+        }
+        throw new Error(
+          `No adapter could handle export '${exportName}' with arguments: ${JSON.stringify(args.slice(0, 2))}...`,
+        );
+      });
+    }
+  }
 
   // Polyfill EventSource for Node.js environment
   if (typeof EventSource === "undefined") {
@@ -48,6 +122,75 @@
     readyCallbacks.forEach((callback) => callback());
     readyCallbacks.length = 0;
   };
+
+  /**
+   * Wraps async exports to handle errors properly
+   */
+  function wrapAsync(fn) {
+    return async (...args) => {
+      try {
+        if (!isReady || !pb) {
+          throw new Error(
+            "PocketBase client not ready yet - wait for isReady() to return true",
+          );
+        }
+        return await fn(...args);
+      } catch (error) {
+        // Don't log 404 errors - they're expected when checking if records exist
+        if (error.status !== 404) {
+          clientLogger.error(`${fn.name}: ${error.message}`);
+        }
+        throw error;
+      }
+    };
+  }
+
+  /**
+   * Register a callback to be called when client is ready
+   */
+  function onReady(callback) {
+    if (isReady) {
+      callback();
+    } else {
+      readyCallbacks.push(callback);
+    }
+  }
+
+  // ============================================================================
+  // State Exports - Available Immediately
+  // ============================================================================
+
+  /**
+   * Check if client is ready (connected AND authenticated)
+   * @export
+   */
+  exports("isReady", () => {
+    return isReady;
+  });
+
+  /**
+   * Register callback to be called when client is ready
+   * @export
+   */
+  exports("onReady", (callback) => {
+    onReady(callback);
+  });
+
+  /**
+   * Check if authenticated (may be ready but not authenticated)
+   * @export
+   */
+  exports("isClientAuthenticated", () => {
+    return isAuthenticated;
+  });
+
+  /**
+   * Get PocketBase URL
+   * @export
+   */
+  exports("getUrl", () => {
+    return pbUrl;
+  });
 
   const tryAuthenticate = async () => {
     if (!config.Superuser.Email || !config.Superuser.Password) {
@@ -93,812 +236,44 @@
     // Create PocketBase instance with the determined URL
     pb = new PocketBase(pbUrl);
 
+    // Initialize export router with the exports function
+    const router = new ExportRouter(exports);
+
+    // Register adapters after PocketBase is initialized
+    const pbAdapter = new PocketBaseAdapter(pb, wrapAsync, clientLogger);
+    const oxmysqlAdapter = new OxMySQLAdapter(pb, wrapAsync, clientLogger);
+
+    // Register adapters with priority (lower = higher priority)
+    // PocketBase has priority 10 (checked first)
+    // OxMySQL has priority 20 (checked second, fallback)
+    router.registerAdapter(pbAdapter, 10);
+    router.registerAdapter(oxmysqlAdapter, 20);
+
+    // Automatically register all exports from adapters (excluding state exports)
+    const allExportNames = new Set();
+    const stateExports = [
+      "isReady",
+      "onReady",
+      "isClientAuthenticated",
+      "getUrl",
+    ];
+
+    pbAdapter.supportedExports.forEach((name) => {
+      if (!stateExports.includes(name)) {
+        allExportNames.add(name);
+      }
+    });
+    oxmysqlAdapter.supportedExports.forEach((name) => allExportNames.add(name));
+
+    // Register all collected exports
+    router.registerExports(Array.from(allExportNames));
+
     await tryAuthenticate();
 
     // Emit client status back to server
     emit("pocketbase:client:ready", {
       authenticated: isAuthenticated,
     });
-  });
-
-  // ============================================================================
-  // Helper Functions
-  // ============================================================================
-
-  /**
-   * Wraps async exports to handle errors properly
-   */
-  function wrapAsync(fn) {
-    return async (...args) => {
-      try {
-        if (!isReady || !pb) {
-          throw new Error(
-            "PocketBase client not ready yet - wait for isReady() to return true",
-          );
-        }
-        return await fn(...args);
-      } catch (error) {
-        // Don't log 404 errors - they're expected when checking if records exist
-        if (error.status !== 404) {
-          clientLogger.error(`${fn.name}: ${error.message}`);
-        }
-        throw error;
-      }
-    };
-  }
-
-  /**
-   * Register a callback to be called when client is ready
-   */
-  function onReady(callback) {
-    if (isReady) {
-      callback();
-    } else {
-      readyCallbacks.push(callback);
-    }
-  }
-
-  // ============================================================================
-  // Internal Authentication (No exports - auto-authenticated as superuser)
-  // ============================================================================
-  // The client automatically authenticates as superuser on startup
-  // Other resources should NOT attempt to re-authenticate
-
-  // ============================================================================
-  // Record CRUD Exports
-  // ============================================================================
-
-  /**
-   * Get a list of records
-   * @export
-   */
-  exports(
-    "getList",
-    wrapAsync(async (collection, page = 1, perPage = 30, options = {}) => {
-      const result = await pb
-        .collection(collection)
-        .getList(page, perPage, options);
-      return {
-        page: result.page,
-        perPage: result.perPage,
-        totalItems: result.totalItems,
-        totalPages: result.totalPages,
-        items: result.items,
-      };
-    }),
-  );
-
-  /**
-   * Get all records (paginated automatically)
-   * @export
-   */
-  exports(
-    "getFullList",
-    wrapAsync(async (collection, options = {}) => {
-      const items = await pb.collection(collection).getFullList(options);
-      return items;
-    }),
-  );
-
-  /**
-   * Get a single record by ID
-   * @export
-   */
-  exports(
-    "getOne",
-    wrapAsync(async (collection, id, options = {}) => {
-      return await pb.collection(collection).getOne(id, options);
-    }),
-  );
-
-  /**
-   * Get first record matching filter
-   * @export
-   */
-  exports(
-    "getFirstListItem",
-    wrapAsync(async (collection, filter, options = {}) => {
-      return await pb.collection(collection).getFirstListItem(filter, options);
-    }),
-  );
-
-  /**
-   * Create a new record
-   * @export
-   */
-  exports(
-    "create",
-    wrapAsync(async (collection, data, options = {}) => {
-      return await pb.collection(collection).create(data, options);
-    }),
-  );
-
-  /**
-   * Update a record
-   * @export
-   */
-  exports(
-    "update",
-    wrapAsync(async (collection, id, data, options = {}) => {
-      return await pb.collection(collection).update(id, data, options);
-    }),
-  );
-
-  /**
-   * Delete a record
-   * @export
-   */
-  exports(
-    "delete",
-    wrapAsync(async (collection, id, options = {}) => {
-      return await pb.collection(collection).delete(id, options);
-    }),
-  );
-
-  // ============================================================================
-  // Realtime Subscriptions
-  // ============================================================================
-
-  const subscriptions = new Map();
-
-  /**
-   * Subscribe to realtime changes
-   * @export
-   */
-  exports(
-    "subscribe",
-    wrapAsync(async (collection, topic, callbackRef) => {
-      const callback = (data) => {
-        // Emit to a FiveM event that the script can listen to
-        emit(`pocketbase:${collection}:${topic}`, data);
-
-        // Also call the callback if provided
-        if (callbackRef && typeof callbackRef === "function") {
-          callbackRef(data);
-        }
-      };
-
-      const unsubscribe = await pb
-        .collection(collection)
-        .subscribe(topic, callback);
-
-      const subKey = `${collection}:${topic}`;
-      subscriptions.set(subKey, unsubscribe);
-
-      return true;
-    }),
-  );
-
-  /**
-   * Unsubscribe from realtime changes
-   * @export
-   */
-  exports(
-    "unsubscribe",
-    wrapAsync(async (collection, topic = null) => {
-      if (topic) {
-        const subKey = `${collection}:${topic}`;
-        const unsubscribe = subscriptions.get(subKey);
-        if (unsubscribe) {
-          await unsubscribe();
-          subscriptions.delete(subKey);
-        }
-      } else {
-        await pb.collection(collection).unsubscribe();
-        // Remove all subscriptions for this collection
-        for (const [key, unsubscribe] of subscriptions.entries()) {
-          if (key.startsWith(`${collection}:`)) {
-            subscriptions.delete(key);
-          }
-        }
-      }
-      return true;
-    }),
-  );
-
-  // ============================================================================
-  // File Helpers
-  // ============================================================================
-
-  /**
-   * Get URL for a file
-   * @export
-   */
-  exports("getFileUrl", (record, filename, options = {}) => {
-    return pb.files.getURL(record, filename, options);
-  });
-
-  /**
-   * Get file token for protected files
-   * @export
-   */
-  exports(
-    "getFileToken",
-    wrapAsync(async (options = {}) => {
-      return await pb.files.getToken(options);
-    }),
-  );
-
-  // ============================================================================
-  // Filter Helper
-  // ============================================================================
-
-  /**
-   * Build filter string with parameter substitution
-   * @export
-   */
-  exports("filter", (rawFilter, params = {}) => {
-    return pb.filter(rawFilter, params);
-  });
-
-  // ============================================================================
-  // Collections Management
-  // ============================================================================
-
-  /**
-   * Get all collections
-   * @export
-   */
-  exports(
-    "getCollections",
-    wrapAsync(async (options = {}) => {
-      return await pb.collections.getFullList(options);
-    }),
-  );
-
-  /**
-   * Get collection by ID or name
-   * @export
-   */
-  exports(
-    "getCollection",
-    wrapAsync(async (idOrName, options = {}) => {
-      return await pb.collections.getOne(idOrName, options);
-    }),
-  );
-
-  /**
-   * Create a new collection
-   * @export
-   */
-  exports(
-    "createCollection",
-    wrapAsync(async (data, options = {}) => {
-      return await pb.collections.create(data, options);
-    }),
-  );
-
-  /**
-   * Update a collection
-   * @export
-   */
-  exports(
-    "updateCollection",
-    wrapAsync(async (idOrName, data, options = {}) => {
-      return await pb.collections.update(idOrName, data, options);
-    }),
-  );
-
-  /**
-   * Delete a collection
-   * @export
-   */
-  exports(
-    "deleteCollection",
-    wrapAsync(async (idOrName, options = {}) => {
-      return await pb.collections.delete(idOrName, options);
-    }),
-  );
-
-  // ============================================================================
-  // Health Check
-  // ============================================================================
-
-  /**
-   * Check PocketBase health
-   * @export
-   */
-  exports(
-    "healthCheck",
-    wrapAsync(async () => {
-      return await pb.health.check();
-    }),
-  );
-
-  /**
-   * Check if client is ready (connected AND authenticated)
-   * @export
-   */
-  exports("isReady", () => {
-    return isReady;
-  });
-
-  /**
-   * Register callback to be called when client is ready
-   * @export
-   */
-  exports("onReady", (callback) => {
-    onReady(callback);
-  });
-
-  /**
-   * Check if authenticated (may be ready but not authenticated)
-   * @export
-   */
-  exports("isClientAuthenticated", () => {
-    return isAuthenticated;
-  });
-
-  /**
-   * Get PocketBase URL
-   * @export
-   */
-  exports("getUrl", () => {
-    return pbUrl;
-  });
-
-  // ============================================================================
-  // Auth Collection Methods (for user authentication, NOT superuser)
-  // ============================================================================
-
-  /**
-   * List available auth methods for a collection
-   * @export
-   */
-  exports(
-    "listAuthMethods",
-    wrapAsync(async (collection, options = {}) => {
-      return await pb.collection(collection).listAuthMethods(options);
-    }),
-  );
-
-  /**
-   * Authenticate with password (for user collections)
-   * @export
-   */
-  const authCollectionWithPassword = wrapAsync(
-    async (collection, usernameOrEmail, password, options = {}) => {
-      const result = await pb
-        .collection(collection)
-        .authWithPassword(usernameOrEmail, password, options);
-      return {
-        token: result.token,
-        record: result.record,
-      };
-    },
-  );
-
-  exports("authCollectionWithPassword", authCollectionWithPassword);
-  exports("authWithPassword", authCollectionWithPassword); // Shorter alias
-
-  /**
-   * Authenticate with OTP
-   * @export
-   */
-  exports(
-    "authWithOTP",
-    wrapAsync(async (collection, otpId, password, options = {}) => {
-      const result = await pb
-        .collection(collection)
-        .authWithOTP(otpId, password, options);
-      return {
-        token: result.token,
-        record: result.record,
-      };
-    }),
-  );
-
-  /**
-   * Authenticate with OAuth2 code
-   * @export
-   */
-  exports(
-    "authWithOAuth2Code",
-    wrapAsync(
-      async (
-        collection,
-        provider,
-        code,
-        codeVerifier,
-        redirectUrl,
-        createData = {},
-        options = {},
-      ) => {
-        const result = await pb
-          .collection(collection)
-          .authWithOAuth2Code(
-            provider,
-            code,
-            codeVerifier,
-            redirectUrl,
-            createData,
-            options,
-          );
-        return {
-          token: result.token,
-          record: result.record,
-          meta: result.meta,
-        };
-      },
-    ),
-  );
-
-  /**
-   * Refresh auth token for a collection
-   * @export
-   */
-  const authRefreshCollection = wrapAsync(async (collection, options = {}) => {
-    const result = await pb.collection(collection).authRefresh(options);
-    return {
-      token: result.token,
-      record: result.record,
-    };
-  });
-
-  exports("authRefreshCollection", authRefreshCollection);
-  exports("authRefresh", authRefreshCollection); // Shorter alias
-
-  /**
-   * Request OTP for a collection
-   * @export
-   */
-  exports(
-    "requestOTP",
-    wrapAsync(async (collection, email, options = {}) => {
-      return await pb.collection(collection).requestOTP(email, options);
-    }),
-  );
-
-  /**
-   * Request password reset
-   * @export
-   */
-  exports(
-    "requestPasswordReset",
-    wrapAsync(async (collection, email, options = {}) => {
-      return await pb
-        .collection(collection)
-        .requestPasswordReset(email, options);
-    }),
-  );
-
-  /**
-   * Confirm password reset
-   * @export
-   */
-  exports(
-    "confirmPasswordReset",
-    wrapAsync(
-      async (collection, token, password, passwordConfirm, options = {}) => {
-        return await pb
-          .collection(collection)
-          .confirmPasswordReset(token, password, passwordConfirm, options);
-      },
-    ),
-  );
-
-  /**
-   * Request verification email
-   * @export
-   */
-  exports(
-    "requestVerification",
-    wrapAsync(async (collection, email, options = {}) => {
-      return await pb
-        .collection(collection)
-        .requestVerification(email, options);
-    }),
-  );
-
-  /**
-   * Confirm email verification
-   * @export
-   */
-  exports(
-    "confirmVerification",
-    wrapAsync(async (collection, token, options = {}) => {
-      return await pb
-        .collection(collection)
-        .confirmVerification(token, options);
-    }),
-  );
-
-  /**
-   * Request email change
-   * @export
-   */
-  exports(
-    "requestEmailChange",
-    wrapAsync(async (collection, newEmail, options = {}) => {
-      return await pb
-        .collection(collection)
-        .requestEmailChange(newEmail, options);
-    }),
-  );
-
-  /**
-   * Confirm email change
-   * @export
-   */
-  exports(
-    "confirmEmailChange",
-    wrapAsync(async (collection, token, password, options = {}) => {
-      return await pb
-        .collection(collection)
-        .confirmEmailChange(token, password, options);
-    }),
-  );
-
-  /**
-   * List external auth providers for a record
-   * @export
-   */
-  exports(
-    "listExternalAuths",
-    wrapAsync(async (collection, recordId, options = {}) => {
-      return await pb
-        .collection(collection)
-        .listExternalAuths(recordId, options);
-    }),
-  );
-
-  /**
-   * Unlink external auth provider
-   * @export
-   */
-  exports(
-    "unlinkExternalAuth",
-    wrapAsync(async (collection, recordId, provider, options = {}) => {
-      return await pb
-        .collection(collection)
-        .unlinkExternalAuth(recordId, provider, options);
-    }),
-  );
-
-  // ============================================================================
-  // Batch Operations
-  // ============================================================================
-
-  /**
-   * Create a new batch instance for bulk operations
-   * Returns a table with _requests that can be passed to batch functions
-   * @export
-   */
-  exports("batch", () => {
-    return {
-      _batchId: Math.random().toString(36).substr(2, 9),
-      _requests: [],
-    };
-  });
-
-  /**
-   * Add create request to batch
-   * @export
-   */
-  exports("batchCreate", (batchData, collection, data, options = {}) => {
-    batchData._requests.push({ type: "create", collection, data, options });
-    return batchData;
-  });
-
-  /**
-   * Add update request to batch
-   * @export
-   */
-  exports("batchUpdate", (batchData, collection, id, data, options = {}) => {
-    batchData._requests.push({ type: "update", collection, id, data, options });
-    return batchData;
-  });
-
-  /**
-   * Add delete request to batch
-   * @export
-   */
-  exports("batchDelete", (batchData, collection, id, options = {}) => {
-    batchData._requests.push({ type: "delete", collection, id, options });
-    return batchData;
-  });
-
-  /**
-   * Add upsert request to batch
-   * @export
-   */
-  exports("batchUpsert", (batchData, collection, data, options = {}) => {
-    batchData._requests.push({ type: "upsert", collection, data, options });
-    return batchData;
-  });
-
-  /**
-   * Execute batch requests
-   * @export
-   */
-  exports(
-    "batchSend",
-    wrapAsync(async (batchData) => {
-      const batch = pb.createBatch();
-
-      for (const req of batchData._requests) {
-        if (req.type === "create") {
-          batch.collection(req.collection).create(req.data, req.options);
-        } else if (req.type === "update") {
-          batch
-            .collection(req.collection)
-            .update(req.id, req.data, req.options);
-        } else if (req.type === "delete") {
-          batch.collection(req.collection).delete(req.id, req.options);
-        } else if (req.type === "upsert") {
-          batch.collection(req.collection).upsert(req.data, req.options);
-        }
-      }
-
-      try {
-        return await batch.send();
-      } catch (error) {
-        if (
-          error.message &&
-          error.message.includes("Batch requests are not allowed")
-        ) {
-          clientLogger.error(
-            "Batch API is disabled. Enable it in PocketBase Admin > Settings > Batch API",
-          );
-        }
-        throw error;
-      }
-    }),
-  );
-
-  // ============================================================================
-  // Realtime Service (Custom Topics)
-  // ============================================================================
-
-  /**
-   * Subscribe to a custom realtime topic
-   * @export
-   */
-  exports(
-    "subscribeToTopic",
-    wrapAsync(async (topic, callbackRef) => {
-      const callback = (data) => {
-        // Emit to a FiveM event
-        emit(`pocketbase:topic:${topic}`, data);
-
-        // Also call the callback if provided
-        if (callbackRef && typeof callbackRef === "function") {
-          callbackRef(data);
-        }
-      };
-
-      const unsubscribe = await pb.realtime.subscribe(topic, callback);
-
-      const subKey = `topic:${topic}`;
-      subscriptions.set(subKey, unsubscribe);
-
-      return true;
-    }),
-  );
-
-  /**
-   * Unsubscribe from a custom topic
-   * @export
-   */
-  exports(
-    "unsubscribeFromTopic",
-    wrapAsync(async (topic) => {
-      const subKey = `topic:${topic}`;
-      const unsubscribe = subscriptions.get(subKey);
-      if (unsubscribe) {
-        await unsubscribe();
-        subscriptions.delete(subKey);
-      } else {
-        await pb.realtime.unsubscribe(topic);
-      }
-      return true;
-    }),
-  );
-
-  /**
-   * Unsubscribe from all topics with a prefix
-   * @export
-   */
-  exports(
-    "unsubscribeByPrefix",
-    wrapAsync(async (topicPrefix) => {
-      await pb.realtime.unsubscribeByPrefix(topicPrefix);
-
-      // Clean up from our subscriptions map
-      for (const [key] of subscriptions.entries()) {
-        if (key.startsWith(`topic:${topicPrefix}`)) {
-          subscriptions.delete(key);
-        }
-      }
-      return true;
-    }),
-  );
-
-  /**
-   * Check if realtime connection is active
-   * @export
-   */
-  exports("isRealtimeConnected", () => {
-    return pb.realtime.isConnected;
-  });
-
-  // ============================================================================
-  // Collection Advanced Operations
-  // ============================================================================
-
-  /**
-   * Delete all records in a collection
-   * @export
-   */
-  exports(
-    "truncateCollection",
-    wrapAsync(async (collectionIdOrName, options = {}) => {
-      return await pb.collections.truncate(collectionIdOrName, options);
-    }),
-  );
-
-  /**
-   * Import collections
-   * @export
-   */
-  exports(
-    "importCollections",
-    wrapAsync(async (collections, deleteMissing = false, options = {}) => {
-      return await pb.collections.import(collections, deleteMissing, options);
-    }),
-  );
-
-  /**
-   * Get collection scaffolds (templates)
-   * @export
-   */
-  exports(
-    "getCollectionScaffolds",
-    wrapAsync(async (options = {}) => {
-      return await pb.collections.getScaffolds(options);
-    }),
-  );
-
-  // ============================================================================
-  // Migration Helpers
-  // ============================================================================
-
-  /**
-   * Create a migration helper that can be used in pb_migrations/*.js files
-   * This returns a helper object for creating collections programmatically
-   * @export
-   */
-  exports("createMigrationHelper", () => {
-    return {
-      // Helper to create a basic collection structure
-      createCollectionConfig: (name, type, fields, options = {}) => {
-        return {
-          name: name,
-          type: type || "base",
-          fields: fields,
-          listRule: options.listRule,
-          viewRule: options.viewRule,
-          createRule: options.createRule,
-          updateRule: options.updateRule,
-          deleteRule: options.deleteRule,
-          indexes: options.indexes || [],
-        };
-      },
-
-      // Helper to create field definitions
-      createField: (name, type, options = {}) => {
-        return {
-          name: name,
-          type: type,
-          required: options.required || false,
-          max: options.max || 0,
-          min: options.min,
-          pattern: options.pattern,
-          presentable: options.presentable,
-          options: options.fieldOptions || {},
-        };
-      },
-    };
   });
 
   // ============================================================================
@@ -948,313 +323,8 @@
   });
 
   // ============================================================================
-  // Extended API - SQL Queries
-  // ============================================================================
-
-  /**
-   * Execute a raw SQL query
-   * Note: For dynamic queries, provide columns as third parameter
-   * @export
-   */
-  exports(
-    "sqlQuery",
-    wrapAsync(async (sql, params = {}, columns = null) => {
-      // If columns not provided, try to auto-detect from simple SELECT
-      if (!columns) {
-        // Simple parser for "SELECT col1, col2 FROM..." queries
-        const selectMatch = sql.match(/SELECT\s+(.+?)\s+FROM/i);
-        if (selectMatch) {
-          const colStr = selectMatch[1].trim();
-          if (colStr !== "*") {
-            columns = {};
-            const cols = colStr.split(",").map((c) =>
-              c
-                .trim()
-                .split(/\s+as\s+/i)
-                .pop()
-                .trim(),
-            );
-            cols.forEach((col) => {
-              // Clean column name (remove table prefix if exists)
-              const cleanCol = col.includes(".") ? col.split(".").pop() : col;
-              columns[cleanCol] = ""; // Default to string type
-            });
-          }
-        }
-      }
-
-      if (!columns) {
-        // Fallback: assume generic columns
-        columns = { id: "", name: "", value: "" };
-      }
-
-      const result = await pb.send("/api/sql/query", {
-        method: "POST",
-        body: { sql, params, columns },
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "SQL query failed");
-      }
-
-      return result.data;
-    }),
-  );
-
-  /**
-   * Execute a SQL query that returns a single value
-   * @export
-   */
-  exports(
-    "sqlScalar",
-    wrapAsync(async (sql, params = {}, columnName = "value") => {
-      const result = await pb.send("/api/sql/scalar", {
-        method: "POST",
-        body: { sql, params, columnName },
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "SQL scalar failed");
-      }
-
-      return result.data;
-    }),
-  );
-
-  /**
-   * Execute a SQL query that returns a single row
-   * @export
-   */
-  exports(
-    "sqlSingle",
-    wrapAsync(async (sql, params = {}, columns = null) => {
-      // If columns not provided, try to auto-detect from simple SELECT
-      if (!columns) {
-        const selectMatch = sql.match(/SELECT\s+(.+?)\s+FROM/i);
-        if (selectMatch) {
-          const colStr = selectMatch[1].trim();
-          if (colStr !== "*") {
-            columns = {};
-            const cols = colStr.split(",").map((c) =>
-              c
-                .trim()
-                .split(/\s+as\s+/i)
-                .pop()
-                .trim(),
-            );
-            cols.forEach((col) => {
-              const cleanCol = col.includes(".") ? col.split(".").pop() : col;
-              columns[cleanCol] = "";
-            });
-          }
-        }
-      }
-
-      if (!columns) {
-        columns = { id: "", name: "", value: "" };
-      }
-
-      const result = await pb.send("/api/sql/single", {
-        method: "POST",
-        body: { sql, params, columns },
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "SQL single failed");
-      }
-
-      return result.data;
-    }),
-  );
-
-  /**
-   * Execute a SQL INSERT/UPDATE/DELETE query
-   * @export
-   */
-  exports(
-    "sqlExecute",
-    wrapAsync(async (sql, params = {}) => {
-      const result = await pb.send("/api/sql/execute", {
-        method: "POST",
-        body: { sql, params },
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "SQL execute failed");
-      }
-
-      return result.insertId;
-    }),
-  );
-
-  /**
-   * Execute multiple SQL queries in a transaction
-   * @export
-   */
-  exports(
-    "sqlTransaction",
-    wrapAsync(async (queries) => {
-      const result = await pb.send("/api/sql/transaction", {
-        method: "POST",
-        body: { queries },
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "SQL transaction failed");
-      }
-
-      return result.success;
-    }),
-  );
-
-  // ============================================================================
-  // Extended API - Advanced Record Operations
-  // ============================================================================
-
-  /**
-   * Find multiple records by IDs (batch fetch)
-   * @export
-   */
-  exports(
-    "findRecordsByIds",
-    wrapAsync(async (collection, ids) => {
-      const result = await pb.send("/api/records/findByIds", {
-        method: "POST",
-        body: { collection, ids },
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "Find by IDs failed");
-      }
-
-      return result.data;
-    }),
-  );
-
-  /**
-   * Count records with optional filter
-   * @export
-   */
-  exports(
-    "countRecords",
-    wrapAsync(async (collection, filter = null, params = {}) => {
-      const result = await pb.send("/api/records/count", {
-        method: "POST",
-        body: { collection, filter, params },
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "Count failed");
-      }
-
-      return result.count;
-    }),
-  );
-
-  // ============================================================================
-  // Extended API - Transactions
-  // ============================================================================
-
-  /**
-   * Run multiple record operations in a transaction
-   * @export
-   */
-  exports(
-    "runTransaction",
-    wrapAsync(async (operations) => {
-      const result = await pb.send("/api/transactions/run", {
-        method: "POST",
-        body: { operations },
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "Transaction failed");
-      }
-
-      return result.results;
-    }),
-  );
-
-  // ============================================================================
-  // Extended API - Custom Realtime Messaging
-  // ============================================================================
-
-  /**
-   * Send custom realtime message to subscribed clients
-   * @export
-   */
-  exports(
-    "sendRealtimeMessage",
-    wrapAsync(async (topic, data) => {
-      const result = await pb.send("/api/realtime/send", {
-        method: "POST",
-        body: { topic, data },
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "Send realtime message failed");
-      }
-
-      return result.sentCount;
-    }),
-  );
-
-  /**
-   * Get connected realtime clients info
-   * @export
-   */
-  exports(
-    "getRealtimeClients",
-    wrapAsync(async () => {
-      const result = await pb.send("/api/realtime/clients", {
-        method: "GET",
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "Get realtime clients failed");
-      }
-
-      return result.clients;
-    }),
-  );
-
-  // ============================================================================
-  // Extended API - Email Operations
-  // ============================================================================
-
-  /**
-   * Send custom email
-   * @export
-   */
-  exports(
-    "sendEmail",
-    wrapAsync(async (to, subject, html, text = "") => {
-      const result = await pb.send("/api/email/send", {
-        method: "POST",
-        body: { to, subject, html, text },
-      });
-
-      if (!result.success) {
-        throw new Error(result.error || "Send email failed");
-      }
-
-      return true;
-    }),
-  );
-
-  // ============================================================================
   // Cleanup
   // ============================================================================
-  on("onResourceStop", (resource) => {
-    if (resource === resourceName) {
-      for (const [key, unsubscribe] of subscriptions.entries()) {
-        try {
-          unsubscribe();
-        } catch (err) {
-          // Silent cleanup
-        }
-      }
-      subscriptions.clear();
-    }
-  });
+  // Note: Subscriptions are automatically cleaned up when the WebSocket connection
+  // closes on resource stop. No explicit cleanup needed.
 })();

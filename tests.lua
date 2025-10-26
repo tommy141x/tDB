@@ -715,6 +715,121 @@ function RunComprehensiveTests()
     end, true) -- Silent - SMTP may not be configured
 
     -- ========================================================================
+    -- OxMySQL Compatibility Tests
+    -- ========================================================================
+
+    print("^5[OxMySQL]^7 Testing OxMySQL compatibility layer...")
+
+    -- Test: query - SELECT query with parameters
+    local queryResults = testExport("query() - SELECT with parameters", function()
+        local results = exports['pb']:query('SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE name = ?', {'Test Player'})
+        if not results or #results == 0 then
+            error("Query returned no results")
+        end
+        print("  Query returned " .. #results .. " record(s)")
+        return results
+    end)
+
+    -- Test: query_async - Async variant
+    testExport("query_async() - SELECT async", function()
+        local results = exports['pb']:query_async('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 5', {})
+        if not results then
+            error("Async query failed")
+        end
+        print("  Async query returned " .. #results .. " record(s)")
+        return results
+    end)
+
+    -- Test: single - Get single row
+    testExport("single() - Get single record", function()
+        local result = exports['pb']:single('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 1', {})
+        if not result then
+            error("Single query returned no result")
+        end
+        print("  Single query returned record with id: " .. tostring(result.id))
+        return result
+    end)
+
+    -- Test: scalar - Get single value
+    testExport("scalar() - Get count", function()
+        local count = exports['pb']:scalar('SELECT COUNT(*) FROM ' .. DEMO_COLLECTION, {})
+        if not count then
+            error("Scalar query returned no value")
+        end
+        print("  Scalar returned count: " .. tostring(count))
+        return count
+    end)
+
+    -- Test: insert - Insert new record via SQL
+    local insertedId = testExport("insert() - INSERT record", function()
+        local id = exports['pb']:insert(
+            'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)',
+            {'OxMySQL Test', 'oxmysql_test_1'}
+        )
+        if not id then
+            error("Insert did not return an ID")
+        end
+        print("  Inserted record with id: " .. tostring(id))
+        return id
+    end)
+
+    -- Test: update - Update record via SQL
+    if insertedId then
+        testExport("update() - UPDATE record", function()
+            local affectedRows = exports['pb']:update(
+                'UPDATE ' .. DEMO_COLLECTION .. ' SET name = ? WHERE id = ?',
+                {'OxMySQL Updated', insertedId}
+            )
+            if not affectedRows or affectedRows == 0 then
+                error("Update did not affect any rows")
+            end
+            print("  Updated " .. tostring(affectedRows) .. " row(s)")
+            return affectedRows
+        end)
+    end
+
+    -- Test: prepare - Prepared statement
+    testExport("prepare() - Prepared statement", function()
+        local results = exports['pb']:prepare('SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE name = ?', {'Test Player'})
+        if not results then
+            error("Prepare query failed")
+        end
+        print("  Prepare returned " .. (type(results) == "table" and #results or 1) .. " result(s)")
+        return results
+    end)
+
+    -- Test: transaction - Execute multiple queries atomically
+    testExport("transaction() - Multiple SQL queries", function()
+        local queries = {
+            {'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'TX Test 1', 'tx_1'}},
+            {'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'TX Test 2', 'tx_2'}},
+        }
+        local results = exports['pb']:transaction(queries)
+        if not results then
+            error("Transaction failed")
+        end
+        print("  Transaction executed " .. #results .. " queries")
+        return results
+    end)
+
+    -- Test: execute - Generic execute (alias for update)
+    testExport("execute() - Generic execute", function()
+        local result = exports['pb']:execute(
+            'UPDATE ' .. DEMO_COLLECTION .. ' SET name = ? WHERE identifier = ?',
+            {'Execute Test', 'oxmysql_test_1'}
+        )
+        print("  Execute completed")
+        return result
+    end)
+
+    -- Cleanup OxMySQL test records
+    if insertedId then
+        pcall(function()
+            exports['pb']:delete(DEMO_COLLECTION, insertedId)
+        end)
+    end
+
+    -- ========================================================================
     -- Cleanup Transaction Records
     -- ========================================================================
 
