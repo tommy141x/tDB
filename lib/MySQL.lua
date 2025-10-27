@@ -8,6 +8,17 @@ local resourceName = 'pb'
 ---@class MySQL
 MySQL = {}
 
+-- Initialize tables for methods that need both callable and .await properties
+MySQL.update = {}
+MySQL.insert = {}
+MySQL.query = {}
+MySQL.single = {}
+MySQL.scalar = {}
+MySQL.prepare = {}
+MySQL.transaction = {}
+MySQL.Sync = {}
+MySQL.Async = {}
+
 -- ============================================================================
 -- Promise-based API (.await syntax)
 -- ============================================================================
@@ -16,18 +27,17 @@ MySQL = {}
 ---@param query string SQL query
 ---@param parameters? table|array Query parameters
 ---@return number affectedRows Number of rows affected
-function MySQL.update.await(query, parameters)
+MySQL.update.await = function(query, parameters)
     return exports[resourceName]:update_async(query, parameters or {})
 end
 
-MySQL.Sync = MySQL.Sync or {}
 MySQL.Sync.execute = MySQL.update.await
 
 ---Execute an insert query and return the insert ID
 ---@param query string SQL INSERT query
 ---@param parameters? table|array Query parameters
 ---@return string|number insertId The ID of the inserted record
-function MySQL.insert.await(query, parameters)
+MySQL.insert.await = function(query, parameters)
     return exports[resourceName]:insert_async(query, parameters or {})
 end
 
@@ -37,7 +47,7 @@ MySQL.Sync.insert = MySQL.insert.await
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@return table[] rows Array of result rows
-function MySQL.query.await(query, parameters)
+MySQL.query.await = function(query, parameters)
     return exports[resourceName]:query_async(query, parameters or {})
 end
 
@@ -47,7 +57,7 @@ MySQL.Sync.fetchAll = MySQL.query.await
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@return table|nil row Single result row or nil
-function MySQL.single.await(query, parameters)
+MySQL.single.await = function(query, parameters)
     return exports[resourceName]:single_async(query, parameters or {})
 end
 
@@ -57,7 +67,7 @@ MySQL.Sync.fetchSingle = MySQL.single.await
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@return any value Single scalar value
-function MySQL.scalar.await(query, parameters)
+MySQL.scalar.await = function(query, parameters)
     return exports[resourceName]:scalar_async(query, parameters or {})
 end
 
@@ -67,57 +77,62 @@ MySQL.Sync.fetchScalar = MySQL.scalar.await
 ---@param query string SQL query
 ---@param parameters? table|array Query parameters
 ---@return any result Query result
-function MySQL.prepare.await(query, parameters)
+MySQL.prepare.await = function(query, parameters)
     return exports[resourceName]:prepare_async(query, parameters or {})
 end
 
 ---Execute multiple queries as a transaction
 ---@param queries table[] Array of queries {query, parameters} or {query = "", values = {}}
 ---@return table[] results Array of results from each query
-function MySQL.transaction.await(queries)
+MySQL.transaction.await = function(queries)
     return exports[resourceName]:transaction_async(queries)
 end
 
+MySQL.Sync.transaction = MySQL.transaction.await
+
 -- ============================================================================
--- Callback-based API
+-- Callback-based API (make tables callable with metatables)
 -- ============================================================================
 
 ---Execute a query with callback (returns affected rows)
 ---@param query string SQL query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(affectedRows)
-function MySQL.update(query, parameters, callback)
-    if type(parameters) == 'function' then
-        callback = parameters
-        parameters = {}
-    end
+setmetatable(MySQL.update, {
+    __call = function(_, query, parameters, callback)
+        if type(parameters) == 'function' then
+            callback = parameters
+            parameters = {}
+        end
 
-    if callback then
-        exports[resourceName]:update(query, parameters or {}, callback)
-    else
-        return exports[resourceName]:update(query, parameters or {})
+        if callback then
+            exports[resourceName]:update(query, parameters or {}, callback)
+        else
+            return exports[resourceName]:update(query, parameters or {})
+        end
     end
-end
+})
 
-MySQL.Async = MySQL.Async or {}
 MySQL.Async.execute = MySQL.update
 
 ---Execute an insert query with callback
 ---@param query string SQL INSERT query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(insertId)
-function MySQL.insert(query, parameters, callback)
-    if type(parameters) == 'function' then
-        callback = parameters
-        parameters = {}
-    end
+setmetatable(MySQL.insert, {
+    __call = function(_, query, parameters, callback)
+        if type(parameters) == 'function' then
+            callback = parameters
+            parameters = {}
+        end
 
-    if callback then
-        exports[resourceName]:insert(query, parameters or {}, callback)
-    else
-        return exports[resourceName]:insert(query, parameters or {})
+        if callback then
+            exports[resourceName]:insert(query, parameters or {}, callback)
+        else
+            return exports[resourceName]:insert(query, parameters or {})
+        end
     end
-end
+})
 
 MySQL.Async.insert = MySQL.insert
 
@@ -125,18 +140,20 @@ MySQL.Async.insert = MySQL.insert
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(rows)
-function MySQL.query(query, parameters, callback)
-    if type(parameters) == 'function' then
-        callback = parameters
-        parameters = {}
-    end
+setmetatable(MySQL.query, {
+    __call = function(_, query, parameters, callback)
+        if type(parameters) == 'function' then
+            callback = parameters
+            parameters = {}
+        end
 
-    if callback then
-        exports[resourceName]:query(query, parameters or {}, callback)
-    else
-        return exports[resourceName]:query(query, parameters or {})
+        if callback then
+            exports[resourceName]:query(query, parameters or {}, callback)
+        else
+            return exports[resourceName]:query(query, parameters or {})
+        end
     end
-end
+})
 
 MySQL.Async.fetchAll = MySQL.query
 
@@ -144,18 +161,20 @@ MySQL.Async.fetchAll = MySQL.query
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(row)
-function MySQL.single(query, parameters, callback)
-    if type(parameters) == 'function' then
-        callback = parameters
-        parameters = {}
-    end
+setmetatable(MySQL.single, {
+    __call = function(_, query, parameters, callback)
+        if type(parameters) == 'function' then
+            callback = parameters
+            parameters = {}
+        end
 
-    if callback then
-        exports[resourceName]:single(query, parameters or {}, callback)
-    else
-        return exports[resourceName]:single(query, parameters or {})
+        if callback then
+            exports[resourceName]:single(query, parameters or {}, callback)
+        else
+            return exports[resourceName]:single(query, parameters or {})
+        end
     end
-end
+})
 
 MySQL.Async.fetchSingle = MySQL.single
 
@@ -163,18 +182,20 @@ MySQL.Async.fetchSingle = MySQL.single
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(value)
-function MySQL.scalar(query, parameters, callback)
-    if type(parameters) == 'function' then
-        callback = parameters
-        parameters = {}
-    end
+setmetatable(MySQL.scalar, {
+    __call = function(_, query, parameters, callback)
+        if type(parameters) == 'function' then
+            callback = parameters
+            parameters = {}
+        end
 
-    if callback then
-        exports[resourceName]:scalar(query, parameters or {}, callback)
-    else
-        return exports[resourceName]:scalar(query, parameters or {})
+        if callback then
+            exports[resourceName]:scalar(query, parameters or {}, callback)
+        else
+            return exports[resourceName]:scalar(query, parameters or {})
+        end
     end
-end
+})
 
 MySQL.Async.fetchScalar = MySQL.scalar
 
@@ -182,29 +203,35 @@ MySQL.Async.fetchScalar = MySQL.scalar
 ---@param query string SQL query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(result)
-function MySQL.prepare(query, parameters, callback)
-    if type(parameters) == 'function' then
-        callback = parameters
-        parameters = {}
-    end
+setmetatable(MySQL.prepare, {
+    __call = function(_, query, parameters, callback)
+        if type(parameters) == 'function' then
+            callback = parameters
+            parameters = {}
+        end
 
-    if callback then
-        exports[resourceName]:prepare(query, parameters or {}, callback)
-    else
-        return exports[resourceName]:prepare(query, parameters or {})
+        if callback then
+            exports[resourceName]:prepare(query, parameters or {}, callback)
+        else
+            return exports[resourceName]:prepare(query, parameters or {})
+        end
     end
-end
+})
 
 ---Execute a transaction with callback
 ---@param queries table[] Array of queries
 ---@param callback? function Callback function(results)
-function MySQL.transaction(queries, callback)
-    if callback then
-        exports[resourceName]:transaction(queries, callback)
-    else
-        return exports[resourceName]:transaction(queries)
+setmetatable(MySQL.transaction, {
+    __call = function(_, queries, callback)
+        if callback then
+            exports[resourceName]:transaction(queries, callback)
+        else
+            return exports[resourceName]:transaction(queries)
+        end
     end
-end
+})
+
+MySQL.Async.transaction = MySQL.transaction
 
 -- ============================================================================
 -- Additional helper to check if MySQL is ready
@@ -218,6 +245,29 @@ function MySQL.ready(callback)
     else
         exports[resourceName]:onReady(callback)
     end
+end
+
+-- ============================================================================
+-- Additional OxMySQL exports for compatibility
+-- ============================================================================
+
+---Check if connection is ready (OxMySQL compatibility)
+---@return boolean ready True if ready
+function MySQL.isReady()
+    return exports[resourceName]:isReady()
+end
+
+---Wait for connection to be ready (OxMySQL compatibility)
+---@return boolean connected True when connected
+MySQL.awaitConnection = function()
+    return exports[resourceName]:awaitConnection()
+end
+
+---Store a query (OxMySQL compatibility - returns query as-is)
+---@param query string SQL query
+---@param callback function Callback function(query)
+function MySQL.store(query, callback)
+    return exports[resourceName]:store(query, callback)
 end
 
 -- ============================================================================

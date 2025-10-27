@@ -192,6 +192,21 @@
     return pbUrl;
   });
 
+  /**
+   * Wait for connection to be ready (OxMySQL compatibility)
+   * Returns a promise that resolves when the client is ready
+   * @export
+   */
+  exports("awaitConnection", () => {
+    return new Promise((resolve) => {
+      if (isReady) {
+        resolve(true);
+      } else {
+        onReady(() => resolve(true));
+      }
+    });
+  });
+
   const tryAuthenticate = async () => {
     if (!config.Superuser.Email || !config.Superuser.Password) {
       notifyReady();
@@ -254,6 +269,7 @@
     const stateExports = [
       "isReady",
       "onReady",
+      "awaitConnection",
       "isClientAuthenticated",
       "getUrl",
     ];
