@@ -103,6 +103,28 @@ Config.Backup = {
 -- ADVANCED OPTIONS (rarely need to change these)
 -- ============================================================================
 Config.Advanced = {
+    -- ========================================================================
+    -- REMOTE POCKETBASE MODE
+    -- ========================================================================
+    -- Connect to an existing remote PocketBase instance instead of starting
+    -- a local one. Both RemoteHost and RemotePort must be filled to enable.
+    --
+    -- When enabled:
+    --   • No local PocketBase process will be started
+    --   • Connects to remote instance using Config.Superuser credentials
+    --   • Config.Port, Migrations, Backup, SMTP, and S3 settings are ignored
+    --   • Perfect for connecting multiple FiveM servers to one PocketBase
+    --
+    -- Examples:
+    --   RemoteHost = "192.168.1.100"
+    --   RemotePort = "8090"
+    --
+    --   RemoteHost = "pocketbase.myserver.com"
+    --   RemotePort = "443"
+    -- ========================================================================
+    RemoteHost = "",
+    RemotePort = "",
+
     -- Enable development mode (more verbose logging)
     Dev = false,
 
