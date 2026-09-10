@@ -7,6 +7,8 @@
  * - handle: the actual implementation
  */
 
+const { describeRouteError } = require("./utils/route-error.js");
+
 class PocketBaseAdapter {
   constructor(pb, wrapAsync, logger) {
     this.name = "PocketBase";
@@ -19,6 +21,53 @@ class PocketBaseAdapter {
 
     // Build list of supported export names for quick lookup
     this.supportedExports = this.exports.map((exp) => exp.name);
+  }
+
+  /**
+   * Run a row-returning statement through the SQL route.
+   *
+   * The route discovers the result shape itself, which is why the sql*
+   * exports no longer ask the caller for a `columns` map and no longer try
+   * to guess one by regexing the SELECT list.
+   *
+   * @returns {Promise<{columns: string[], rows: object[]}>}
+   */
+  async _tdbQuery(sql, params) {
+    const result = await this._tdbSend("/api/tdb/query", {
+      sql,
+      params: params || {},
+    });
+
+    return { columns: result.columns || [], rows: result.rows || [] };
+  }
+
+  /**
+   * POST to a tDB SQL route, surfacing the database's own error message.
+   *
+   * The SDK rejects on a 400 before the route's { success, error } body is
+   * ever inspected, and its own message for that is "Something went wrong."
+   * describeRouteError digs the real one out.
+   */
+  async _tdbSend(route, body) {
+    let result;
+
+    try {
+      result = await this.pb.send(route, {
+        method: "POST",
+        body,
+        // Opt out of the SDK's auto-cancellation, which would otherwise abort
+        // one query as soon as another was issued.
+        requestKey: null,
+      });
+    } catch (error) {
+      throw new Error(describeRouteError(error));
+    }
+
+    if (!result.success) {
+      throw new Error(result.error || `${route} failed`);
+    }
+
+    return result;
   }
 
   /**
@@ -822,42 +871,9 @@ class PocketBaseAdapter {
           return typeof args[0] === "string";
         },
         handle: (args) => {
-          const [sql, params = {}, columns = null] = args;
+          const [sql, params = {}] = args;
           return this.wrapAsync(async () => {
-            let finalColumns = columns;
-            if (!finalColumns) {
-              const selectMatch = sql.match(/SELECT\s+(.+?)\s+FROM/i);
-              if (selectMatch) {
-                const colStr = selectMatch[1].trim();
-                if (colStr !== "*") {
-                  finalColumns = {};
-                  const cols = colStr.split(",").map((c) =>
-                    c
-                      .trim()
-                      .split(/\s+as\s+/i)
-                      .pop()
-                      .trim(),
-                  );
-                  cols.forEach((col) => {
-                    const cleanCol = col.includes(".")
-                      ? col.split(".").pop()
-                      : col;
-                    finalColumns[cleanCol] = "";
-                  });
-                }
-              }
-            }
-            if (!finalColumns) {
-              finalColumns = { id: "", name: "", value: "" };
-            }
-            const result = await this.pb.send("/api/sql/query", {
-              method: "POST",
-              body: { sql, params, columns: finalColumns },
-            });
-            if (!result.success) {
-              throw new Error(result.error || "SQL query failed");
-            }
-            return result.data;
+            return (await this._tdbQuery(sql, params)).rows;
           })();
         },
       },
@@ -868,16 +884,17 @@ class PocketBaseAdapter {
           return typeof args[0] === "string";
         },
         handle: (args) => {
-          const [sql, params = {}, columnName = "value"] = args;
+          // columnName used to default to "value", which only ever worked if
+          // the caller had aliased their column that way. The first selected
+          // column is the sane default; an explicit name still wins.
+          const [sql, params = {}, columnName = null] = args;
           return this.wrapAsync(async () => {
-            const result = await this.pb.send("/api/sql/scalar", {
-              method: "POST",
-              body: { sql, params, columnName },
-            });
-            if (!result.success) {
-              throw new Error(result.error || "SQL scalar failed");
-            }
-            return result.data;
+            const { columns, rows } = await this._tdbQuery(sql, params);
+            if (rows.length === 0) return null;
+
+            const key = columnName || columns[0];
+            const value = rows[0][key];
+            return value === undefined ? null : value;
           })();
         },
       },
@@ -888,42 +905,10 @@ class PocketBaseAdapter {
           return typeof args[0] === "string";
         },
         handle: (args) => {
-          const [sql, params = {}, columns = null] = args;
+          const [sql, params = {}] = args;
           return this.wrapAsync(async () => {
-            let finalColumns = columns;
-            if (!finalColumns) {
-              const selectMatch = sql.match(/SELECT\s+(.+?)\s+FROM/i);
-              if (selectMatch) {
-                const colStr = selectMatch[1].trim();
-                if (colStr !== "*") {
-                  finalColumns = {};
-                  const cols = colStr.split(",").map((c) =>
-                    c
-                      .trim()
-                      .split(/\s+as\s+/i)
-                      .pop()
-                      .trim(),
-                  );
-                  cols.forEach((col) => {
-                    const cleanCol = col.includes(".")
-                      ? col.split(".").pop()
-                      : col;
-                    finalColumns[cleanCol] = "";
-                  });
-                }
-              }
-            }
-            if (!finalColumns) {
-              finalColumns = { id: "", name: "", value: "" };
-            }
-            const result = await this.pb.send("/api/sql/single", {
-              method: "POST",
-              body: { sql, params, columns: finalColumns },
-            });
-            if (!result.success) {
-              throw new Error(result.error || "SQL single failed");
-            }
-            return result.data;
+            const { rows } = await this._tdbQuery(sql, params);
+            return rows.length ? rows[0] : null;
           })();
         },
       },
@@ -936,13 +921,10 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [sql, params = {}] = args;
           return this.wrapAsync(async () => {
-            const result = await this.pb.send("/api/sql/execute", {
-              method: "POST",
-              body: { sql, params },
+            const result = await this._tdbSend("/api/tdb/execute", {
+              sql,
+              params,
             });
-            if (!result.success) {
-              throw new Error(result.error || "SQL execute failed");
-            }
             return result.insertId;
           })();
         },
@@ -956,14 +938,11 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [queries] = args;
           return this.wrapAsync(async () => {
-            const result = await this.pb.send("/api/sql/transaction", {
-              method: "POST",
-              body: { queries },
+            await this._tdbSend("/api/tdb/batch", {
+              statements: queries,
+              transaction: true,
             });
-            if (!result.success) {
-              throw new Error(result.error || "SQL transaction failed");
-            }
-            return result.success;
+            return true;
           })();
         },
       },
