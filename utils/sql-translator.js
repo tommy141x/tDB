@@ -503,6 +503,127 @@ module.exports = (function () {
     return { sql: out, extraStatements };
   }
 
+  /**
+   * Text types whose MySQL default collation compares case-insensitively.
+   */
+  const TEXT_TYPE = /\b(?:CHARACTER\s+VARYING|VARCHAR|NVARCHAR|VARCHAR2|NCHAR|CHAR|TINYTEXT|MEDIUMTEXT|LONGTEXT|TEXT|CLOB|ENUM)\b(\s*\([^)]*\))?/i;
+
+  // Entries in a column list that define a constraint rather than a column.
+  const TABLE_CONSTRAINT =
+    /^\s*(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY|CHECK|KEY|INDEX)\b/i;
+
+  // A column the author deliberately made byte-exact. MySQL's own way of
+  // asking for case-sensitivity, so it must be honoured, not overridden.
+  const EXPLICIT_BINARY = /\b(?:BINARY|COLLATE\s+\w*(?:_bin|_cs|BINARY)\w*)\b/i;
+
+  // The only three collations SQLite knows.
+  const SQLITE_COLLATIONS = /^(?:BINARY|NOCASE|RTRIM)$/i;
+
+  /**
+   * Translate a MySQL collation name into the nearest SQLite one.
+   *
+   * `COLLATE utf8mb4_bin` passes the safety gate untouched - it is valid
+   * MySQL, not a construct with no equivalent - but SQLite raises "no such
+   * collating sequence" the moment the table is used. Mapping by suffix
+   * preserves the author's actual intent, which is only ever one of two
+   * things: compare exactly, or compare case-insensitively.
+   */
+  function mapCollation(entry) {
+    return entry.replace(/\bCOLLATE\s+([A-Za-z0-9_]+)/gi, (whole, name) => {
+      if (SQLITE_COLLATIONS.test(name)) return whole;
+      if (/(?:_bin|_cs)$/i.test(name)) return "COLLATE BINARY";
+      return "COLLATE NOCASE";
+    });
+  }
+
+  /**
+   * Give text columns MySQL's case-insensitive comparison behaviour.
+   *
+   * This is the difference most likely to bite a script moved from MySQL and
+   * the least likely to be noticed. MySQL's default collation
+   * (utf8mb4_general_ci and friends) compares case-insensitively, so
+   * `WHERE license = 'LICENSE:AB12'` finds a row stored as 'license:ab12'.
+   * SQLite compares TEXT byte-for-byte, so the same query returns nothing at
+   * all - no error, just a player whose data has apparently vanished.
+   *
+   * COLLATE NOCASE on the column carries that behaviour into =, IN, LIKE,
+   * ORDER BY, GROUP BY and unique indexes alike, which also matches MySQL,
+   * where 'ABC' and 'abc' collide in a UNIQUE key.
+   *
+   * Two limits worth stating rather than hiding:
+   *   - SQLite's NOCASE folds ASCII only, so 'Ä' and 'ä' still differ. MySQL's
+   *     general_ci does fold them. Identifiers in FiveM scripts - licenses,
+   *     citizen ids, plates - are ASCII in practice.
+   *   - Applied at CREATE TABLE, so it governs tables this resource creates.
+   *     A table created before this existed keeps binary collation until it
+   *     is recreated.
+   *
+   * A column that explicitly asks for BINARY or a _bin/_cs collation is left
+   * alone.
+   */
+  function applyTextCollation(sql) {
+    const mask = codeMask(sql);
+
+    if (!/^\s*CREATE\s+(?:TEMPORARY\s+)?TABLE\b/i.test(mask)) return sql;
+
+    const open = mask.indexOf("(");
+    if (open === -1) return sql;
+
+    const depths = parenDepths(mask);
+
+    // The matching close paren for the column list.
+    let close = -1;
+    for (let i = open + 1; i < mask.length; i++) {
+      if (mask[i] === ")" && depths[i] === 0) {
+        close = i;
+        break;
+      }
+    }
+    if (close === -1) return sql;
+
+    // Top-level commas separate one column or constraint from the next.
+    const bounds = [open + 1];
+    for (let i = open + 1; i < close; i++) {
+      if (mask[i] === "," && depths[i] === 1) bounds.push(i + 1);
+    }
+    bounds.push(close + 1);
+
+    let out = "";
+    let cursor = 0;
+
+    for (let b = 0; b < bounds.length - 1; b++) {
+      const start = bounds[b];
+      // Everything up to the separator, without the separator itself.
+      const end = bounds[b + 1] - 1;
+      const entry = sql.slice(start, end);
+
+      out += sql.slice(cursor, start);
+      cursor = end;
+
+      if (/\bCOLLATE\b/i.test(entry)) {
+        // Already spoken for - only make the name one SQLite recognises.
+        out += mapCollation(entry);
+        continue;
+      }
+
+      if (TABLE_CONSTRAINT.test(entry) || EXPLICIT_BINARY.test(entry)) {
+        out += entry;
+        continue;
+      }
+
+      const type = TEXT_TYPE.exec(entry);
+      if (!type) {
+        out += entry;
+        continue;
+      }
+
+      const at = type.index + type[0].length;
+      out += `${entry.slice(0, at)} COLLATE NOCASE${entry.slice(at)}`;
+    }
+
+    return out + sql.slice(cursor);
+  }
+
   // ==========================================================================
   // 4. The safety gate
   // ==========================================================================
@@ -694,6 +815,12 @@ module.exports = (function () {
     // Polyglot returns success even when it has passed a MySQL-only
     // construct through untouched, so verify rather than trust.
     assertTranslated(translated, originalSql);
+
+    // After the gate, because it deliberately introduces a COLLATE clause
+    // that MySQL-side checks have no reason to expect.
+    if (options.textCollation !== false) {
+      translated = applyTextCollation(translated);
+    }
 
     return {
       sql: translated,

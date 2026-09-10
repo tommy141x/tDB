@@ -302,6 +302,88 @@ async function main() {
   expectThrow("garbage SQL is rejected", "SELECT FROM WHERE ((( ");
 
   // ------------------------------------------------------------------
+  section("Text collation");
+
+  const collDb = freshDb();
+
+  // Not via checkPrepares: that helper runs extraStatements first, and the
+  // index here cannot exist before its table. The adapter's execute() batches
+  // them in the right order.
+  const coll = translator.translate(
+    `CREATE TABLE accounts (
+       id INT AUTO_INCREMENT,
+       license VARCHAR(64),
+       note TEXT DEFAULT 'has, a comma (and parens)',
+       token VARCHAR(64) COLLATE utf8mb4_bin,
+       avatar BLOB,
+       PRIMARY KEY (id),
+       UNIQUE KEY license (license)
+     )`,
+    [],
+    { resolveConflictTarget },
+  );
+
+  if (coll) {
+    coll.sqliteSql = coll.sql.replace(/\{:(\w+)\}/g, ":$1");
+    collDb.exec(coll.sqliteSql);
+    for (const extra of coll.extraStatements) collDb.exec(extra);
+    ok(true, "CREATE TABLE with text columns is accepted by SQLite");
+
+    ok(
+      /license TEXT\(64\) COLLATE NOCASE/i.test(coll.sql),
+      "a text column gains COLLATE NOCASE, matching MySQL's default collation",
+      coll.sql,
+    );
+    ok(
+      /COLLATE BINARY/i.test(coll.sql) && !/utf8mb4_bin/i.test(coll.sql),
+      "an explicit _bin collation becomes BINARY, not a name SQLite cannot resolve",
+      coll.sql,
+    );
+    ok(
+      !/avatar BLOB COLLATE/i.test(coll.sql),
+      "a BLOB column is left alone",
+      coll.sql,
+    );
+    ok(
+      /'has, a comma \(and parens\)'/.test(coll.sql),
+      "a DEFAULT string containing commas and parens is not mistaken for structure",
+      coll.sql,
+    );
+
+    // Prove the behaviour, not just the text.
+    collDb
+      .prepare("INSERT INTO accounts (license, token) VALUES (?, ?)")
+      .run("license:AbCdEf", "TokenAbC");
+
+    const found = collDb
+      .prepare("SELECT id FROM accounts WHERE license = ?")
+      .all("LICENSE:ABCDEF");
+    ok(found.length === 1, "a wrong-case lookup finds the row");
+
+    const tokenMiss = collDb
+      .prepare("SELECT id FROM accounts WHERE token = ?")
+      .all("tokenabc");
+    ok(
+      tokenMiss.length === 0,
+      "the _bin column stayed case-sensitive, as its author asked",
+    );
+
+    let uniqueErr = null;
+    try {
+      collDb
+        .prepare("INSERT INTO accounts (license) VALUES (?)")
+        .run("LICENSE:abcdef");
+    } catch (e) {
+      uniqueErr = e.message;
+    }
+    ok(
+      uniqueErr !== null,
+      "the UNIQUE index treats differing case as the same value, as MySQL does",
+      uniqueErr,
+    );
+  }
+
+  // ------------------------------------------------------------------
   section("Caching");
 
   translator.clearCache();

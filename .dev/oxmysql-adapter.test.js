@@ -176,6 +176,50 @@ async function main() {
     ok(triggers.length > 0, "ON UPDATE CURRENT_TIMESTAMP became a trigger", show(triggers));
 
     // ----------------------------------------------------------------
+    console.log("\n=== Text compares case-insensitively, as it does in MySQL");
+
+    await call(
+      "insert",
+      "INSERT INTO players (citizenid, license, name) VALUES (?, ?, ?)",
+      ["CaseTest01", "license:AbCdEf", "MixedCase"],
+    );
+
+    const wrongCase = await call(
+      "single",
+      "SELECT * FROM players WHERE license = ?",
+      ["LICENSE:ABCDEF"],
+    );
+    ok(
+      wrongCase && wrongCase.citizenid === "CaseTest01",
+      "a lookup in the wrong case still finds the row (silently finds nothing in stock SQLite)",
+      show(wrongCase),
+    );
+
+    const likeCase = await call(
+      "query",
+      "SELECT citizenid FROM players WHERE name LIKE ?",
+      ["mixedcase"],
+    );
+    ok(likeCase.length === 1, "LIKE matches regardless of case", show(likeCase));
+
+    // MySQL treats these as the same value in a UNIQUE key; so must we.
+    let duplicate = null;
+    try {
+      await call("insert", "INSERT INTO players (citizenid) VALUES (?)", [
+        "casetest01",
+      ]);
+    } catch (e) {
+      duplicate = e.message;
+    }
+    ok(
+      duplicate !== null,
+      "a UNIQUE key rejects the same value in another case, as MySQL does",
+      duplicate,
+    );
+
+    await call("update", "DELETE FROM players WHERE citizenid = ?", ["CaseTest01"]);
+
+    // ----------------------------------------------------------------
     console.log("\n=== Return values match oxmysql exactly");
 
     const insertId = await call(
@@ -183,7 +227,18 @@ async function main() {
       "INSERT INTO players (citizenid, license, name, money) VALUES (?, ?, ?, ?)",
       ["ABC123", "license:aaa", "Tommy", 500],
     );
-    ok(insertId === 1, "insert returns insertId, not an object", show(insertId));
+    ok(
+      typeof insertId === "number" && insertId > 0,
+      "insert returns insertId, not an object",
+      show(insertId),
+    );
+    ok(
+      (await call("scalar", "SELECT id FROM players WHERE citizenid = ?", [
+        "ABC123",
+      ])) === insertId,
+      "the insertId is the id of the row that was actually inserted",
+      show(insertId),
+    );
 
     const affected = await call(
       "update",
