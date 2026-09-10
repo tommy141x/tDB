@@ -7,7 +7,9 @@
  * - handle: the actual implementation
  */
 
-const { describeRouteError } = require("./utils/route-error.js");
+// Relative to this file: a required module resolves from its own directory,
+// unlike a manifest server_script, which resolves from the resource root.
+const { describeRouteError } = require("../utils/route-error.js");
 
 class PocketBaseAdapter {
   constructor(pb, wrapAsync, logger) {

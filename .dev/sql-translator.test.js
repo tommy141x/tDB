@@ -8,19 +8,11 @@
  *   node .dev/sql-translator.test.js
  */
 const path = require("path");
-const Module = require("module");
 const { DatabaseSync } = require("node:sqlite");
 
-const ROOT = path.resolve(__dirname, "..");
-
-// FiveM resolves require() from the resource root; plain Node does not.
-const originalResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, ...rest) {
-  if (/^\.\/(utils|bin|adapters)\//.test(request)) {
-    return originalResolve.call(this, path.join(ROOT, request.slice(2)), ...rest);
-  }
-  return originalResolve.call(this, request, ...rest);
-};
+// Resolve require() the way citizen-scripting-node does. See the file itself:
+// only manifest server_scripts get the resource root as their base.
+const ROOT = require("./fivem-require.js");
 
 const translator = require(path.join(ROOT, "utils/sql-translator.js"));
 

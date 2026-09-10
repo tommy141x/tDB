@@ -17,21 +17,11 @@
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
-const Module = require("module");
 const { spawn, spawnSync } = require("child_process");
 
-const ROOT = path.resolve(__dirname, "..");
-
-// FiveM resolves require() paths from the resource root; plain Node resolves
-// them relative to the requiring file. Rewrite the resource's own "./utils/..."
-// and "./bin/..." specifiers so the same sources load unmodified here.
-const originalResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, ...rest) {
-  if (/^\.\/(utils|bin|adapters)\//.test(request)) {
-    return originalResolve.call(this, path.join(ROOT, request.slice(2)), ...rest);
-  }
-  return originalResolve.call(this, request, ...rest);
-};
+// Resolve require() the way citizen-scripting-node does. See the file itself:
+// only manifest server_scripts get the resource root as their base.
+const ROOT = require("./fivem-require.js");
 
 const PocketBase = require(path.join(ROOT, "bin/pocketbase.cjs.js"));
 const {

@@ -53,7 +53,13 @@
  * calls produces one re-authentication, not one per call.
  */
 module.exports = (function () {
-  const { retryWithBackoff } = require("./utils/process-utils.js");
+  // Relative to THIS file, not the resource root. citizen-scripting-node
+  // resolves a manifest server_script's own requires from the resource root
+  // (they run against a synthetic /dummy.js there), but a module those scripts
+  // pull in is an ordinary CommonJS module and resolves from its own
+  // directory. So a top-level script says "./utils/x.js" and a module inside
+  // utils/ says "./x.js" - for the same file.
+  const { retryWithBackoff } = require("./process-utils.js");
 
   const SUPERUSERS_COLLECTION = "_superusers";
 

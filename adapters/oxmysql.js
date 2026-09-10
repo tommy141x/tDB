@@ -28,8 +28,10 @@
  * silently, and the script author has no reason to suspect the database layer.
  */
 
-const translator = require("./utils/sql-translator.js");
-const { describeRouteError } = require("./utils/route-error.js");
+// Relative to this file: a required module resolves from its own directory,
+// unlike a manifest server_script, which resolves from the resource root.
+const translator = require("../utils/sql-translator.js");
+const { describeRouteError } = require("../utils/route-error.js");
 
 // Export name -> how the result is shaped. See the note above about `execute`.
 const RESULT_MODES = {
