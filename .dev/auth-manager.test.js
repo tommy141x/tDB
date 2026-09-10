@@ -27,9 +27,12 @@ Module._resolveFilename = function (request, ...rest) {
 };
 
 const PocketBase = require(path.join(ROOT, "bin/pocketbase.cjs.js"));
-const { AuthManager, getTokenExpiryMs } = require(
-  path.join(ROOT, "utils/auth-manager.js"),
-);
+const {
+  AuthManager,
+  getTokenExpiryMs,
+  ensureSuperuserTokenDuration,
+  MANAGED_TOKEN_DURATION_SECONDS,
+} = require(path.join(ROOT, "utils/auth-manager.js"));
 
 const PB_BIN = path.join(
   ROOT,
@@ -117,20 +120,26 @@ async function main() {
     const expMs = getTokenExpiryMs(probe.authStore.token);
     assert(expMs !== null, "getTokenExpiryMs() decodes the exp claim");
 
+    const superusers = await probe.collections.getOne("_superusers");
+    const configured = superusers.authToken.duration;
+
     const lifetimeSec = Math.round((expMs - Date.now()) / 1000);
-    log.info(`issued token lifetime: ~${lifetimeSec}s`);
-    assert(
-      lifetimeSec > 86000 && lifetimeSec <= 86400,
-      `superuser token really is ~1 day (measured ${lifetimeSec}s) - the documented cause of the spam`,
+    log.info(
+      `_superusers authToken.duration = ${configured}s; issued token ~${lifetimeSec}s`,
     );
 
-    // Shrink the lifetime so expiry is observable in seconds, not a day.
-    const SHORT = 10; // PocketBase enforces a 10s minimum
-    const superusers = await probe.collections.getOne("_superusers");
-    await probe.collections.update(superusers.id, {
-      authToken: { duration: SHORT },
-    });
-    log.info(`_superusers authToken.duration set to ${SHORT}s for the test`);
+    // The whole bug in one assertion: PocketBase 0.40.3 hands a service
+    // account a token that dies in seconds. Asserted as a bound rather than
+    // exactly 10 so a future release nudging the default doesn't read as a
+    // regression - what matters is that it is far too short to ignore.
+    assert(
+      configured <= 60 && Math.abs(lifetimeSec - configured) <= 2,
+      `superuser token lifetime is ${configured}s out of the box - the cause of the spam`,
+    );
+
+    // No need to shrink anything for the tests below: the default is already
+    // short enough to watch expire.
+    const SHORT = configured;
 
     // ----------------------------------------------------------------------
     log.step("Reproducing the original bug (authenticate once, never refresh)");
@@ -220,16 +229,19 @@ async function main() {
     );
 
     // ----------------------------------------------------------------------
-    log.step("AuthManager: proactive refresh happens without any caller");
+    log.step("AuthManager: proactive refresh beats a short token to expiry");
 
     mgr._authWithPassword = realAuth;
     await mgr.ensureAuthenticated(true);
 
     const tokenBefore = managed.authStore.token;
 
-    // Timer is clamped to a 30s floor, so wait past it.
-    log.info("waiting 35s for the scheduled refresh to fire...");
-    await sleep(35000);
+    // The refresh is scheduled at 75% of the token's own lifetime, so with a
+    // SHORT second token it must fire before SHORT elapses. A floor larger
+    // than the lifetime - the bug this replaced - leaves the token expired
+    // here instead, so this is the check that pins the fix down.
+    log.info(`waiting ${SHORT}s, during which the refresh should fire...`);
+    await sleep(SHORT * 1000);
 
     const tokenAfter = managed.authStore.token;
     assert(
@@ -238,11 +250,90 @@ async function main() {
     );
     assert(
       (await managed.collections.getFullList().then(() => true, () => false)),
-      "client is usable straight after the proactive refresh",
+      "the client stayed usable across expiry with no caller-side recovery",
+    );
+
+    // Several lifetimes back to back: the steady state must be silent, not a
+    // repeating cycle of expire, 403, recover.
+    log.info(`holding for ${SHORT * 3}s to watch the steady state...`);
+    let unrecoveredFailure = null;
+    for (let i = 0; i < 3; i++) {
+      await sleep(SHORT * 1000);
+      try {
+        await managed.collections.getFullList();
+      } catch (e) {
+        unrecoveredFailure = `${e.status} ${e.message}`;
+        break;
+      }
+    }
+    assert(
+      unrecoveredFailure === null,
+      `no call failed across ${SHORT * 3}s of unattended running (${unrecoveredFailure})`,
     );
 
     mgr.stop();
     assert(mgr.refreshTimer === null, "stop() clears the refresh timer");
+
+    // ----------------------------------------------------------------------
+    log.step("Local mode widens the token lifetime instead of living with it");
+
+    // The probe's own token expired many lifetimes ago, which is exactly the
+    // race the reauth hook exists for - so exercise it rather than papering
+    // over it with a fresh login here.
+    const reauth = () =>
+      probe
+        .collection("_superusers")
+        .authWithPassword(EMAIL, PASSWORD, { requestKey: null });
+
+    const changed = await ensureSuperuserTokenDuration(
+      probe,
+      quietLogger,
+      reauth,
+    );
+    assert(
+      changed === true,
+      "the 10s default is raised, recovering from the expired token en route",
+    );
+
+    const after = await probe.collections.getOne("_superusers");
+    assert(
+      after.authToken.duration === MANAGED_TOKEN_DURATION_SECONDS,
+      `duration is now ${after.authToken.duration}s`,
+    );
+
+    const fresh = new PocketBase(URL);
+    await fresh
+      .collection("_superusers")
+      .authWithPassword(EMAIL, PASSWORD, { requestKey: null });
+    const freshLifetime = Math.round(
+      (getTokenExpiryMs(fresh.authStore.token) - Date.now()) / 1000,
+    );
+    assert(
+      Math.abs(freshLifetime - MANAGED_TOKEN_DURATION_SECONDS) <= 5,
+      `a newly issued token now lasts ~${freshLifetime}s`,
+    );
+
+    assert(
+      (await ensureSuperuserTokenDuration(probe, quietLogger, reauth)) === false,
+      "re-running it is a no-op - no needless write on every restart",
+    );
+
+    // A manager starting against the widened instance must schedule its
+    // refresh from the new lifetime, not re-apply an old floor.
+    const widenedMgr = new AuthManager(
+      new PocketBase(URL),
+      { Email: EMAIL, Password: PASSWORD },
+      quietLogger,
+    );
+    await widenedMgr.start();
+    const scheduledMs = widenedMgr.refreshTimer
+      ? Number(widenedMgr.refreshTimer._idleTimeout)
+      : -1;
+    assert(
+      scheduledMs > SHORT * 1000 && scheduledMs <= 6 * 60 * 60 * 1000,
+      `next refresh scheduled in ${Math.round(scheduledMs / 1000)}s, capped at 6h`,
+    );
+    widenedMgr.stop();
   } finally {
     server.kill();
     await sleep(500);

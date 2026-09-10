@@ -4,7 +4,11 @@
 (function () {
   const PocketBase = require("./bin/pocketbase.cjs.js");
   const configLoader = require("./utils/config-loader.js");
-  const { AuthManager, isAuthError } = require("./utils/auth-manager.js");
+  const {
+    AuthManager,
+    isAuthError,
+    ensureSuperuserTokenDuration,
+  } = require("./utils/auth-manager.js");
   const PocketBaseAdapter = require("./adapters/pocketbase.js");
   const OxMySQLAdapter = require("./adapters/oxmysql.js");
 
@@ -139,6 +143,10 @@
   // Determine PocketBase URL - will be set based on server mode (local or remote)
   let pbUrl = null;
   let pb = null;
+
+  // Whether we are talking to somebody else's instance. Gates the settings we
+  // are only entitled to change on an instance this resource starts itself.
+  let isRemoteMode = false;
 
   // Owns the superuser token lifecycle once the server reports ready.
   let authManager = null;
@@ -291,12 +299,34 @@
     );
 
     isAuthenticated = await authManager.start();
+
+    if (isAuthenticated) await applyManagedTokenLifetime();
+
     notifyReady();
+  };
+
+  /**
+   * On a local instance, correct PocketBase's 10 second superuser token
+   * lifetime before settling into the refresh loop. A remote instance is left
+   * exactly as its owner configured it.
+   */
+  const applyManagedTokenLifetime = async () => {
+    if (isRemoteMode) return;
+
+    const changed = await ensureSuperuserTokenDuration(pb, clientLogger, () =>
+      authManager.ensureAuthenticated(true),
+    );
+
+    // The token already in hand was minted under the old duration, so trade
+    // it in - otherwise the refresh timer is scheduled against 10 seconds.
+    if (changed) await authManager.ensureAuthenticated(true);
   };
 
   // Event-driven startup: Listen for server ready event
   on("pocketbase:server:ready", async (data) => {
     // Initialize PocketBase client with the correct URL (local or remote)
+    isRemoteMode = Boolean(data.isRemote);
+
     if (data.isRemote) {
       // Remote mode - connect to remote URL
       pbUrl = data.url;
