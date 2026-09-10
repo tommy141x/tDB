@@ -299,7 +299,23 @@ module.exports = (function () {
     }
 
     const table = tableMatch[2];
-    const target = resolveConflictTarget ? resolveConflictTarget(table) : null;
+
+    // MySQL's ON DUPLICATE KEY fires on any unique constraint, while SQLite
+    // demands one named target. Hand the resolver the columns being inserted so
+    // it can pick the constraint this statement can actually violate.
+    const columnListMatch = /\bINSERT\s+(?:IGNORE\s+)?INTO\s+[`"\[]?[A-Za-z0-9_$]+[`"\]]?\s*\(([^)]*)\)/i.exec(
+      mask.slice(0, dupMatch.index),
+    );
+    const insertColumns = columnListMatch
+      ? columnListMatch[1]
+          .split(",")
+          .map((c) => c.trim().replace(/^[`"\[]|[`"\]]$/g, ""))
+          .filter(Boolean)
+      : [];
+
+    const target = resolveConflictTarget
+      ? resolveConflictTarget(table, insertColumns)
+      : null;
 
     if (!target || target.length === 0) {
       throw new SQLTranslationError(
