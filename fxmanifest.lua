@@ -4,7 +4,7 @@ game 'gta5'
 name 'PocketBase'
 description 'Open Source realtime backend in 1 file'
 author 'Tommy Johnston, Gani Georgiev'
-version 'v0.30.4'
+version 'v0.40.3'
 
 lua54 'yes'
 node_version '22'

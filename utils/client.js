@@ -4,7 +4,7 @@
 (function () {
   const PocketBase = require("./bin/pocketbase.cjs.js");
   const configLoader = require("./utils/config-loader.js");
-  const { retryWithBackoff } = require("./utils/process-utils.js");
+  const { AuthManager, isAuthError } = require("./utils/auth-manager.js");
   const PocketBaseAdapter = require("./adapters/pocketbase.js");
   const OxMySQLAdapter = require("./adapters/oxmysql.js");
 
@@ -99,6 +99,35 @@
   };
 
   // ============================================================================
+  // Log Throttling
+  // ============================================================================
+  // A script polling on a timer turns one persistent fault into hundreds of
+  // identical console lines per minute, which buries whatever else the server
+  // is trying to tell you. Identical messages collapse into a periodic line
+  // carrying the suppressed count instead.
+  const LOG_THROTTLE_WINDOW_MS = 60 * 1000;
+  const throttleState = new Map();
+
+  function logThrottled(level, key, message) {
+    const now = Date.now();
+    const entry = throttleState.get(key);
+
+    if (!entry || now - entry.lastLoggedAt >= LOG_THROTTLE_WINDOW_MS) {
+      const suppressed = entry ? entry.suppressed : 0;
+      throttleState.set(key, { lastLoggedAt: now, suppressed: 0 });
+
+      clientLogger[level](
+        suppressed > 0
+          ? `${message} ^8(repeated ${suppressed} more time${suppressed === 1 ? "" : "s"} in the last minute)^7`
+          : message,
+      );
+      return;
+    }
+
+    entry.suppressed++;
+  }
+
+  // ============================================================================
   // Configuration
   // ============================================================================
   const resourceName = GetCurrentResourceName();
@@ -110,6 +139,9 @@
   // Determine PocketBase URL - will be set based on server mode (local or remote)
   let pbUrl = null;
   let pb = null;
+
+  // Owns the superuser token lifecycle once the server reports ready.
+  let authManager = null;
 
   // Wait for PocketBase to be ready and authenticate
   let isReady = false;
@@ -124,25 +156,63 @@
   };
 
   /**
-   * Wraps async exports to handle errors properly
+   * Wraps async exports so that every call gets consistent readiness checks,
+   * transparent recovery from an expired superuser session, and non-spammy
+   * error reporting.
+   *
+   * @param {function} fn The operation to run.
+   * @param {string} [label] Name used in error messages. Most callers pass an
+   *   anonymous arrow, whose `fn.name` is "" - that is why the original error
+   *   lines read as "[PocketBase Client] : <message>" with nothing before the
+   *   colon.
    */
-  function wrapAsync(fn) {
+  function wrapAsync(fn, label) {
+    const name = label || fn.name || "request";
+
     return async (...args) => {
+      if (!isReady || !pb) {
+        throw new Error(
+          "PocketBase client not ready yet - wait for isReady() to return true",
+        );
+      }
+
       try {
-        if (!isReady || !pb) {
-          throw new Error(
-            "PocketBase client not ready yet - wait for isReady() to return true",
-          );
-        }
         return await fn(...args);
       } catch (error) {
-        // Don't log 404 errors - they're expected when checking if records exist
-        if (error.status !== 404) {
-          clientLogger.error(`${fn.name}: ${error.message}`);
+        // A 401/403 here usually means the superuser token expired rather
+        // than that the caller did anything wrong. Re-authenticate once and
+        // replay the call; only a second failure is a real error.
+        if (isAuthError(error) && authManager) {
+          const recovered = await authManager.ensureAuthenticated(true);
+
+          if (recovered) {
+            try {
+              return await fn(...args);
+            } catch (retryError) {
+              return handleCallError(retryError, name);
+            }
+          }
         }
-        throw error;
+
+        return handleCallError(error, name);
       }
     };
+  }
+
+  /**
+   * Log an export failure once per throttle window, then rethrow it so the
+   * caller still sees the failure.
+   */
+  function handleCallError(error, name) {
+    // 404 is a normal answer to "does this record exist?", not a fault.
+    if (error.status !== 404) {
+      logThrottled(
+        "error",
+        `${name}:${error.status || 0}:${error.message}`,
+        `${name}: ${error.message}`,
+      );
+    }
+    throw error;
   }
 
   /**
@@ -181,7 +251,9 @@
    * @export
    */
   exports("isClientAuthenticated", () => {
-    return isAuthenticated;
+    // Report the live session state, not just the outcome of the initial
+    // login - the token is refreshed on a timer and can lapse and recover.
+    return authManager ? authManager.isAuthenticated : isAuthenticated;
   });
 
   /**
@@ -207,33 +279,15 @@
     });
   });
 
+  /**
+   * Authenticate and hand the session to the AuthManager, which keeps the
+   * token refreshed for as long as the resource runs.
+   */
   const tryAuthenticate = async () => {
-    if (!config.Superuser.Email || !config.Superuser.Password) {
-      notifyReady();
-      return;
-    }
+    authManager = new AuthManager(pb, config.Superuser, clientLogger);
 
-    try {
-      await retryWithBackoff(
-        async () => {
-          await pb
-            .collection("_superusers")
-            .authWithPassword(
-              config.Superuser.Email,
-              config.Superuser.Password,
-            );
-        },
-        10, // maxAttempts
-        100, // baseDelay
-        2000, // maxDelay
-      );
-
-      isAuthenticated = true;
-      notifyReady();
-    } catch (authErr) {
-      clientLogger.error(`Authentication failed: ${authErr.message}`);
-      notifyReady();
-    }
+    isAuthenticated = await authManager.start();
+    notifyReady();
   };
 
   // Event-driven startup: Listen for server ready event
@@ -342,5 +396,13 @@
   // Cleanup
   // ============================================================================
   // Note: Subscriptions are automatically cleaned up when the WebSocket connection
-  // closes on resource stop. No explicit cleanup needed.
+  // closes on resource stop. The auth refresh timer is ours though, and has to
+  // be cancelled explicitly or it will keep firing against a dead client.
+  on("onResourceStop", (stoppedResource) => {
+    if (stoppedResource !== resourceName) return;
+
+    if (authManager) {
+      authManager.stop();
+    }
+  });
 })();

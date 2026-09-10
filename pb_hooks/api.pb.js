@@ -73,7 +73,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 /**
@@ -138,7 +138,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 /**
@@ -184,7 +184,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 /**
@@ -236,7 +236,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 /**
@@ -289,7 +289,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 // ============================================================================
@@ -327,7 +327,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 /**
@@ -377,7 +377,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 // ============================================================================
@@ -475,7 +475,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 // ============================================================================
@@ -526,7 +526,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 /**
@@ -565,7 +565,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 // ============================================================================
@@ -616,7 +616,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireAuth(),
+  $apis.requireSuperuserAuth(),
 );
 
 // ============================================================================
