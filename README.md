@@ -1,588 +1,407 @@
-# PocketBase for FiveM
+# tDB
 
-A production-ready [PocketBase](https://pocketbase.io/) instance in one FiveM resource with automatic setup, realtime events, backups, SQL queries, transactions, and comprehensive exports.
+A database resource for FiveM. It is a drop-in replacement for **oxmysql** — the
+same exports, the same return values, MySQL SQL translated to SQLite — backed by
+an embedded [PocketBase](https://pocketbase.io/) instance that also gives you
+collections, realtime subscriptions, file storage and an admin UI if you want
+them.
 
----
-
-## 🚀 Quick Start
-
-### Installation
-
-1. Download and extract to your `resources` folder
-2. The resource folder name should be `pb`
-3. Add `ensure pb` to your `server.cfg`
-4. Start your server
-
-**That's it!** PocketBase will automatically:
-- Start on `127.0.0.1:8090`
-- Create a superuser account
-- Authenticate your scripts
-- Work immediately with zero configuration
-
----
-
-## ⚙️ Basic Configuration
-
-### Admin UI Access
-
-By default, the admin UI is **not exposed** (most secure). Your scripts can still access PocketBase.
-
-**To enable public admin UI access:**
+Nothing to install alongside it. No MySQL server, no connection string.
 
 ```lua
-Config.ExposeAdmin = true  -- Set to true in config.lua
+-- Existing oxmysql code. Unchanged.
+local row = exports.oxmysql:single_async('SELECT * FROM players WHERE citizenid = ?', { cid })
 ```
 
-When enabled, configure your public URL:
+---
+
+## Install
+
+1. Drop the folder into `resources/` and keep the name **`tDB`**.
+2. `ensure tDB` in `server.cfg` — before any resource that queries the database.
+3. Start the server.
+
+On first start tDB provisions PocketBase itself: it creates the superuser,
+writes the credentials into `config.lua`, and authenticates. **The PocketBase
+web installer never appears**, and if the superuser account is ever lost or
+broken the resource repairs it in place without a restart.
+
+### Replacing oxmysql
+
+Remove `oxmysql` from `server.cfg`. tDB declares `provide 'oxmysql'` (and
+`mysql-async` and `ghmattimysql`), so `exports.oxmysql:...` calls and
+`dependency 'oxmysql'` lines resolve to tDB with no edits to any script.
+
+The one thing `provide` cannot cover is a **file** reference. If a resource has
 
 ```lua
-Config.Host = ""  -- Leave empty to auto-detect, or set to your IP/domain
+server_script '@oxmysql/lib/MySQL.lua'
+```
+
+change it to
+
+```lua
+server_script '@tDB/lib/MySQL.lua'
+```
+
+Scripts that only call `exports.oxmysql` need no change.
+
+> Running tDB and a real oxmysql at the same time is not supported — two
+> resources answering the same export name is ambiguous, and they would be
+> talking to two different databases.
+
+---
+
+## The oxmysql API
+
+Every oxmysql export, with the `_async` and `Sync` variants, plus the
+`mysql_*` names from mysql-async.
+
+| Export | Returns |
+|---|---|
+| `query`, `execute`, `fetch` | array of rows |
+| `single` | one row, or `nil` |
+| `scalar` | the first column of the first row, or `nil` |
+| `insert` | the new row's id |
+| `update` | affected row count |
+| `prepare` | one row per parameter set; unpacked when a callback is given |
+| `rawExecute` | the raw result |
+| `transaction` | `true`, or `false` if it rolled back |
+| `store` | the query, unchanged |
+
+`execute` and `fetch` are aliases of `query` and return **rows**, not a count —
+that is oxmysql's own behaviour, taken from its source. The mysql-async
+`MySQL.Sync.execute` / `mysql_execute` names do mean "update"; that difference
+is preserved too.
+
+```lua
+-- Placeholders: ?, @name and :name all work
+local rows   = exports.oxmysql:query_async('SELECT * FROM players WHERE money > ?', { 1000 })
+local row    = exports.oxmysql:single_async('SELECT * FROM players WHERE citizenid = @cid', { cid = cid })
+local name   = exports.oxmysql:scalar_async('SELECT name FROM players WHERE id = ?', { 1 })
+local id     = exports.oxmysql:insert_async('INSERT INTO logs (msg) VALUES (?)', { 'joined' })
+local n      = exports.oxmysql:update_async('UPDATE players SET money = money + ? WHERE id = ?', { 500, 1 })
+
+local ok = exports.oxmysql:transaction_async({
+    { 'UPDATE accounts SET balance = balance - ? WHERE id = ?', { 1000, 'a' } },
+    { 'UPDATE accounts SET balance = balance + ? WHERE id = ?', { 1000, 'b' } },
+})
+```
+
+With the library file:
+
+```lua
+-- fxmanifest.lua:  server_script '@tDB/lib/MySQL.lua'
+local rows = MySQL.query.await('SELECT * FROM players')
+local id   = MySQL.insert.await('INSERT INTO logs (msg) VALUES (?)', { 'joined' })
+
+MySQL.ready(function() print('database up') end)
+```
+
+### Query cache
+
+Off by default. When on, row queries are cached and **any** write through tDB
+clears the cache, so a cached read cannot outlive the data it described.
+
+```lua
+exports.tDB:enableCache(60000, 100)   -- ttl ms, max entries
+exports.tDB:invalidateCache('players') -- or a substring match
+exports.tDB:disableCache()
+exports.tDB:setSlowQueryThreshold(150) -- ms; 0 disables the warning
+```
+
+---
+
+## MySQL compatibility
+
+SQL is translated from MySQL to SQLite per statement and cached by shape.
+Handled for you:
+
+- `ON DUPLICATE KEY UPDATE` → `ON CONFLICT (...) DO UPDATE`, with the conflict
+  target resolved from the table's real unique indexes
+- `AUTO_INCREMENT`, `ENGINE=`, `DEFAULT CHARSET=` and the other table options
+- inline `KEY` / `UNIQUE KEY` in `CREATE TABLE` → separate `CREATE INDEX`
+- `ON UPDATE CURRENT_TIMESTAMP` → a trigger
+- `DELETE ... LIMIT`, `LIMIT offset, count`
+- backticks, `IF()`, `IFNULL()`, `CONCAT()`, `NOW()`, `UNIX_TIMESTAMP()`
+- **case-insensitive text.** MySQL's default collation compares text
+  case-insensitively and SQLite does not, so text columns are created
+  `COLLATE NOCASE`. `WHERE license = 'LICENSE:AB12'` finds `license:ab12`, and a
+  `UNIQUE` key rejects the same value in another case, exactly as MySQL does. A
+  column declared `BINARY` or with a `_bin` / `_cs` collation stays byte-exact.
+
+**Anything that cannot be translated faithfully raises an error naming the
+construct**, rather than running something subtly different. A wrong row is far
+worse than a failed call: it corrupts save data silently, and the script author
+has no reason to suspect the database layer. Currently refused by name:
+`DATE_ADD`/`DATE_SUB`, `INTERVAL`, `STRAIGHT_JOIN`, `SQL_CALC_FOUND_ROWS`,
+`GROUP_CONCAT ... SEPARATOR`.
+
+Known limits worth stating plainly:
+
+- `COLLATE NOCASE` folds ASCII only. `Ä` and `ä` still differ; MySQL's
+  `general_ci` folds them.
+- Collation is applied when a table is created. A table that predates tDB keeps
+  binary collation until it is recreated.
+- `RETURNING` is not supported through the query path — MySQL has no equivalent,
+  so no MySQL-dialect script can ask for it.
+
+---
+
+## Configuration
+
+Everything lives in `config.lua`. The defaults are meant to be usable as-is.
+
+```lua
 Config.Port = 8090
-```
+Config.ExposeAdmin = false   -- true publishes the admin UI on Config.Host
+Config.Host = "localhost"    -- "" auto-detects the public IP
 
-**Important:** If you enable `ExposeAdmin`, you must:
-- Open port 8090 in your firewall
-- Configure port forwarding if needed
-- Set a strong superuser password
-
-### Superuser Credentials
-
-Credentials are auto-generated on first startup. Find them in `config.lua`:
-
-```lua
-Config.Superuser = {
-    Email = "admin@localhost.local",    -- Auto-generated
-    Password = "qOl9dbdZHF54ixFfM9th", -- Auto-generated (20 char random)
+Config.Superuser = {         -- generated on first start if left empty
+    Email = "",
+    Password = "",
 }
 ```
 
-**Security:** These credentials are stored in plain text. Protect your `config.lua` file!
+The superuser credentials are stored in plain text — protect `config.lua`.
+
+### Local or remote
+
+By default tDB starts and manages its own PocketBase process on `127.0.0.1`.
+To point it at an instance you already run:
+
+```lua
+Config.Advanced = {
+    RemoteHost = "db.example.com",
+    RemotePort = "8090",
+}
+```
+
+Both must be set. In remote mode no local process is started and tDB treats the
+instance as somebody else's: it will not alter its settings.
 
 ### Backups
 
-Enable automatic database backups:
-
 ```lua
 Config.Backup = {
-    Enabled = true,        -- Enable backup system
-    OnStartup = true,      -- Backup before each startup (recommended)
-    Schedule = 86400,      -- Auto-backup every 24 hours (0 = disabled)
-    KeepLast = 7,         -- Keep last 7 backups, delete older
+    Enabled = true,
+    OnStartup = true,      -- back up before each start
+    Schedule = 86400,      -- seconds; 0 disables
+    KeepLast = 7,
     BackupPrefix = "auto_",
 }
 ```
 
-Backups are stored in the `pb_data/backups` directory.
+Backups land in `pb_data/backups`.
 
----
-
-## 🔧 Advanced Configuration
-
-### SMTP (Email)
-
-Configure email sending for password resets, verifications, etc:
+### SMTP, S3, migrations
 
 ```lua
 Config.Advanced = {
-    SMTP = {
-        Enabled = true,
-        Host = "smtp.gmail.com",
-        Port = 587,
-        Username = "your-email@gmail.com",
-        Password = "your-app-password",
-        TLS = true,
-    },
+    SMTP = { Enabled = true, Host = "smtp.example.com", Port = 587,
+             Username = "", Password = "", TLS = true },
+
+    S3 = { Enabled = true, Bucket = "", Region = "", Endpoint = "",
+           AccessKey = "", SecretKey = "", ForcePathStyle = false },
 }
+
+Config.Migrations = { AutoApply = true, Dir = "pb_migrations" }
 ```
 
-### S3 Storage
-
-Offload file uploads to S3-compatible storage:
-
-```lua
-Config.Advanced = {
-    S3 = {
-        Enabled = true,
-        Bucket = "my-bucket",
-        Region = "us-east-1",
-        Endpoint = "",  -- Leave empty for AWS S3
-        AccessKey = "your-access-key",
-        SecretKey = "your-secret-key",
-        ForcePathStyle = false,  -- Set true for MinIO
-    },
-}
-```
-
-### Migrations
-
-Auto-apply database migrations on startup:
-
-```lua
-Config.Migrations = {
-    AutoApply = true,  -- Apply pending migrations automatically
-    Dir = "pb_migrations",
-}
-```
-
-PocketBase automatically generates migration files when you modify collections via the admin UI.
+PocketBase writes a migration file whenever you change a collection in the admin
+UI, so schema changes travel with the resource.
 
 ---
 
-## 📚 Exports Reference
+## Beyond SQL
 
-All examples use `exports['pb']:functionName()`
+tDB also exposes PocketBase itself, under `exports.tDB`. Use it or ignore it —
+the oxmysql surface does not depend on any of it.
 
-### ⚠️ Wait for Ready
+### Waiting for startup
 
-**Important:** PocketBase must be ready before using any exports. Use the callback or check manually:
+Every export below needs the database to be up. PocketBase takes a second or two
+to start.
 
-#### Using Callback (Recommended)
 ```lua
-exports['pb']:onReady(function()
-    -- PocketBase is ready, safe to use all exports
-    local players = exports['pb']:getFullList("players")
+exports.tDB:onReady(function()
+    local players = exports.tDB:getFullList('players')
 end)
+
+-- or
+if exports.tDB:isReady() then ... end
+exports.tDB:awaitConnection()
 ```
 
-#### Manual Check
+### Records
+
 ```lua
-if exports['pb']:isReady() then
-    local players = exports['pb']:getFullList("players")
-else
-    print("PocketBase not ready yet!")
-end
+local player  = exports.tDB:create('players', { username = 'John', score = 100 })
+local one     = exports.tDB:getOne('players', recordId)
+local page    = exports.tDB:getList('players', 1, 50)   -- .totalItems, .page, .totalPages
+local all     = exports.tDB:getFullList('players', { sort = '-score' })
+exports.tDB:update('players', recordId, { score = 150 })
+exports.tDB:delete('players', recordId)
+
+-- Build filters safely; values are bound, not interpolated
+local filter = exports.tDB:filter('score > {:min} && banned = {:banned}', { min = 100, banned = false })
+local top    = exports.tDB:getFullList('players', { filter = filter })
+local first  = exports.tDB:getFirstListItem('players', filter)
+
+local some   = exports.tDB:findRecordsByIds('players', { 'id1', 'id2' })
+local n      = exports.tDB:countRecords('players', 'active = true')
 ```
-
-**Note:** The resource usually takes 1-2 seconds to start. Using `onReady()` ensures your code runs at the right time.
-
----
 
 ### Collections
 
-#### Get Collections
 ```lua
-local collections = exports['pb']:getCollections()
-```
-
-#### Create Collection
-```lua
-local collection = exports['pb']:createCollection({
-    name = "players",
-    type = "base",
+exports.tDB:createCollection({
+    name = 'players',
+    type = 'base',
     fields = {
-        { name = "username", type = "text", required = true },
-        { name = "score", type = "number" },
-        { name = "banned", type = "bool" }
-    }
-})
-```
-
-#### Update/Delete Collection
-```lua
-exports['pb']:updateCollection("players", { ... })
-exports['pb']:deleteCollection("players")
-```
-
-#### Advanced Operations
-```lua
--- Delete all records in collection
-exports['pb']:truncateCollection("logs")
-
--- Get collection templates
-local scaffolds = exports['pb']:getCollectionScaffolds()
-```
-
----
-
-### Records (CRUD)
-
-#### Create Record
-```lua
-local player = exports['pb']:create("players", {
-    username = "John",
-    score = 100,
-    banned = false
-})
-```
-
-#### Get Record
-```lua
-local player = exports['pb']:getOne("players", recordId)
-```
-
-#### Get Multiple Records
-```lua
--- Paginated
-local result = exports['pb']:getList("players", 1, 50)
-print(result.totalItems, result.page, result.totalPages)
-
--- All records
-local players = exports['pb']:getFullList("players")
-```
-
-#### Update Record
-```lua
-local updated = exports['pb']:update("players", recordId, {
-    score = 150
-})
-```
-
-#### Delete Record
-```lua
-exports['pb']:delete("players", recordId)
-```
-
----
-
-### Filtering & Searching
-
-#### Build Safe Filters
-```lua
-local filter = exports['pb']:filter("score > {:min} && banned = {:banned}", {
-    min = 100,
-    banned = false
+        { name = 'username', type = 'text', required = true },
+        { name = 'score',    type = 'number' },
+        { name = 'banned',   type = 'bool' },
+    },
 })
 
-local players = exports['pb']:getFullList("players", { filter = filter })
+exports.tDB:getCollections()
+exports.tDB:updateCollection('players', { ... })
+exports.tDB:deleteCollection('players')
+exports.tDB:truncateCollection('logs')
+exports.tDB:getCollectionScaffolds()
 ```
 
-#### Get First Match
-```lua
-local player = exports['pb']:getFirstListItem("players", "username = 'John'")
-```
-
----
-
-### Batch Operations
-
-Perform multiple operations in a single request:
+### Realtime
 
 ```lua
-local batch = exports['pb']:batch()
-batch = exports['pb']:batchCreate(batch, "players", { username = "Alice", score = 50 })
-batch = exports['pb']:batchCreate(batch, "players", { username = "Bob", score = 75 })
-batch = exports['pb']:batchUpdate(batch, "players", playerId, { score = 100 })
-batch = exports['pb']:batchDelete(batch, "players", oldPlayerId)
-
-local results = exports['pb']:batchSend(batch)
-```
-
-**Note:** Batch API must be enabled in PocketBase Admin > Settings > Batch API
-
----
-
-### Realtime (Collection)
-
-Subscribe to collection changes:
-
-```lua
--- Subscribe
-exports['pb']:subscribe("players", "*")
-
--- Listen for events
-RegisterNetEvent('pocketbase:players:*', function(data)
-    print("Action:", data.action)  -- "create", "update", "delete"
-    print("Record:", json.encode(data.record))
-end)
-
--- Unsubscribe
-exports['pb']:unsubscribe("players", "*")
-```
-
-### Realtime (Custom Topics)
-
-Subscribe to custom server events:
-
-```lua
--- Subscribe
-exports['pb']:subscribeToTopic("server_events")
-
--- Listen
-RegisterNetEvent('pocketbase:topic:server_events', function(data)
-    print("Event:", json.encode(data))
-end)
-
--- Unsubscribe
-exports['pb']:unsubscribeFromTopic("server_events")
-exports['pb']:unsubscribeByPrefix("server_")
-```
-
-### Realtime (Server Broadcasts)
-
-Send custom messages from server to connected clients:
-
-```lua
--- Send message to all clients subscribed to topic
-local sentCount = exports['pb']:sendRealtimeMessage("server_events", {
-    type = "announcement",
-    message = "Server restart in 5 minutes"
-})
-
--- Get list of connected clients
-local clients = exports['pb']:getRealtimeClients()
-print("Connected clients:", #clients)
-```
-
----
-
-## 🗄️ SQL Queries
-
-Execute SQL queries directly against the SQLite database:
-
-```lua
--- Complex queries with JOINs
-local topPlayers = exports['pb']:sqlQuery([[
-    SELECT users.name, COUNT(orders.id) as total
-    FROM users
-    LEFT JOIN orders ON orders.user_id = users.id
-    GROUP BY users.id
-    HAVING total > 5
-    ORDER BY total DESC
-]], {})
-
--- Get single value (COUNT, SUM, etc.)
-local totalPlayers = exports['pb']:sqlScalar("SELECT COUNT(*) FROM players")
-
--- Get single row
-local player = exports['pb']:sqlSingle("SELECT * FROM players WHERE id = {:id} LIMIT 1", {id = "abc"})
-
--- Execute INSERT/UPDATE/DELETE
-local insertId = exports['pb']:sqlExecute("INSERT INTO logs (message) VALUES ({:msg})", {msg = "Player joined"})
-
--- Transaction (all succeed or all fail)
-local success = exports['pb']:sqlTransaction({
-    {sql = "UPDATE accounts SET balance = balance - 1000 WHERE id = {:from}", params = {from = "acc1"}},
-    {sql = "UPDATE accounts SET balance = balance + 1000 WHERE id = {:to}", params = {to = "acc2"}}
-})
-```
-
----
-
-## 🔄 Transactions
-
-Execute multiple record operations atomically:
-
-```lua
--- All operations succeed or all fail together
-local results = exports['pb']:runTransaction({
-    {type = "create", collection = "players", data = {name = "John"}},
-    {type = "update", collection = "stats", id = "stat_id", data = {total = 100}},
-    {type = "delete", collection = "temp_data", id = "temp_id"}
-})
-
-print("Created player:", results[1].id)
-```
-
----
-
-## 📊 Advanced Record Operations
-
-```lua
--- Batch fetch by IDs
-local players = exports['pb']:findRecordsByIds("players", {"id1", "id2", "id3"})
-
--- Count records with filter
-local activeCount = exports['pb']:countRecords("players", "active = true")
-```
-
----
-
-## 📧 Email Sending
-
-Send emails programmatically (requires SMTP configuration):
-
-```lua
-local success = exports['pb']:sendEmail(
-    "user@example.com",
-    "Welcome!",
-    "<h1>Welcome to the server!</h1>",
-    "Welcome to the server!" -- Plain text fallback
-)
-```
-
----
-
-### User Authentication
-
-For auth-type collections (like `users`):
-
-#### List Auth Methods
-```lua
-local methods = exports['pb']:listAuthMethods("users")
-```
-
-#### Authenticate User
-```lua
-local result = exports['pb']:authWithPassword("users", "user@email.com", "password")
-print("Token:", result.token)
-print("User:", json.encode(result.record))
-```
-
-#### Password Reset
-```lua
--- Request reset email
-exports['pb']:requestPasswordReset("users", "user@email.com")
-
--- Confirm with token
-exports['pb']:confirmPasswordReset("users", token, newPassword, newPasswordConfirm)
-```
-
-#### Email Verification
-```lua
--- Request verification email
-exports['pb']:requestVerification("users", "user@email.com")
-
--- Confirm with token
-exports['pb']:confirmVerification("users", token)
-```
-
-#### OAuth2
-```lua
--- Get available providers
-local methods = exports['pb']:listAuthMethods("users")
-
--- Authenticate with OAuth2 code
-local result = exports['pb']:authWithOAuth2Code("users", "google", code, codeVerifier, redirectUrl)
-```
-
----
-
-### Files
-
-#### Get File URL
-```lua
-local url = exports['pb']:getFileUrl(record, "avatar.png")
-```
-
-#### Get Protected File Token
-```lua
-local token = exports['pb']:getFileToken()
-```
-
----
-
-### Utilities
-
-#### Health Check
-```lua
-local health = exports['pb']:healthCheck()
-```
-
-#### Check Ready Status
-```lua
-local ready = exports['pb']:isReady()
-```
-
-#### Get PocketBase URL
-```lua
-local url = exports['pb']:getUrl()
-```
-
-#### Check Realtime Connection
-```lua
-local connected = exports['pb']:isRealtimeConnected()
-```
-
----
-
-## 💡 Examples
-
-### Player System
-```lua
--- Wait for PocketBase to be ready on resource start
-exports['pb']:onReady(function()
-    print("PocketBase is ready!")
-end)
-
--- Create player on join
-AddEventHandler('playerJoining', function()
-    local source = source
-    local identifiers = GetPlayerIdentifiers(source)
-
-    local player = exports['pb']:create("players", {
-        identifier = identifiers[1],
-        name = GetPlayerName(source),
-        playtime = 0,
-        joined = os.date("!%Y-%m-%dT%H:%M:%SZ")
-    })
-end)
-
--- Update playtime on quit
-AddEventHandler('playerDropped', function()
-    local source = source
-    local identifiers = GetPlayerIdentifiers(source)
-
-    local filter = exports['pb']:filter("identifier = {:id}", {id = identifiers[1]})
-    local player = exports['pb']:getFirstListItem("players", filter)
-
-    if player then
-        exports['pb']:update("players", player.id, {
-            playtime = player.playtime + 60  -- Add 1 hour
-        })
-    end
-end)
-```
-
-### Ban System with Realtime
-```lua
--- Subscribe to ban updates when ready
-exports['pb']:onReady(function()
-    exports['pb']:subscribe("bans", "*")
-end)
+exports.tDB:subscribe('bans', '*')
 
 RegisterNetEvent('pocketbase:bans:*', function(data)
-    if data.action == "create" then
-        local ban = data.record
-        -- Kick player if online
-        for _, playerId in ipairs(GetPlayers()) do
-            local ids = GetPlayerIdentifiers(playerId)
-            if ids[1] == ban.identifier then
-                DropPlayer(playerId, "You have been banned: " .. ban.reason)
-            end
-        end
+    -- data.action is "create" | "update" | "delete"
+    if data.action == 'create' then
+        -- data.record
     end
 end)
+
+exports.tDB:unsubscribe('bans', '*')
 ```
 
-### Leaderboard
+Custom topics, and broadcasting to them from the server:
+
 ```lua
--- Get top 10 players
-local filter = exports['pb']:filter("banned = false")
-local topPlayers = exports['pb']:getFullList("players", {
-    filter = filter,
-    sort = "-score",  -- Descending
-    limit = 10
+exports.tDB:subscribeToTopic('server_events')
+RegisterNetEvent('pocketbase:topic:server_events', function(data) end)
+
+exports.tDB:sendRealtimeMessage('server_events', { type = 'announcement', message = '...' })
+local clients = exports.tDB:getRealtimeClients()
+
+exports.tDB:unsubscribeFromTopic('server_events')
+exports.tDB:unsubscribeByPrefix('server_')
+```
+
+### Record transactions and batches
+
+```lua
+local results = exports.tDB:runTransaction({
+    { type = 'create', collection = 'players', data = { name = 'John' } },
+    { type = 'update', collection = 'stats', id = statId, data = { total = 100 } },
+    { type = 'delete', collection = 'temp',  id = tempId },
 })
 
-for i, player in ipairs(topPlayers) do
-    print(i, player.name, player.score)
-end
+local batch = exports.tDB:batch()
+batch = exports.tDB:batchCreate(batch, 'players', { username = 'Alice' })
+batch = exports.tDB:batchUpdate(batch, 'players', playerId, { score = 100 })
+local out = exports.tDB:batchSend(batch)
 ```
 
+The batch API must be enabled in Admin → Settings → Batch API.
+
+### Raw SQL, PocketBase-flavoured
+
+The same database the oxmysql exports use, with `{:name}` placeholders and no
+MySQL translation:
+
+```lua
+local rows  = exports.tDB:sqlQuery('SELECT p.name, COUNT(o.id) AS n FROM players p LEFT JOIN orders o ON o.player = p.id GROUP BY p.id')
+local row   = exports.tDB:sqlSingle('SELECT * FROM players WHERE id = {:id}', { id = 1 })
+local total = exports.tDB:sqlScalar('SELECT COUNT(*) FROM players')
+local newId = exports.tDB:sqlExecute('INSERT INTO logs (msg) VALUES ({:m})', { m = 'hello' })
+
+exports.tDB:sqlTransaction({
+    { sql = 'UPDATE accounts SET balance = balance - {:n} WHERE id = {:a}', params = { n = 100, a = 'a' } },
+    { sql = 'UPDATE accounts SET balance = balance + {:n} WHERE id = {:b}', params = { n = 100, b = 'b' } },
+})
+```
+
+Result shapes are discovered from the database, so `SELECT *` returns the table's
+real columns, integers arrive as numbers, and `NULL` arrives as `nil` rather
+than an empty string.
+
+### Users, files, mail
+
+```lua
+local result  = exports.tDB:authWithPassword('users', email, password)
+exports.tDB:requestPasswordReset('users', email)
+exports.tDB:confirmPasswordReset('users', token, new, newConfirm)
+exports.tDB:requestVerification('users', email)
+exports.tDB:authWithOAuth2Code('users', 'google', code, verifier, redirect)
+
+local url   = exports.tDB:getFileUrl(record, 'avatar.png')
+local token = exports.tDB:getFileToken()
+
+exports.tDB:sendEmail('user@example.com', 'Welcome', '<h1>Hi</h1>', 'Hi')
+```
+
+### Admin UI
+
+Off by default; scripts do not need it. To reach it:
+
+```lua
+Config.ExposeAdmin = true
+Config.Host = ""    -- auto-detect, or set a domain
+```
+
+Then open `http://<host>:8090/_/` and sign in with `Config.Superuser`. Opening
+the port to the internet means opening it in the firewall too — put it behind a
+reverse proxy or a tunnel if you can.
+
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-### "Batch requests are not allowed"
-Enable Batch API in PocketBase Admin > Settings > Batch API
+**"Only superusers can perform this action", repeating in the console.**
+Fixed. PocketBase issues superuser tokens with a ten second lifetime; tDB
+refreshes ahead of expiry, recovers from a rejection automatically, and — on an
+instance it manages — raises that lifetime to a day at startup. If you still see
+it, the credentials in `config.lua` no longer match the database; delete them
+and restart to have them reprovisioned.
 
-### "Public URL not accessible"
-Check firewall settings and port forwarding. This doesn't affect local script access.
+**The PocketBase setup screen opened in my browser.**
+It should never appear. tDB provisions the superuser before PocketBase serves,
+and repairs it in place if it goes missing. If you see the installer, the
+resource is not the one that started that instance — check for a second
+PocketBase already bound to the port.
 
-### Authentication failed
-Check `Config.Superuser` credentials in `config.lua`. Delete and restart to regenerate.
+**"Batch requests are not allowed".**
+Enable the batch API in Admin → Settings.
+
+**An error naming a SQL construct.**
+That statement has no faithful SQLite translation and was refused rather than
+silently changed. Rewrite it, or open an issue with the statement.
+
+**Nothing is reachable from outside.**
+Only affects the admin UI. Script access is local and unaffected.
 
 ---
 
-## Note
-This resource bundles the Windows AMD64 & Linux AMD64 PocketBase binaries, if you wish to download them yourself you can find them here: https://github.com/pocketbase/pocketbase/releases
+## Credits and licence
 
----
+Bundles the Windows and Linux AMD64 [PocketBase](https://github.com/pocketbase/pocketbase/releases)
+binaries (0.40.3, MIT, by Gani Georgiev), and the Polyglot SQL transpiler
+(`@polyglot-sql/sdk`, MIT, by TobiLG) as WebAssembly in `bin/polyglot/`.
 
-## 📖 Documentation
+- PocketBase docs — https://pocketbase.io/docs/
+- PocketBase JS SDK — https://github.com/pocketbase/js-sdk
 
-- **PocketBase Docs**: https://pocketbase.io/docs/
-- **JavaScript SDK**: https://github.com/pocketbase/js-sdk
-- **Admin UI**: http://127.0.0.1:8090/_/ (when running)
-
----
+See `LICENSE.md`.

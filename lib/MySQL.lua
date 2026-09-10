@@ -1,9 +1,21 @@
 ---@diagnostic disable: duplicate-set-field
--- MySQL.lua - OxMySQL Compatibility Library for PocketBase
--- This library provides MySQL.* syntax compatibility for resources using oxmysql
--- Usage: Add `server_script '@pb/lib/MySQL.lua'` to your fxmanifest.lua
+-- MySQL.lua - the MySQL.* API, for scripts that load oxmysql's library file
+-- rather than calling its exports.
+--
+-- Usage: replace
+--     server_script '@oxmysql/lib/MySQL.lua'
+-- with
+--     server_script '@tDB/lib/MySQL.lua'
+-- in the consuming resource's fxmanifest.
+--
+-- Scripts that call exports.oxmysql:query(...) need no change at all - tDB
+-- declares `provide 'oxmysql'`, which routes that export name here.
 
-local resourceName = 'pb'
+-- The resource this file lives in. It cannot be discovered at runtime:
+-- GetCurrentResourceName() returns the resource that *loaded* the file, not
+-- the one that ships it. Renaming the folder means changing this and the
+-- @tDB/ prefix above together.
+local resourceName = 'tDB'
 
 ---@class MySQL
 MySQL = {}
@@ -16,6 +28,9 @@ MySQL.single = {}
 MySQL.scalar = {}
 MySQL.prepare = {}
 MySQL.transaction = {}
+MySQL.execute = {}
+MySQL.fetch = {}
+MySQL.rawExecute = {}
 MySQL.Sync = {}
 MySQL.Async = {}
 
@@ -89,6 +104,32 @@ MySQL.transaction.await = function(queries)
 end
 
 MySQL.Sync.transaction = MySQL.transaction.await
+
+---Alias of MySQL.query - returns rows, NOT an affected-row count.
+---MySQL.Sync.execute and MySQL.Async.execute are the mysql-async names and do
+---mean "update"; that difference is oxmysql's, and it is preserved here.
+---@param query string SQL query
+---@param parameters? table|array Query parameters
+---@return table[] rows
+MySQL.execute.await = function(query, parameters)
+    return exports[resourceName]:execute_async(query, parameters or {})
+end
+
+---Alias of MySQL.query.
+---@param query string SQL query
+---@param parameters? table|array Query parameters
+---@return table[] rows
+MySQL.fetch.await = function(query, parameters)
+    return exports[resourceName]:fetch_async(query, parameters or {})
+end
+
+---Run a statement without the result unpacking prepare applies
+---@param query string SQL query
+---@param parameters? table|array Query parameters
+---@return any result
+MySQL.rawExecute.await = function(query, parameters)
+    return exports[resourceName]:rawExecute_async(query, parameters or {})
+end
 
 -- ============================================================================
 -- Callback-based API (make tables callable with metatables)
@@ -233,6 +274,54 @@ setmetatable(MySQL.transaction, {
 
 MySQL.Async.transaction = MySQL.transaction
 
+---Alias of MySQL.query, with callback
+setmetatable(MySQL.execute, {
+    __call = function(_, query, parameters, callback)
+        if type(parameters) == 'function' then
+            callback = parameters
+            parameters = {}
+        end
+
+        if callback then
+            exports[resourceName]:execute(query, parameters or {}, callback)
+        else
+            return exports[resourceName]:execute(query, parameters or {})
+        end
+    end
+})
+
+---Alias of MySQL.query, with callback
+setmetatable(MySQL.fetch, {
+    __call = function(_, query, parameters, callback)
+        if type(parameters) == 'function' then
+            callback = parameters
+            parameters = {}
+        end
+
+        if callback then
+            exports[resourceName]:fetch(query, parameters or {}, callback)
+        else
+            return exports[resourceName]:fetch(query, parameters or {})
+        end
+    end
+})
+
+---Run a statement without prepare's result unpacking, with callback
+setmetatable(MySQL.rawExecute, {
+    __call = function(_, query, parameters, callback)
+        if type(parameters) == 'function' then
+            callback = parameters
+            parameters = {}
+        end
+
+        if callback then
+            exports[resourceName]:rawExecute(query, parameters or {}, callback)
+        else
+            return exports[resourceName]:rawExecute(query, parameters or {})
+        end
+    end
+})
+
 -- ============================================================================
 -- Additional helper to check if MySQL is ready
 -- ============================================================================
@@ -277,4 +366,4 @@ end
 -- ghmattimysql.execute is an alias for MySQL.Async.execute
 -- ghmattimysql.executeSync is an alias for MySQL.Sync.execute
 
-print('^2[PocketBase]^7 MySQL compatibility library loaded')
+print('^2[tDB]^7 MySQL compatibility library loaded')

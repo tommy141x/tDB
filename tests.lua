@@ -51,7 +51,7 @@ local function displayTestResults()
 end
 
 -- Wait for PocketBase to be ready
-exports['pb']:onReady(function()
+exports['tDB']:onReady(function()
     print("^3[PocketBase Demo]^7 Starting comprehensive export tests...")
 
     Citizen.CreateThread(function()
@@ -69,22 +69,22 @@ function RunComprehensiveTests()
 
     -- Test: isReady
     local isReady = testExport("isReady()", function()
-        return exports['pb']:isReady()
+        return exports['tDB']:isReady()
     end)
 
     -- Test: isClientAuthenticated
     local isAuth = testExport("isClientAuthenticated()", function()
-        return exports['pb']:isClientAuthenticated()
+        return exports['tDB']:isClientAuthenticated()
     end)
 
     -- Test: getUrl
     local pbUrl = testExport("getUrl()", function()
-        return exports['pb']:getUrl()
+        return exports['tDB']:getUrl()
     end)
 
     -- Test: healthCheck
     testExport("healthCheck()", function()
-        return exports['pb']:healthCheck()
+        return exports['tDB']:healthCheck()
     end)
 
     -- Note: Authentication exports removed - resource auto-authenticates as superuser
@@ -95,7 +95,7 @@ function RunComprehensiveTests()
 
     -- Test: getCollections
     local collections = testExport("getCollections()", function()
-        return exports['pb']:getCollections()
+        return exports['tDB']:getCollections()
     end)
 
     -- Check if demo collection exists
@@ -147,7 +147,7 @@ function RunComprehensiveTests()
         }
 
         local result = testExport("createCollection()", function()
-            return exports['pb']:createCollection(collectionSchema)
+            return exports['tDB']:createCollection(collectionSchema)
         end)
 
         if result then
@@ -158,7 +158,7 @@ function RunComprehensiveTests()
     -- Test: getCollection
     if collectionId then
         testExport("getCollection()", function()
-            return exports['pb']:getCollection(DEMO_COLLECTION)
+            return exports['tDB']:getCollection(DEMO_COLLECTION)
         end)
     end
 
@@ -176,7 +176,7 @@ function RunComprehensiveTests()
     }
 
     local createdRecord = testExport("create()", function()
-        return exports['pb']:create(DEMO_COLLECTION, newPlayer)
+        return exports['tDB']:create(DEMO_COLLECTION, newPlayer)
     end)
 
     if createdRecord then
@@ -186,7 +186,7 @@ function RunComprehensiveTests()
     -- Test: getOne
     if createdRecordId then
         testExport("getOne()", function()
-            local record = exports['pb']:getOne(DEMO_COLLECTION, createdRecordId)
+            local record = exports['tDB']:getOne(DEMO_COLLECTION, createdRecordId)
             -- Validate we got the correct record back
             if not record or record.id ~= createdRecordId then
                 error("Retrieved record ID doesn't match")
@@ -201,7 +201,7 @@ function RunComprehensiveTests()
     -- Test: update
     if createdRecordId then
         testExport("update()", function()
-            local updated = exports['pb']:update(DEMO_COLLECTION, createdRecordId, {
+            local updated = exports['tDB']:update(DEMO_COLLECTION, createdRecordId, {
                 playtime = 120,
                 level = 5
             })
@@ -221,7 +221,7 @@ function RunComprehensiveTests()
 
     -- Test: getList
     testExport("getList()", function()
-        local result = exports['pb']:getList(DEMO_COLLECTION, 1, 10)
+        local result = exports['tDB']:getList(DEMO_COLLECTION, 1, 10)
         -- Validate pagination structure
         if not result or not result.items then
             error("getList didn't return proper structure")
@@ -237,7 +237,7 @@ function RunComprehensiveTests()
 
     -- Test: getFullList
     testExport("getFullList()", function()
-        local records = exports['pb']:getFullList(DEMO_COLLECTION)
+        local records = exports['tDB']:getFullList(DEMO_COLLECTION)
         -- Validate we got an array of records
         if type(records) ~= "table" then
             error("getFullList didn't return a table")
@@ -250,7 +250,7 @@ function RunComprehensiveTests()
 
     -- Test: filter
     local filterString = testExport("filter()", function()
-        local filter = exports['pb']:filter("playtime > {:minPlaytime}", {minPlaytime = 60})
+        local filter = exports['tDB']:filter("playtime > {:minPlaytime}", {minPlaytime = 60})
         -- Validate filter string was generated
         if type(filter) ~= "string" or filter == "" then
             error("filter() didn't return a valid filter string")
@@ -261,7 +261,7 @@ function RunComprehensiveTests()
     -- Test: getFullList with filter
     if filterString then
         testExport("getFullList() with filter", function()
-            local records = exports['pb']:getFullList(DEMO_COLLECTION, {filter = filterString})
+            local records = exports['tDB']:getFullList(DEMO_COLLECTION, {filter = filterString})
             -- Validate filtered results
             if type(records) ~= "table" then
                 error("Filtered getFullList didn't return a table")
@@ -283,7 +283,7 @@ function RunComprehensiveTests()
     -- Test: getFirstListItem (with existing record)
     if createdRecordId then
         testExport("getFirstListItem()", function()
-            local record = exports['pb']:getFirstListItem(DEMO_COLLECTION, "level >= 1")
+            local record = exports['tDB']:getFirstListItem(DEMO_COLLECTION, "level >= 1")
             -- Validate we got a record that matches the filter
             if not record or not record.id then
                 error("getFirstListItem didn't return a valid record")
@@ -301,7 +301,7 @@ function RunComprehensiveTests()
 
     -- Test: subscribe
     testExport("subscribe()", function()
-        local result = exports['pb']:subscribe(DEMO_COLLECTION, "*")
+        local result = exports['tDB']:subscribe(DEMO_COLLECTION, "*")
         -- Validate subscription was successful
         if result ~= true then
             error("subscribe() should return true on success")
@@ -319,7 +319,7 @@ function RunComprehensiveTests()
 
     -- Test: unsubscribe
     testExport("unsubscribe()", function()
-        local result = exports['pb']:unsubscribe(DEMO_COLLECTION, "*")
+        local result = exports['tDB']:unsubscribe(DEMO_COLLECTION, "*")
         -- Validate unsubscribe was successful
         if result ~= true then
             error("unsubscribe() should return true on success")
@@ -334,7 +334,7 @@ function RunComprehensiveTests()
     -- Test: getFileUrl (with dummy record)
     if createdRecord then
         testExport("getFileUrl()", function()
-            local url = exports['pb']:getFileUrl(createdRecord, "avatar.png")
+            local url = exports['tDB']:getFileUrl(createdRecord, "avatar.png")
             -- Validate URL was generated
             if type(url) ~= "string" or url == "" then
                 error("getFileUrl() didn't return a valid URL string")
@@ -348,7 +348,7 @@ function RunComprehensiveTests()
 
     -- Test: getFileToken
     testExport("getFileToken()", function()
-        local token = exports['pb']:getFileToken()
+        local token = exports['tDB']:getFileToken()
         -- Validate token was returned
         if type(token) ~= "string" or token == "" then
             error("getFileToken() didn't return a valid token string")
@@ -363,7 +363,7 @@ function RunComprehensiveTests()
     -- Test: updateCollection (add a field)
     if collectionId then
         testExport("updateCollection()", function()
-            return exports['pb']:updateCollection(DEMO_COLLECTION, {
+            return exports['tDB']:updateCollection(DEMO_COLLECTION, {
                 fields = {
                     {
                         name = "name",
@@ -411,7 +411,7 @@ function RunComprehensiveTests()
 
     -- Test: listAuthMethods (expected to fail - not an auth collection)
     testExport("listAuthMethods()", function()
-        return exports['pb']:listAuthMethods(DEMO_COLLECTION)
+        return exports['tDB']:listAuthMethods(DEMO_COLLECTION)
     end, true)
 
     -- Note: Other auth methods exist but won't test here since demo_players isn't an auth collection
@@ -426,22 +426,22 @@ function RunComprehensiveTests()
 
     -- Test: batch() API with multiple operations
     local batchResults = testExport("batch() API", function()
-        local batch = exports['pb']:batch()
-        batch = exports['pb']:batchCreate(batch, DEMO_COLLECTION, {
+        local batch = exports['tDB']:batch()
+        batch = exports['tDB']:batchCreate(batch, DEMO_COLLECTION, {
             name = "Batch Player 1",
             identifier = "batch_" .. os.time() .. "_1",
             playtime = 10,
             level = 1,
             active = true
         })
-        batch = exports['pb']:batchCreate(batch, DEMO_COLLECTION, {
+        batch = exports['tDB']:batchCreate(batch, DEMO_COLLECTION, {
             name = "Batch Player 2",
             identifier = "batch_" .. os.time() .. "_2",
             playtime = 20,
             level = 2,
             active = true
         })
-        return exports['pb']:batchSend(batch)
+        return exports['tDB']:batchSend(batch)
     end, true) -- Silent errors - batch API may be disabled
 
 
@@ -452,7 +452,7 @@ function RunComprehensiveTests()
 
     -- Test: subscribeToTopic
     testExport("subscribeToTopic()", function()
-        local result = exports['pb']:subscribeToTopic("custom_events")
+        local result = exports['tDB']:subscribeToTopic("custom_events")
         -- Validate subscription was successful
         if result ~= true then
             error("subscribeToTopic() should return true on success")
@@ -469,7 +469,7 @@ function RunComprehensiveTests()
 
     -- Test: isRealtimeConnected
     testExport("isRealtimeConnected()", function()
-        local connected = exports['pb']:isRealtimeConnected()
+        local connected = exports['tDB']:isRealtimeConnected()
         -- Validate it returns a boolean
         if type(connected) ~= "boolean" then
             error("isRealtimeConnected() should return a boolean")
@@ -479,7 +479,7 @@ function RunComprehensiveTests()
 
     -- Test: unsubscribeFromTopic
     testExport("unsubscribeFromTopic()", function()
-        local result = exports['pb']:unsubscribeFromTopic("custom_events")
+        local result = exports['tDB']:unsubscribeFromTopic("custom_events")
         -- Validate unsubscribe was successful
         if result ~= true then
             error("unsubscribeFromTopic() should return true on success")
@@ -489,7 +489,7 @@ function RunComprehensiveTests()
 
     -- Test: unsubscribeByPrefix
     testExport("unsubscribeByPrefix()", function()
-        local result = exports['pb']:unsubscribeByPrefix("custom_")
+        local result = exports['tDB']:unsubscribeByPrefix("custom_")
         -- Validate unsubscribe was successful
         if result ~= true then
             error("unsubscribeByPrefix() should return true on success")
@@ -503,7 +503,7 @@ function RunComprehensiveTests()
 
     -- Test: getCollectionScaffolds
     testExport("getCollectionScaffolds()", function()
-        local scaffolds = exports['pb']:getCollectionScaffolds()
+        local scaffolds = exports['tDB']:getCollectionScaffolds()
         -- Validate scaffolds structure
         if type(scaffolds) ~= "table" then
             error("getCollectionScaffolds() didn't return a table")
@@ -513,14 +513,14 @@ function RunComprehensiveTests()
 
     -- Test: importCollections with empty array (should succeed with no changes)
     testExport("importCollections()", function()
-        local result = exports['pb']:importCollections(json.encode({}), false)
+        local result = exports['tDB']:importCollections(json.encode({}), false)
         -- Should succeed even with empty data
         return true
     end, true) -- Silent - may have validation requirements
 
     -- Test: truncateCollection (commented out to preserve demo data)
     -- testExport("truncateCollection()", function()
-    --     return exports['pb']:truncateCollection(DEMO_COLLECTION)
+    --     return exports['tDB']:truncateCollection(DEMO_COLLECTION)
     -- end)
 
     -- ========================================================================
@@ -531,7 +531,7 @@ function RunComprehensiveTests()
 
     -- Test: sqlQuery - Select all from collection
     local sqlQueryResult = testExport("sqlQuery() - SELECT", function()
-        local result = exports['pb']:sqlQuery(
+        local result = exports['tDB']:sqlQuery(
             "SELECT id, name, type FROM _collections WHERE system = {:system} LIMIT 5",
             {system = false}
         )
@@ -543,7 +543,7 @@ function RunComprehensiveTests()
 
     -- Test: sqlScalar - Get count
     testExport("sqlScalar() - COUNT", function()
-        local count = exports['pb']:sqlScalar(
+        local count = exports['tDB']:sqlScalar(
             "SELECT COUNT(*) FROM _collections",
             {}
         )
@@ -556,7 +556,7 @@ function RunComprehensiveTests()
 
     -- Test: sqlSingle - Get one row
     testExport("sqlSingle() - Get one row", function()
-        local row = exports['pb']:sqlSingle(
+        local row = exports['tDB']:sqlSingle(
             "SELECT id, name FROM _collections LIMIT 1",
             {}
         )
@@ -569,7 +569,7 @@ function RunComprehensiveTests()
     -- Test: sqlExecute - Create a test table
     local testTableName = "sql_test_" .. os.time()
     testExport("sqlExecute() - CREATE TABLE", function()
-        local insertId = exports['pb']:sqlExecute(
+        local insertId = exports['tDB']:sqlExecute(
             "CREATE TABLE IF NOT EXISTS " .. testTableName .. " (id INTEGER PRIMARY KEY, value TEXT)",
             {}
         )
@@ -578,7 +578,7 @@ function RunComprehensiveTests()
 
     -- Test: sqlExecute - Insert into test table
     testExport("sqlExecute() - INSERT", function()
-        local insertId = exports['pb']:sqlExecute(
+        local insertId = exports['tDB']:sqlExecute(
             "INSERT INTO " .. testTableName .. " (value) VALUES ({:val})",
             {val = "test_value"}
         )
@@ -587,7 +587,7 @@ function RunComprehensiveTests()
 
     -- Test: sqlTransaction - Multiple queries atomically
     testExport("sqlTransaction() - Atomic operations", function()
-        local success = exports['pb']:sqlTransaction({
+        local success = exports['tDB']:sqlTransaction({
             {sql = "INSERT INTO " .. testTableName .. " (value) VALUES ({:val1})", params = {val1 = "transaction_test_1"}},
             {sql = "INSERT INTO " .. testTableName .. " (value) VALUES ({:val2})", params = {val2 = "transaction_test_2"}},
             {sql = "UPDATE " .. testTableName .. " SET value = {:newval} WHERE value = {:oldval}", params = {newval = "updated", oldval = "transaction_test_1"}}
@@ -600,7 +600,7 @@ function RunComprehensiveTests()
 
     -- Cleanup test table
     pcall(function()
-        exports['pb']:sqlExecute("DROP TABLE IF EXISTS " .. testTableName, {})
+        exports['tDB']:sqlExecute("DROP TABLE IF EXISTS " .. testTableName, {})
     end)
 
     -- ========================================================================
@@ -612,7 +612,7 @@ function RunComprehensiveTests()
     -- Test: findRecordsByIds - Batch fetch
     if createdRecordId then
         testExport("findRecordsByIds() - Batch fetch", function()
-            local records = exports['pb']:findRecordsByIds(DEMO_COLLECTION, {createdRecordId})
+            local records = exports['tDB']:findRecordsByIds(DEMO_COLLECTION, {createdRecordId})
             if type(records) ~= "table" or #records == 0 then
                 error("findRecordsByIds() didn't return records")
             end
@@ -622,7 +622,7 @@ function RunComprehensiveTests()
 
     -- Test: countRecords - With filter
     testExport("countRecords() - With filter", function()
-        local count = exports['pb']:countRecords(DEMO_COLLECTION, "name != ''")
+        local count = exports['tDB']:countRecords(DEMO_COLLECTION, "name != ''")
         if type(count) ~= "number" then
             error("countRecords() didn't return a number")
         end
@@ -632,7 +632,7 @@ function RunComprehensiveTests()
 
     -- Test: countRecords - Without filter
     testExport("countRecords() - No filter", function()
-        local count = exports['pb']:countRecords(DEMO_COLLECTION)
+        local count = exports['tDB']:countRecords(DEMO_COLLECTION)
         if type(count) ~= "number" then
             error("countRecords() didn't return a number")
         end
@@ -649,7 +649,7 @@ function RunComprehensiveTests()
     -- Test: runTransaction - Multiple record operations atomically
     local txRecordIds = {}
     testExport("runTransaction() - Create, Update, Delete", function()
-        local results = exports['pb']:runTransaction({
+        local results = exports['tDB']:runTransaction({
             {type = "create", collection = DEMO_COLLECTION, data = {name = "Transaction Test 1", identifier = "tx_test_1"}},
             {type = "create", collection = DEMO_COLLECTION, data = {name = "Transaction Test 2", identifier = "tx_test_2"}},
         })
@@ -676,7 +676,7 @@ function RunComprehensiveTests()
 
     -- Test: sendRealtimeMessage - Send custom message
     testExport("sendRealtimeMessage() - Custom topic", function()
-        local sentCount = exports['pb']:sendRealtimeMessage("test_topic", {
+        local sentCount = exports['tDB']:sendRealtimeMessage("test_topic", {
             message = "Hello from tests!",
             timestamp = os.time()
         })
@@ -689,7 +689,7 @@ function RunComprehensiveTests()
 
     -- Test: getRealtimeClients - Get connected clients
     testExport("getRealtimeClients() - List clients", function()
-        local clients = exports['pb']:getRealtimeClients()
+        local clients = exports['tDB']:getRealtimeClients()
         if type(clients) ~= "table" then
             error("getRealtimeClients() didn't return a table")
         end
@@ -705,7 +705,7 @@ function RunComprehensiveTests()
 
     -- Test: sendEmail (will likely fail without SMTP configured, so silenced)
     testExport("sendEmail() - Send test email", function()
-        local success = exports['pb']:sendEmail(
+        local success = exports['tDB']:sendEmail(
             "test@example.com",
             "PocketBase Test Email",
             "<h1>Test Email</h1><p>This is a test email from PocketBase.</p>",
@@ -722,7 +722,7 @@ function RunComprehensiveTests()
 
     -- Test: awaitConnection - Wait for connection
     testExport("awaitConnection() - Wait for connection", function()
-        local connected = exports['pb']:awaitConnection()
+        local connected = exports['tDB']:awaitConnection()
         if not connected then
             error("Could not connect")
         end
@@ -733,7 +733,7 @@ function RunComprehensiveTests()
     -- Test: store - Store query for later use (compatibility)
     testExport("store() - Store query", function()
         local storedQuery = nil
-        exports['pb']:store('SELECT * FROM ' .. DEMO_COLLECTION, function(query)
+        exports['tDB']:store('SELECT * FROM ' .. DEMO_COLLECTION, function(query)
             storedQuery = query
         end)
         if not storedQuery then
@@ -745,7 +745,7 @@ function RunComprehensiveTests()
 
     -- Test: query - SELECT query with parameters
     local queryResults = testExport("query() - SELECT with parameters", function()
-        local results = exports['pb']:query('SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE name = ?', {'Test Player'})
+        local results = exports['tDB']:query('SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE name = ?', {'Test Player'})
         if not results or #results == 0 then
             error("Query returned no results")
         end
@@ -755,7 +755,7 @@ function RunComprehensiveTests()
 
     -- Test: fetch - Alias for query
     testExport("fetch() - SELECT (alias for query)", function()
-        local results = exports['pb']:fetch('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 3', {})
+        local results = exports['tDB']:fetch('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 3', {})
         if not results then
             error("Fetch query failed")
         end
@@ -765,7 +765,7 @@ function RunComprehensiveTests()
 
     -- Test: query_async - Async variant
     testExport("query_async() - SELECT async", function()
-        local results = exports['pb']:query_async('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 5', {})
+        local results = exports['tDB']:query_async('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 5', {})
         if not results then
             error("Async query failed")
         end
@@ -775,7 +775,7 @@ function RunComprehensiveTests()
 
     -- Test: querySync - Sync variant
     testExport("querySync() - SELECT sync", function()
-        local results = exports['pb']:querySync('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 2', {})
+        local results = exports['tDB']:querySync('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 2', {})
         if not results then
             error("Sync query failed")
         end
@@ -785,7 +785,7 @@ function RunComprehensiveTests()
 
     -- Test: single - Get single row
     testExport("single() - Get single record", function()
-        local result = exports['pb']:single('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 1', {})
+        local result = exports['tDB']:single('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 1', {})
         if not result then
             error("Single query returned no result")
         end
@@ -796,7 +796,7 @@ function RunComprehensiveTests()
     -- Test: single with callback
     testExport("single() - With callback", function()
         local callbackResult = nil
-        exports['pb']:single('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 1', {}, function(result)
+        exports['tDB']:single('SELECT * FROM ' .. DEMO_COLLECTION .. ' LIMIT 1', {}, function(result)
             callbackResult = result
         end)
         Wait(100) -- Give callback time to execute
@@ -809,7 +809,7 @@ function RunComprehensiveTests()
 
     -- Test: scalar - Get single value
     testExport("scalar() - Get count", function()
-        local count = exports['pb']:scalar('SELECT COUNT(*) FROM ' .. DEMO_COLLECTION, {})
+        local count = exports['tDB']:scalar('SELECT COUNT(*) FROM ' .. DEMO_COLLECTION, {})
         if not count then
             error("Scalar query returned no value")
         end
@@ -819,7 +819,7 @@ function RunComprehensiveTests()
 
     -- Test: scalar - Get specific column
     testExport("scalar() - Get specific column value", function()
-        local name = exports['pb']:scalar('SELECT name FROM ' .. DEMO_COLLECTION .. ' LIMIT 1', {})
+        local name = exports['tDB']:scalar('SELECT name FROM ' .. DEMO_COLLECTION .. ' LIMIT 1', {})
         if not name then
             error("Scalar query returned no value")
         end
@@ -829,7 +829,7 @@ function RunComprehensiveTests()
 
     -- Test: insert - Insert new record via SQL
     local insertedId = testExport("insert() - INSERT record", function()
-        local id = exports['pb']:insert(
+        local id = exports['tDB']:insert(
             'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)',
             {'OxMySQL Test', 'oxmysql_test_1'}
         )
@@ -842,7 +842,7 @@ function RunComprehensiveTests()
 
     -- Test: insert_async - Async insert
     local insertedId2 = testExport("insert_async() - INSERT async", function()
-        local id = exports['pb']:insert_async(
+        local id = exports['tDB']:insert_async(
             'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)',
             {'OxMySQL Test 2', 'oxmysql_test_2'}
         )
@@ -856,7 +856,7 @@ function RunComprehensiveTests()
     -- Test: update - Update record via SQL
     if insertedId then
         testExport("update() - UPDATE record", function()
-            local affectedRows = exports['pb']:update(
+            local affectedRows = exports['tDB']:update(
                 'UPDATE ' .. DEMO_COLLECTION .. ' SET name = ? WHERE id = ?',
                 {'OxMySQL Updated', insertedId}
             )
@@ -870,7 +870,7 @@ function RunComprehensiveTests()
 
     -- Test: update with complex WHERE
     testExport("update() - UPDATE with complex WHERE", function()
-        local affectedRows = exports['pb']:update(
+        local affectedRows = exports['tDB']:update(
             'UPDATE ' .. DEMO_COLLECTION .. ' SET level = ? WHERE level >= ? AND active = ?',
             {10, 1, true}
         )
@@ -880,7 +880,7 @@ function RunComprehensiveTests()
 
     -- Test: SELECT with complex WHERE and ORDER BY
     testExport("query() - Complex SELECT with WHERE and ORDER BY", function()
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT name, level FROM ' .. DEMO_COLLECTION .. ' WHERE level >= ? ORDER BY level',
             {1}
         )
@@ -893,7 +893,7 @@ function RunComprehensiveTests()
 
     -- Test: SELECT with LIMIT
     testExport("query() - SELECT with LIMIT", function()
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level > ? LIMIT 2',
             {0}
         )
@@ -906,7 +906,7 @@ function RunComprehensiveTests()
 
     -- Test: prepare - Prepared statement
     testExport("prepare() - Prepared statement", function()
-        local results = exports['pb']:prepare('SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE name = ?', {'Test Player'})
+        local results = exports['tDB']:prepare('SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE name = ?', {'Test Player'})
         if not results then
             error("Prepare query failed")
         end
@@ -916,7 +916,7 @@ function RunComprehensiveTests()
 
     -- Test: Named parameters (deprecated @name syntax)
     testExport("query() - Named parameters", function()
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE name = @playerName',
             {playerName = 'Test Player'}
         )
@@ -929,7 +929,7 @@ function RunComprehensiveTests()
 
     -- Test: Comparison operators - Greater than
     testExport("query() - Greater than operator", function()
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level > ?',
             {5}
         )
@@ -942,7 +942,7 @@ function RunComprehensiveTests()
 
     -- Test: Comparison operators - Less than or equal
     testExport("query() - Less than or equal operator", function()
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level <= ?',
             {10}
         )
@@ -955,7 +955,7 @@ function RunComprehensiveTests()
 
     -- Test: Comparison operators - Not equal
     testExport("query() - Not equal operator", function()
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE name != ?',
             {'NonExistentName'}
         )
@@ -968,7 +968,7 @@ function RunComprehensiveTests()
 
     -- Test: LIKE operator
     testExport("query() - LIKE operator", function()
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE name LIKE ?',
             {'%Test%'}
         )
@@ -983,12 +983,12 @@ function RunComprehensiveTests()
     testExport("query() - IN operator", function()
         -- First insert test records with known levels
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'IN Test 1', 'in_test_1', 1})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'IN Test 2', 'in_test_2', 5})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'IN Test 3', 'in_test_3', 10})
-        testIds[4] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'IN Test 4', 'in_test_4', 15})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'IN Test 1', 'in_test_1', 1})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'IN Test 2', 'in_test_2', 5})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'IN Test 3', 'in_test_3', 10})
+        testIds[4] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'IN Test 4', 'in_test_4', 15})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level IN (1, 5, 10)',
             {}
         )
@@ -1010,7 +1010,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1020,12 +1020,12 @@ function RunComprehensiveTests()
     testExport("query() - BETWEEN operator", function()
         -- Insert test records
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'BETWEEN Test 1', 'between_test_1', 0})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'BETWEEN Test 2', 'between_test_2', 5})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'BETWEEN Test 3', 'between_test_3', 10})
-        testIds[4] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'BETWEEN Test 4', 'between_test_4', 15})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'BETWEEN Test 1', 'between_test_1', 0})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'BETWEEN Test 2', 'between_test_2', 5})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'BETWEEN Test 3', 'between_test_3', 10})
+        testIds[4] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'BETWEEN Test 4', 'between_test_4', 15})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level BETWEEN 1 AND 10',
             {}
         )
@@ -1044,7 +1044,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1057,10 +1057,10 @@ function RunComprehensiveTests()
         -- So we test that IS NULL converts to "= null" syntax (even though it won't match anything)
 
         -- Insert record without level field (will default to 0)
-        local testId1 = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'NULL Test 1', 'null_test_1'})
+        local testId1 = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'NULL Test 1', 'null_test_1'})
 
         -- Check what was actually inserted - level should be 0 (default)
-        local checkResult = exports['pb']:single('SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE id = ?', {testId1})
+        local checkResult = exports['tDB']:single('SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE id = ?', {testId1})
 
         if not checkResult then
             error("Could not retrieve inserted record")
@@ -1072,7 +1072,7 @@ function RunComprehensiveTests()
         end
 
         -- Now test IS NULL query - should return 0 results because PocketBase doesn't have NULL
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level IS NULL',
             {}
         )
@@ -1085,7 +1085,7 @@ function RunComprehensiveTests()
         print("  IS NULL correctly converts syntax (returns 0 results as expected - PocketBase uses zero-defaults)")
 
         -- Cleanup
-        pcall(function() exports['pb']:delete(DEMO_COLLECTION, testId1) end)
+        pcall(function() exports['tDB']:delete(DEMO_COLLECTION, testId1) end)
 
         return true
     end)
@@ -1094,10 +1094,10 @@ function RunComprehensiveTests()
     testExport("query() - IS NOT NULL operator", function()
         -- Insert records with name (name is required field, so we must provide it)
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'Has Name', 'not_null_test_1'})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'Also Has Name', 'not_null_test_2'})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'Has Name', 'not_null_test_1'})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'Also Has Name', 'not_null_test_2'})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE name IS NOT NULL',
             {}
         )
@@ -1122,7 +1122,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1131,25 +1131,25 @@ function RunComprehensiveTests()
     -- Test: LIMIT with OFFSET
     testExport("query() - LIMIT with OFFSET", function()
         -- First, clean up any existing test records
-        local cleanup = exports['pb']:query(
+        local cleanup = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ?',
             {'%offset_test_%'}
         )
         for _, record in ipairs(cleanup) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, record.id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, record.id) end)
         end
 
         -- Insert records with known order
         local testIds = {}
         for i = 1, 10 do
-            testIds[i] = exports['pb']:insert(
+            testIds[i] = exports['tDB']:insert(
                 'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)',
                 {'OFFSET Test ' .. i, 'offset_test_' .. i, i}
             )
         end
 
         -- Get all records ordered by level
-        local allResults = exports['pb']:query(
+        local allResults = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ? ORDER BY level',
             {'%offset_test_%'}
         )
@@ -1160,7 +1160,7 @@ function RunComprehensiveTests()
             print("  DEBUG: First 3 levels: " .. allResults[1].level .. ", " .. allResults[2].level .. ", " .. allResults[3].level)
         end
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ? ORDER BY level LIMIT 5 OFFSET 2',
             {'%offset_test_%'}
         )
@@ -1191,7 +1191,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1201,11 +1201,11 @@ function RunComprehensiveTests()
     testExport("query() - DISTINCT", function()
         -- Insert duplicate level values
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'DISTINCT Test 1', 'distinct_test_1', 99})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'DISTINCT Test 2', 'distinct_test_2', 99})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'DISTINCT Test 3', 'distinct_test_3', 99})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'DISTINCT Test 1', 'distinct_test_1', 99})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'DISTINCT Test 2', 'distinct_test_2', 99})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'DISTINCT Test 3', 'distinct_test_3', 99})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT DISTINCT level FROM ' .. DEMO_COLLECTION .. ' WHERE level = 99',
             {}
         )
@@ -1226,7 +1226,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1236,11 +1236,11 @@ function RunComprehensiveTests()
     testExport("query() - Multiple ORDER BY", function()
         -- Insert records with same level but different names
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Zebra', 'order_test_1', 50})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Alpha', 'order_test_2', 50})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Beta', 'order_test_3', 50})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Zebra', 'order_test_1', 50})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Alpha', 'order_test_2', 50})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Beta', 'order_test_3', 50})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level = 50 ORDER BY level DESC, name ASC',
             {}
         )
@@ -1259,7 +1259,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1269,11 +1269,11 @@ function RunComprehensiveTests()
     testExport("query() - SUM aggregation", function()
         -- Insert records with known values
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'SUM Test 1', 'sum_test_1', 10})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'SUM Test 2', 'sum_test_2', 20})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'SUM Test 3', 'sum_test_3', 30})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'SUM Test 1', 'sum_test_1', 10})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'SUM Test 2', 'sum_test_2', 20})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'SUM Test 3', 'sum_test_3', 30})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT SUM(level) as total_level FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ?',
             {'%sum_test_%'}
         )
@@ -1291,7 +1291,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1301,11 +1301,11 @@ function RunComprehensiveTests()
     testExport("query() - AVG aggregation", function()
         -- Insert records with known values
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'AVG Test 1', 'avg_test_1', 10})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'AVG Test 2', 'avg_test_2', 20})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'AVG Test 3', 'avg_test_3', 30})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'AVG Test 1', 'avg_test_1', 10})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'AVG Test 2', 'avg_test_2', 20})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'AVG Test 3', 'avg_test_3', 30})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT AVG(level) as avg_level FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ?',
             {'%avg_test_%'}
         )
@@ -1323,7 +1323,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1333,11 +1333,11 @@ function RunComprehensiveTests()
     testExport("query() - MIN aggregation", function()
         -- Insert records with known values
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MIN Test 1', 'min_test_1', 100})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MIN Test 2', 'min_test_2', 5})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MIN Test 3', 'min_test_3', 50})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MIN Test 1', 'min_test_1', 100})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MIN Test 2', 'min_test_2', 5})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MIN Test 3', 'min_test_3', 50})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT MIN(level) as min_level FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ?',
             {'%min_test_%'}
         )
@@ -1355,7 +1355,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1365,11 +1365,11 @@ function RunComprehensiveTests()
     testExport("query() - MAX aggregation", function()
         -- Insert records with known values
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MAX Test 1', 'max_test_1', 100})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MAX Test 2', 'max_test_2', 5})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MAX Test 3', 'max_test_3', 50})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MAX Test 1', 'max_test_1', 100})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MAX Test 2', 'max_test_2', 5})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MAX Test 3', 'max_test_3', 50})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT MAX(level) as max_level FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ?',
             {'%max_test_%'}
         )
@@ -1387,7 +1387,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1397,11 +1397,11 @@ function RunComprehensiveTests()
     testExport("query() - Multiple aggregations", function()
         -- Insert records with known values
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MULTI Test 1', 'multi_test_1', 10})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MULTI Test 2', 'multi_test_2', 20})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MULTI Test 3', 'multi_test_3', 30})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MULTI Test 1', 'multi_test_1', 10})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MULTI Test 2', 'multi_test_2', 20})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'MULTI Test 3', 'multi_test_3', 30})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT COUNT(*) as count, SUM(level) as total, AVG(level) as average FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ?',
             {'%multi_test_%'}
         )
@@ -1426,7 +1426,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1436,11 +1436,11 @@ function RunComprehensiveTests()
     testExport("prepare() - Multiple parameter sets", function()
         -- Insert test records
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'PREP Test 1', 'prep_test_1', 11})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'PREP Test 2', 'prep_test_2', 22})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'PREP Test 3', 'prep_test_3', 33})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'PREP Test 1', 'prep_test_1', 11})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'PREP Test 2', 'prep_test_2', 22})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'PREP Test 3', 'prep_test_3', 33})
 
-        local results = exports['pb']:prepare(
+        local results = exports['tDB']:prepare(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level = ?',
             {{11}, {22}, {33}}
         )
@@ -1468,7 +1468,7 @@ function RunComprehensiveTests()
 
         -- Cleanup
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1482,9 +1482,9 @@ function RunComprehensiveTests()
 
     -- Test: UPPER function
     testExport("query() - UPPER function", function()
-        local testId = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'lowercase name', 'upper_test_1', 1})
+        local testId = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'lowercase name', 'upper_test_1', 1})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT UPPER(name) AS upper_name FROM ' .. DEMO_COLLECTION .. ' WHERE identifier = ?',
             {'upper_test_1'}
         )
@@ -1499,15 +1499,15 @@ function RunComprehensiveTests()
 
         print("  UPPER correctly converted: " .. results[1].upper_name)
 
-        pcall(function() exports['pb']:delete(DEMO_COLLECTION, testId) end)
+        pcall(function() exports['tDB']:delete(DEMO_COLLECTION, testId) end)
         return results
     end)
 
     -- Test: LOWER function
     testExport("query() - LOWER function", function()
-        local testId = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'UPPERCASE NAME', 'lower_test_1', 1})
+        local testId = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'UPPERCASE NAME', 'lower_test_1', 1})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT LOWER(name) AS lower_name FROM ' .. DEMO_COLLECTION .. ' WHERE identifier = ?',
             {'lower_test_1'}
         )
@@ -1522,15 +1522,15 @@ function RunComprehensiveTests()
 
         print("  LOWER correctly converted: " .. results[1].lower_name)
 
-        pcall(function() exports['pb']:delete(DEMO_COLLECTION, testId) end)
+        pcall(function() exports['tDB']:delete(DEMO_COLLECTION, testId) end)
         return results
     end)
 
     -- Test: CONCAT function
     testExport("query() - CONCAT function", function()
-        local testId = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'John', 'concat_test_1', 5})
+        local testId = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'John', 'concat_test_1', 5})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT CONCAT(name, " - Level ", level) AS full_info FROM ' .. DEMO_COLLECTION .. ' WHERE identifier = ?',
             {'concat_test_1'}
         )
@@ -1545,15 +1545,15 @@ function RunComprehensiveTests()
 
         print("  CONCAT correctly combined: " .. results[1].full_info)
 
-        pcall(function() exports['pb']:delete(DEMO_COLLECTION, testId) end)
+        pcall(function() exports['tDB']:delete(DEMO_COLLECTION, testId) end)
         return results
     end)
 
     -- Test: LENGTH function
     testExport("query() - LENGTH function", function()
-        local testId = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Hello', 'length_test_1', 1})
+        local testId = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Hello', 'length_test_1', 1})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT LENGTH(name) AS name_length FROM ' .. DEMO_COLLECTION .. ' WHERE identifier = ?',
             {'length_test_1'}
         )
@@ -1568,7 +1568,7 @@ function RunComprehensiveTests()
 
         print("  LENGTH correctly calculated: " .. tostring(results[1].name_length))
 
-        pcall(function() exports['pb']:delete(DEMO_COLLECTION, testId) end)
+        pcall(function() exports['tDB']:delete(DEMO_COLLECTION, testId) end)
         return results
     end)
 
@@ -1582,24 +1582,24 @@ function RunComprehensiveTests()
     testExport("query() - GROUP BY with COUNT", function()
         -- Clean up any stale test data first
         pcall(function()
-            local staleRecords = exports['pb']:query(
+            local staleRecords = exports['tDB']:query(
                 'SELECT id FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ?',
                 {'%group_test_%'}
             )
             if staleRecords then
                 for _, record in ipairs(staleRecords) do
-                    pcall(function() exports['pb']:delete(DEMO_COLLECTION, record.id) end)
+                    pcall(function() exports['tDB']:delete(DEMO_COLLECTION, record.id) end)
                 end
             end
         end)
 
         -- Insert test records with different levels
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Group 1 User 1', 'group_test_1', 10})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Group 1 User 2', 'group_test_2', 10})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Group 2 User 1', 'group_test_3', 20})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Group 1 User 1', 'group_test_1', 10})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Group 1 User 2', 'group_test_2', 10})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Group 2 User 1', 'group_test_3', 20})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT level, COUNT(*) AS count FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ? GROUP BY level',
             {'%group_test_%'}
         )
@@ -1634,7 +1634,7 @@ function RunComprehensiveTests()
         print("  GROUP BY correctly grouped and counted: Level 10=" .. level10Count .. ", Level 20=" .. level20Count)
 
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1644,23 +1644,23 @@ function RunComprehensiveTests()
     testExport("query() - GROUP BY with SUM and AVG", function()
         -- Clean up any stale test data first
         pcall(function()
-            local staleRecords = exports['pb']:query(
+            local staleRecords = exports['tDB']:query(
                 'SELECT id FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ?',
                 {'%groupagg_test_%'}
             )
             if staleRecords then
                 for _, record in ipairs(staleRecords) do
-                    pcall(function() exports['pb']:delete(DEMO_COLLECTION, record.id) end)
+                    pcall(function() exports['tDB']:delete(DEMO_COLLECTION, record.id) end)
                 end
             end
         end)
 
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level, playtime) VALUES (?, ?, ?, ?)', {'Player 1', 'groupagg_test_1', 1, 100})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level, playtime) VALUES (?, ?, ?, ?)', {'Player 2', 'groupagg_test_2', 1, 200})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level, playtime) VALUES (?, ?, ?, ?)', {'Player 3', 'groupagg_test_3', 2, 300})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level, playtime) VALUES (?, ?, ?, ?)', {'Player 1', 'groupagg_test_1', 1, 100})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level, playtime) VALUES (?, ?, ?, ?)', {'Player 2', 'groupagg_test_2', 1, 200})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level, playtime) VALUES (?, ?, ?, ?)', {'Player 3', 'groupagg_test_3', 2, 300})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT level, COUNT(*) AS player_count, SUM(playtime) AS total_time, AVG(playtime) AS avg_time FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ? GROUP BY level',
             {'%groupagg_test_%'}
         )
@@ -1695,7 +1695,7 @@ function RunComprehensiveTests()
         print("  GROUP BY with multiple aggregations correct: COUNT=" .. level1.player_count .. ", SUM=" .. level1.total_time .. ", AVG=" .. level1.avg_time)
 
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1710,11 +1710,11 @@ function RunComprehensiveTests()
     -- Test: IN subquery
     testExport("query() - IN subquery", function()
         local testIds = {}
-        testIds[1] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Subquery User 1', 'subquery_test_1', 50})
-        testIds[2] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Subquery User 2', 'subquery_test_2', 51})
-        testIds[3] = exports['pb']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Subquery User 3', 'subquery_test_3', 52})
+        testIds[1] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Subquery User 1', 'subquery_test_1', 50})
+        testIds[2] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Subquery User 2', 'subquery_test_2', 51})
+        testIds[3] = exports['tDB']:insert('INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier, level) VALUES (?, ?, ?)', {'Subquery User 3', 'subquery_test_3', 52})
 
-        local results = exports['pb']:query(
+        local results = exports['tDB']:query(
             'SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level IN (SELECT level FROM ' .. DEMO_COLLECTION .. ' WHERE identifier LIKE ? AND level > 50)',
             {'%subquery_test_%'}
         )
@@ -1739,7 +1739,7 @@ function RunComprehensiveTests()
         print("  IN subquery correctly filtered: found " .. #results .. " records with levels > 50")
 
         for _, id in ipairs(testIds) do
-            pcall(function() exports['pb']:delete(DEMO_COLLECTION, id) end)
+            pcall(function() exports['tDB']:delete(DEMO_COLLECTION, id) end)
         end
 
         return results
@@ -1747,7 +1747,7 @@ function RunComprehensiveTests()
 
     -- Test: rawExecute - Raw execute
     testExport("rawExecute() - Raw execute query", function()
-        local results = exports['pb']:rawExecute('SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level > ?', {0})
+        local results = exports['tDB']:rawExecute('SELECT * FROM ' .. DEMO_COLLECTION .. ' WHERE level > ?', {0})
         if not results then
             error("rawExecute query failed")
         end
@@ -1757,7 +1757,7 @@ function RunComprehensiveTests()
 
     -- Test: rawExecute_async - Async raw execute
     testExport("rawExecute_async() - Raw execute async", function()
-        local results = exports['pb']:rawExecute_async('SELECT name FROM ' .. DEMO_COLLECTION .. ' LIMIT 3', {})
+        local results = exports['tDB']:rawExecute_async('SELECT name FROM ' .. DEMO_COLLECTION .. ' LIMIT 3', {})
         if not results then
             error("rawExecute_async failed")
         end
@@ -1767,7 +1767,7 @@ function RunComprehensiveTests()
 
     -- Test: DELETE query
     local deleteTestId = testExport("insert() - Create record for DELETE test", function()
-        local id = exports['pb']:insert(
+        local id = exports['tDB']:insert(
             'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)',
             {'Delete Test', 'delete_test_1'}
         )
@@ -1776,7 +1776,7 @@ function RunComprehensiveTests()
 
     if deleteTestId then
         testExport("execute() - DELETE query", function()
-            local affectedRows = exports['pb']:execute(
+            local affectedRows = exports['tDB']:execute(
                 'DELETE FROM ' .. DEMO_COLLECTION .. ' WHERE id = ?',
                 {deleteTestId}
             )
@@ -1794,7 +1794,7 @@ function RunComprehensiveTests()
             {'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'TX Test 1', 'tx_1'}},
             {'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'TX Test 2', 'tx_2'}},
         }
-        local results = exports['pb']:transaction(queries)
+        local results = exports['tDB']:transaction(queries)
         if not results then
             error("Transaction failed")
         end
@@ -1808,7 +1808,7 @@ function RunComprehensiveTests()
             { query = 'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', values = {'TX Test 3', 'tx_3'}},
             { query = 'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', values = {'TX Test 4', 'tx_4'}},
         }
-        local results = exports['pb']:transaction(queries)
+        local results = exports['tDB']:transaction(queries)
         if not results then
             error("Transaction with object format failed")
         end
@@ -1822,7 +1822,7 @@ function RunComprehensiveTests()
             'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES ("TX Test 5", "tx_5")',
             'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES ("TX Test 6", "tx_6")',
         }
-        local results = exports['pb']:transaction(queries)
+        local results = exports['tDB']:transaction(queries)
         if not results then
             error("Transaction with string array failed")
         end
@@ -1836,7 +1836,7 @@ function RunComprehensiveTests()
             {'INSERT INTO ' .. DEMO_COLLECTION .. ' (name, identifier) VALUES (?, ?)', {'TX Mixed 1', 'tx_mixed_1'}},
             {'UPDATE ' .. DEMO_COLLECTION .. ' SET level = ? WHERE identifier = ?', {99, 'tx_mixed_1'}},
         }
-        local results = exports['pb']:transaction(queries)
+        local results = exports['tDB']:transaction(queries)
         if not results or #results ~= 2 then
             error("Mixed transaction failed")
         end
@@ -1846,7 +1846,7 @@ function RunComprehensiveTests()
 
     -- Test: execute - Generic execute (alias for query/update)
     testExport("execute() - Generic execute", function()
-        local result = exports['pb']:execute(
+        local result = exports['tDB']:execute(
             'UPDATE ' .. DEMO_COLLECTION .. ' SET name = ? WHERE identifier = ?',
             {'Execute Test', 'oxmysql_test_1'}
         )
@@ -1856,7 +1856,7 @@ function RunComprehensiveTests()
 
     -- Test: executeSync - Sync variant
     testExport("executeSync() - Execute sync", function()
-        local result = exports['pb']:executeSync(
+        local result = exports['tDB']:executeSync(
             'UPDATE ' .. DEMO_COLLECTION .. ' SET level = ? WHERE identifier = ?',
             {50, 'oxmysql_test_2'}
         )
@@ -1867,12 +1867,12 @@ function RunComprehensiveTests()
     -- Cleanup OxMySQL test records
     if insertedId then
         pcall(function()
-            exports['pb']:delete(DEMO_COLLECTION, insertedId)
+            exports['tDB']:delete(DEMO_COLLECTION, insertedId)
         end)
     end
     if insertedId2 then
         pcall(function()
-            exports['pb']:delete(DEMO_COLLECTION, insertedId2)
+            exports['tDB']:delete(DEMO_COLLECTION, insertedId2)
         end)
     end
 
@@ -1880,9 +1880,9 @@ function RunComprehensiveTests()
     local txIdentifiers = {'tx_1', 'tx_2', 'tx_3', 'tx_4', 'tx_5', 'tx_6', 'tx_mixed_1'}
     for _, identifier in ipairs(txIdentifiers) do
         pcall(function()
-            local records = exports['pb']:getFullList(DEMO_COLLECTION, {filter = 'identifier = "' .. identifier .. '"'})
+            local records = exports['tDB']:getFullList(DEMO_COLLECTION, {filter = 'identifier = "' .. identifier .. '"'})
             for _, record in ipairs(records) do
-                exports['pb']:delete(DEMO_COLLECTION, record.id)
+                exports['tDB']:delete(DEMO_COLLECTION, record.id)
             end
         end)
     end
@@ -1894,7 +1894,7 @@ function RunComprehensiveTests()
     -- Clean up transaction test records
     for _, recordId in ipairs(txRecordIds) do
         pcall(function()
-            exports['pb']:delete(DEMO_COLLECTION, recordId)
+            exports['tDB']:delete(DEMO_COLLECTION, recordId)
         end)
     end
 
@@ -1907,7 +1907,7 @@ function RunComprehensiveTests()
         for _, result in ipairs(batchResults) do
             if result and result.id then
                 pcall(function()
-                    exports['pb']:delete(DEMO_COLLECTION, result.id)
+                    exports['tDB']:delete(DEMO_COLLECTION, result.id)
                 end)
             end
         end
@@ -1916,11 +1916,11 @@ function RunComprehensiveTests()
     -- Test: delete (original record)
     if createdRecordId then
         testExport("delete()", function()
-            local result = exports['pb']:delete(DEMO_COLLECTION, createdRecordId)
+            local result = exports['tDB']:delete(DEMO_COLLECTION, createdRecordId)
             -- Validate deletion succeeded (returns true or nil)
             -- Try to fetch the record to confirm it's deleted
             local success, error = pcall(function()
-                return exports['pb']:getOne(DEMO_COLLECTION, createdRecordId)
+                return exports['tDB']:getOne(DEMO_COLLECTION, createdRecordId)
             end)
             -- If we can still get the record, deletion failed
             if success then
@@ -1934,7 +1934,7 @@ function RunComprehensiveTests()
     -- If you want to delete it, uncomment the following:
     -- if collectionId then
     --     testExport("deleteCollection()", function()
-    --         return exports['pb']:deleteCollection(DEMO_COLLECTION)
+    --         return exports['tDB']:deleteCollection(DEMO_COLLECTION)
     --     end)
     -- end
 

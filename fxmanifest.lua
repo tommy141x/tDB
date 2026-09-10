@@ -1,10 +1,12 @@
 fx_version 'cerulean'
 game 'gta5'
 
-name 'PocketBase'
-description 'Open Source realtime backend in 1 file'
-author 'Tommy Johnston, Gani Georgiev'
-version 'v0.40.3'
+name 'tDB'
+description 'Database resource for FiveM: a drop-in oxmysql replacement backed by PocketBase, with realtime and collection APIs on top'
+author 'Tommy Johnston'
+version '1.0.0'
+
+-- Bundles PocketBase 0.40.3 by Gani Georgiev (MIT). See bin/ and CREDITS.
 
 lua54 'yes'
 node_version '22'
