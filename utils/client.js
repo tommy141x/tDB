@@ -340,6 +340,22 @@
     // Create PocketBase instance with the determined URL
     pb = new PocketBase(pbUrl);
 
+    // The SDK defaults to auto-cancellation: it keys each request by method
+    // and path, and a second request with the same key ABORTS the first. That
+    // is a browser feature - a search box superseding its own in-flight
+    // request - and it is actively wrong here. On a game server, two players
+    // hitting one code path in the same tick is the normal case, and the
+    // loser gets "The request was autocancelled" instead of their data.
+    // Measured before this line existed: 5 of 6 concurrent identical calls
+    // were cancelled (.dev/autocancel.test.js).
+    //
+    // Only one of the adapters' ~31 SDK call sites passed requestKey: null,
+    // so this is set once on the client rather than trusting every site to
+    // remember. It is also the likely source of the "Invalid state: Reader
+    // released" warning at startup: aborting a fetch whose body is mid-read
+    // is exactly what that Node web-streams path trips over.
+    pb.autoCancellation(false);
+
     // Initialize export router with the exports function
     const router = new ExportRouter(exports);
 
