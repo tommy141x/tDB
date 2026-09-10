@@ -283,8 +283,12 @@
    * Authenticate and hand the session to the AuthManager, which keeps the
    * token refreshed for as long as the resource runs.
    */
-  const tryAuthenticate = async () => {
-    authManager = new AuthManager(pb, config.Superuser, clientLogger);
+  const tryAuthenticate = async (credentials) => {
+    authManager = new AuthManager(
+      pb,
+      credentials || config.Superuser,
+      clientLogger,
+    );
 
     isAuthenticated = await authManager.start();
     notifyReady();
@@ -341,6 +345,34 @@
     await tryAuthenticate();
 
     // Emit client status back to server
+    emit("pocketbase:client:ready", {
+      authenticated: isAuthenticated,
+    });
+  });
+
+  /**
+   * Re-authenticate after the server side repairs the superuser account.
+   *
+   * Only the session is rebuilt - the client, adapters and exports stay as they
+   * are, and the previous manager is stopped so its refresh timer is not leaked.
+   */
+  on("pocketbase:server:reauth", async (data) => {
+    if (!pb) return;
+
+    if (authManager) {
+      authManager.stop();
+      authManager = null;
+    }
+
+    // Prefer the credentials the server just provisioned; the local config
+    // cache can predate that rewrite.
+    const credentials =
+      data && data.email && data.password
+        ? { Email: data.email, Password: data.password }
+        : config.Superuser;
+
+    await tryAuthenticate(credentials);
+
     emit("pocketbase:client:ready", {
       authenticated: isAuthenticated,
     });

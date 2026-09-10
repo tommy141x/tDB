@@ -47,6 +47,11 @@ const startupStatus = {
   warnings: [],
 };
 
+// The credentials the local instance is actually provisioned with, kept so a
+// repair can re-apply them, and a latch so repair runs at most once per start.
+let activeSuperuser = null;
+let superuserRepairAttempted = false;
+
 // ============================================================================
 // Configuration
 // ============================================================================
@@ -377,6 +382,32 @@ function generateRandomPassword(length = 20) {
   return crypto.randomBytes(length).toString("base64").slice(0, length);
 }
 
+/**
+ * Run `superuser upsert`, which creates the account or resets its password if
+ * it already exists. Idempotent, so it doubles as the repair operation.
+ */
+async function upsertSuperuser(pbPath, email, password) {
+  const result = await spawnWithTimeout(
+    pbPath,
+    ["superuser", "upsert", email, password, "--dir", config.Advanced.DataDir],
+    { cwd: resourcePath },
+    30000, // Increased timeout for first-time database initialization
+  );
+
+  // A zero exit code alone is not proof: trust it only when PocketBase also
+  // says it saved the record, otherwise a silent failure leaves the instance
+  // with no superuser and `serve` falls back to its interactive installer.
+  const saved =
+    result.code === 0 && /Successfully saved superuser/i.test(result.stdout);
+
+  const detail =
+    (result.stderr || "").trim() ||
+    (result.stdout || "").trim() ||
+    `exit code ${result.code}`;
+
+  return { ok: saved, detail };
+}
+
 async function createSuperuser(pbPath, publicIP) {
   let email = config.Superuser.Email;
   let password = config.Superuser.Password;
@@ -394,36 +425,81 @@ async function createSuperuser(pbPath, publicIP) {
     needsConfigUpdate = true;
   }
 
-  // Always upsert the superuser (create if not exists, update if exists)
-  const result = await spawnWithTimeout(
-    pbPath,
-    ["superuser", "upsert", email, password, "--dir", config.Advanced.DataDir],
-    { cwd: resourcePath },
-    30000, // Increased timeout for first-time database initialization
-  );
+  // Remember the credentials the instance is actually provisioned with, so a
+  // later repair can re-apply exactly these.
+  activeSuperuser = { email, password };
 
-  if (
-    result.code === 0 ||
-    result.stdout.includes("Successfully saved superuser")
-  ) {
-    // Update config file with generated credentials (only if we generated them)
-    if (needsConfigUpdate) {
-      const updated = configLoader.updateSuperuserCredentials(email, password);
-      if (!updated) {
-        startupStatus.warnings.push("Failed to save credentials to config.lua");
-      }
-      // Store for display (only if newly generated)
-      startupStatus.superuserEmail = email;
-      startupStatus.superuserPassword = password;
+  let attempt = await upsertSuperuser(pbPath, email, password);
+
+  // One retry: on a cold start the first call can race the database file
+  // being created.
+  if (!attempt.ok) {
+    logger.debug(`Superuser provisioning retrying (${attempt.detail})`);
+    attempt = await upsertSuperuser(pbPath, email, password);
+  }
+
+  if (!attempt.ok) {
+    startupStatus.errors.push(`Failed to configure superuser: ${attempt.detail}`);
+    return false;
+  }
+
+  // Update config file with generated credentials (only if we generated them)
+  if (needsConfigUpdate) {
+    const updated = configLoader.updateSuperuserCredentials(email, password);
+    if (!updated) {
+      startupStatus.warnings.push("Failed to save credentials to config.lua");
     }
+    // Store for display (only if newly generated)
+    startupStatus.superuserEmail = email;
+    startupStatus.superuserPassword = password;
+  }
 
-    return true;
-  } else {
-    startupStatus.errors.push(
-      `Failed to configure superuser (code ${result.code})`,
+  return true;
+}
+
+/**
+ * Re-provision the superuser against a running instance and ask the client to
+ * authenticate again.
+ *
+ * PocketBase reads superusers from the database on each request, so this takes
+ * effect without a restart. It exists so the resource can never strand a server
+ * owner on the web installer: the resource has to work headless, with the admin
+ * UI staying optional.
+ */
+async function repairSuperuser(pbPath, reason) {
+  if (superuserRepairAttempted) return false;
+  superuserRepairAttempted = true;
+
+  if (!activeSuperuser) {
+    startupStatus.warnings.push(
+      "Superuser repair skipped - no credentials resolved",
     );
     return false;
   }
+
+  logger.warn(`Repairing superuser account (${reason})`);
+
+  const attempt = await upsertSuperuser(
+    pbPath,
+    activeSuperuser.email,
+    activeSuperuser.password,
+  );
+
+  if (!attempt.ok) {
+    startupStatus.errors.push(`Superuser repair failed: ${attempt.detail}`);
+    return false;
+  }
+
+  logger.info("Superuser account repaired - re-authenticating");
+
+  // Hand the credentials over explicitly rather than letting the client re-read
+  // config.lua: its loader caches on first load, so it may still hold the
+  // values from before provisioning rewrote them.
+  emit("pocketbase:server:reauth", {
+    email: activeSuperuser.email,
+    password: activeSuperuser.password,
+  });
+  return true;
 }
 
 // ============================================================================
@@ -919,12 +995,19 @@ async function startPocketBase() {
         continue;
       }
 
-      // Suppress first time setup messages - we handle superuser creation via CLI
+      // PocketBase only prints its installer banner when the instance has no
+      // superuser at all. Since one is provisioned before `serve`, seeing this
+      // means provisioning silently failed - so repair it rather than hiding
+      // it. Suppressing the line (as this used to do) left the owner staring
+      // at a setup page the resource is supposed to make unnecessary.
       if (
         line.includes("Launch the URL below") ||
         line.includes("create your first superuser account") ||
-        line.includes("/_/#/pbinstal/")
+        line.includes("/_/#/pbinstall/")
       ) {
+        if (!superuserRepairAttempted) {
+          repairSuperuser(pbPath, "PocketBase reported no superuser exists");
+        }
         continue;
       }
 
@@ -979,6 +1062,25 @@ async function startPocketBase() {
       });
 
       await clientReadyPromise;
+
+      // A local instance that refuses our own credentials has a missing or
+      // mismatched superuser: re-provision it and give the client one more go,
+      // so a broken pb_data never requires the web installer to recover.
+      if (startupStatus.clientAuthenticated === false) {
+        const repaired = await repairSuperuser(
+          pbPath,
+          "client could not authenticate against the local instance",
+        );
+        if (repaired) {
+          startupStatus.clientAuthenticated = await new Promise((resolve) => {
+            const timeout = setTimeout(() => resolve(false), 5000);
+            on("pocketbase:client:ready", (data) => {
+              clearTimeout(timeout);
+              resolve(data.authenticated);
+            });
+          });
+        }
+      }
 
       // Check if hooks are healthy
       startupStatus.hooksHealthy = await checkHooksHealth(finalUrl);
