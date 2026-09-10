@@ -77,7 +77,16 @@ async function authenticate(url) {
 function serve(dir, port) {
   const proc = spawn(
     PB_BIN,
-    ["serve", `--http=127.0.0.1:${port}`, "--dir", dir],
+    // --migrationsDir inside the throwaway dir: PocketBase defaults it to
+    // `<dataDir>/../pb_migrations`, which every temp dir here would share.
+    [
+      "serve",
+      `--http=127.0.0.1:${port}`,
+      "--dir",
+      dir,
+      "--migrationsDir",
+      path.join(dir, "migrations"),
+    ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
   const output = { text: "" };

@@ -371,11 +371,13 @@ reverse proxy or a tunnel if you can.
 ## Troubleshooting
 
 **"Only superusers can perform this action", repeating in the console.**
-Fixed. PocketBase issues superuser tokens with a ten second lifetime; tDB
-refreshes ahead of expiry, recovers from a rejection automatically, and — on an
-instance it manages — raises that lifetime to a day at startup. If you still see
-it, the credentials in `config.lua` no longer match the database; delete them
-and restart to have them reprovisioned.
+Fixed. PocketBase superuser tokens last a day; the old code authenticated once
+at startup and never replaced the token, so a server left up longer than that
+spammed until it was restarted. tDB now refreshes ahead of expiry — on a
+schedule read from the token itself, so a lifetime you change in the admin UI
+is honoured — and recovers from a rejection automatically. If you still see it,
+the credentials in `config.lua` no longer match the database; delete them and
+restart to have them reprovisioned.
 
 **The PocketBase setup screen opened in my browser.**
 It should never appear. tDB provisions the superuser before PocketBase serves,

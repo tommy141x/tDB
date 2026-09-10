@@ -6,6 +6,13 @@
  *   node .dev/auth-manager.test.js
  *
  * This is a dev harness, not part of the shipped resource.
+ *
+ * It provisions a throwaway data dir, records the stock token lifetime, and
+ * then SHORTENS it on purpose so a token can be watched expiring inside a test
+ * run. That shortening is a fixture and nothing outside this file should read
+ * a duration back out of the dir and call it a default - doing exactly that is
+ * how "PocketBase issues 10 second superuser tokens" got written down as a
+ * measurement. It is 86400. See .dev/probe-duration.js for the clean reading.
  */
 const path = require("path");
 const fs = require("fs");
@@ -99,9 +106,22 @@ async function main() {
   }
   log.info("superuser created");
 
+  // --migrationsDir inside the throwaway dir, not next to it. PocketBase's
+  // default is `<dataDir>/../pb_migrations`, and every throwaway dir here
+  // lives in %TEMP% - so without this, all of them share one migrations
+  // directory. PocketBase writes a migration file for every collection change
+  // it serves, which means this harness's own token-lifetime fixture was being
+  // replayed into the next "virgin" instance, where it read back as a default.
   const server = spawn(
     PB_BIN,
-    ["serve", `--http=127.0.0.1:${PORT}`, "--dir", DATA_DIR],
+    [
+      "serve",
+      `--http=127.0.0.1:${PORT}`,
+      "--dir",
+      DATA_DIR,
+      "--migrationsDir",
+      path.join(DATA_DIR, "migrations"),
+    ],
     { stdio: "ignore" },
   );
 
@@ -121,25 +141,35 @@ async function main() {
     assert(expMs !== null, "getTokenExpiryMs() decodes the exp claim");
 
     const superusers = await probe.collections.getOne("_superusers");
-    const configured = superusers.authToken.duration;
+    const stockDuration = superusers.authToken.duration;
 
     const lifetimeSec = Math.round((expMs - Date.now()) / 1000);
     log.info(
-      `_superusers authToken.duration = ${configured}s; issued token ~${lifetimeSec}s`,
+      `_superusers authToken.duration = ${stockDuration}s; issued token ~${lifetimeSec}s`,
     );
 
-    // The whole bug in one assertion: PocketBase 0.40.3 hands a service
-    // account a token that dies in seconds. Asserted as a bound rather than
-    // exactly 10 so a future release nudging the default doesn't read as a
-    // regression - what matters is that it is far too short to ignore.
+    // Recorded, not relied on. The bug is not that this number is small - on a
+    // virgin 0.40.3 dir it is 86400 - it is that the old code authenticated
+    // once and never replaced the token, so whatever the number is, the
+    // session dies that long after startup and never comes back.
     assert(
-      configured <= 60 && Math.abs(lifetimeSec - configured) <= 2,
-      `superuser token lifetime is ${configured}s out of the box - the cause of the spam`,
+      Math.abs(lifetimeSec - stockDuration) <= 2,
+      `the issued token matches the collection's configured lifetime (${stockDuration}s)`,
     );
 
-    // No need to shrink anything for the tests below: the default is already
-    // short enough to watch expire.
-    const SHORT = configured;
+    // A day is too long to watch expire, so shorten it deliberately for the
+    // sections below. 10 is not a preference - it is the smallest value
+    // PocketBase will accept ("Must be no less than 10.").
+    //
+    // This is a fixture, and it is written down as one: an earlier revision
+    // shortened a dir exactly this way, and a later reading of that same dir
+    // mistook the fixture for PocketBase's default. Hence the odd coincidence
+    // that the "measured default" was also 10.
+    const SHORT = 10;
+    await probe.collections.update("_superusers", {
+      authToken: { duration: SHORT },
+    });
+    log.info(`fixture: _superusers token lifetime shortened to ${SHORT}s`);
 
     // ----------------------------------------------------------------------
     log.step("Reproducing the original bug (authenticate once, never refresh)");
@@ -275,7 +305,7 @@ async function main() {
     assert(mgr.refreshTimer === null, "stop() clears the refresh timer");
 
     // ----------------------------------------------------------------------
-    log.step("Local mode widens the token lifetime instead of living with it");
+    log.step("Local mode restores a lifetime that has been left too short");
 
     // The probe's own token expired many lifetimes ago, which is exactly the
     // race the reauth hook exists for - so exercise it rather than papering
@@ -292,7 +322,7 @@ async function main() {
     );
     assert(
       changed === true,
-      "the 10s default is raised, recovering from the expired token en route",
+      `${SHORT}s is raised back to the floor, recovering from the expired token en route`,
     );
 
     const after = await probe.collections.getOne("_superusers");

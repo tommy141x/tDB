@@ -534,7 +534,14 @@ async function applyPendingMigrations(pbPath) {
   try {
     const result = await spawnWithTimeout(
       pbPath,
-      ["migrate", "up", "--dir", config.Advanced.DataDir],
+      [
+        "migrate",
+        "up",
+        "--dir",
+        config.Advanced.DataDir,
+        "--migrationsDir",
+        config.Migrations.Dir,
+      ],
       { cwd: resourcePath },
       30000,
     );
@@ -952,11 +959,21 @@ async function startPocketBase() {
   await performStartupBackup();
 
   // Build arguments
+  //
+  // --migrationsDir is passed explicitly rather than left to default. Without
+  // it PocketBase derives the directory from the data dir as
+  // `<dataDir>/../pb_migrations`, which makes Config.Migrations.Dir a setting
+  // that silently does nothing - and, for any instance whose data dir is not
+  // under the resource, quietly shares a migrations directory with every other
+  // instance next to it. PocketBase writes a migration file for every
+  // collection change, so a shared directory means one instance's edits are
+  // replayed into the next one that starts.
   const args = [
     "serve",
     `--http=${bindAddress}`,
     `--dir=${config.Advanced.DataDir}`,
     `--publicDir=${config.Advanced.PublicDir}`,
+    `--migrationsDir=${config.Migrations.Dir}`,
   ];
 
   if (config.Advanced.Dev) {

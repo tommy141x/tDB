@@ -2,30 +2,47 @@
  * Superuser auth token lifecycle management.
  *
  * This is the root of the "Only superusers can perform this action" spam.
- * Measured on PocketBase 0.40.3, a freshly provisioned `_superusers`
- * collection carries `authToken: { duration: 10 }` - ten seconds - while
- * ordinary auth collections get 432000. Authenticate once and every call
- * after the tenth second answers 403 with exactly that message, forever,
- * until the resource restarts.
+ * A superuser token expires and nothing ever replaces it: the old code
+ * authenticated once at startup and then held that token for the life of the
+ * process. Every call after expiry answers 403 with exactly that message,
+ * forever, until the resource restarts - which matches the report exactly
+ * ("after a while it's like something expires").
  *
- * (An earlier comment here claimed the default was 86400. It is not; the
- * value above was read back from a running instance and confirmed by
- * decoding the issued JWT and watching a request start failing.)
+ * Measured on a virgin 0.40.3 data dir (.dev/probe-duration.js):
  *
- * Two things follow, and both are needed:
+ *     _superusers.authToken = {"duration": 86400}   // 1 day
+ *     users.authToken       = {"duration": 432000}  // 5 days
+ *     issued JWT: exp - now = 86400, refreshable: true
  *
- *   1. Refresh scheduling must adapt to whatever lifetime the server hands
- *      out, including a very short one. See scheduleRefresh - the delay is
- *      derived from the token's own `exp`, and the floor that stops a busy
- *      loop is deliberately far below any plausible token lifetime, so a
- *      short-lived token still gets a *proactive* refresh rather than a
- *      permanent cycle of expire-fail-recover.
+ * A day is exactly long enough to look like it works. A FiveM server that is
+ * restarted nightly never sees it; one left up over a weekend spams the
+ * console from the first day onward.
  *
- *   2. Where we own the instance, ten seconds is simply the wrong setting.
- *      ensureSuperuserTokenDuration() widens it once at startup so the
- *      steady state is a refresh every few hours, not every few seconds.
- *      A remote instance belongs to somebody else and is left alone; there,
- *      (1) alone keeps the session healthy.
+ * (An earlier version of this comment claimed the default was 10 seconds.
+ * That number came from a data dir an older revision of the test harness had
+ * itself patched down to 10 in order to watch a token expire, and was then
+ * read back as if it were stock. It is 86400. The fix below does not depend
+ * on which of the two it is - that is the point of deriving the schedule from
+ * the token - but the comment should not have asserted a measurement it did
+ * not make cleanly.)
+ *
+ * Two things follow:
+ *
+ *   1. Refresh scheduling adapts to whatever lifetime the server hands out.
+ *      See scheduleRefresh - the delay comes from the token's own `exp`, so
+ *      an operator who shortens or lengthens the setting gets a correct
+ *      schedule without tDB knowing the number. The floor that stops a busy
+ *      loop sits far below any plausible lifetime, so even a very short token
+ *      is refreshed *proactively* rather than in a permanent cycle of
+ *      expire-fail-recover.
+ *
+ *   2. On an instance we own, ensureSuperuserTokenDuration() holds the
+ *      setting at a day or more. Against a stock instance that is a no-op;
+ *      it exists so an instance whose duration was lowered - by an operator
+ *      experimenting in the admin UI, or by tooling - is put back rather than
+ *      quietly re-authenticating every few seconds forever. A remote instance
+ *      belongs to somebody else and is left alone; there, (1) alone keeps the
+ *      session healthy.
  *
  * The token is kept alive along two paths:
  *   - proactively, by refreshing well before `exp` (see scheduleRefresh)
@@ -50,11 +67,10 @@ module.exports = (function () {
   const MAX_REFRESH_DELAY_MS = 6 * 60 * 60 * 1000; // 6h
 
   // Only a floor against busy-looping when `exp` is already in the past. It
-  // must stay well below any real token lifetime: a floor of 30s against
-  // PocketBase's 10s default would put every "proactive" refresh 20s after
-  // the token had already expired, turning the proactive path into a
-  // permanent 403-and-recover cycle - which is the bug this module exists
-  // to prevent.
+  // must stay well below any lifetime an operator might configure: a floor of
+  // 30s against a 10s token would put every "proactive" refresh 20s after the
+  // token had already expired, turning the proactive path into a permanent
+  // 403-and-recover cycle - which is the bug this module exists to prevent.
   const MIN_REFRESH_DELAY_MS = 1000;
 
   // How long to wait before trying again after a re-authentication failed
@@ -65,10 +81,10 @@ module.exports = (function () {
   // Fallback cadence used when a token carries no usable `exp` claim.
   const FALLBACK_REFRESH_MS = 60 * 60 * 1000; // 1h
 
-  // What the `_superusers` token lifetime is widened to on an instance we
-  // manage ourselves. Long enough that refreshing is a background detail
-  // rather than a per-minute round trip, short enough that a leaked token
-  // is not a standing key. Proactive refresh still runs at 75% of it.
+  // The floor tDB holds the `_superusers` token lifetime at on an instance it
+  // manages. This is PocketBase's own default, so on a stock instance the
+  // check finds it already satisfied and changes nothing. It is a floor, not
+  // a target: a longer lifetime an operator chose deliberately is left alone.
   const MANAGED_TOKEN_DURATION_SECONDS = 24 * 60 * 60; // 1 day
 
   const SUPERUSERS_COLLECTION_PATH = "/api/collections/_superusers";
@@ -112,25 +128,29 @@ module.exports = (function () {
   }
 
   /**
-   * Widen the `_superusers` token lifetime on an instance this resource owns.
+   * Hold the `_superusers` token lifetime at a sane floor on an instance this
+   * resource owns.
    *
-   * PocketBase ships this collection with a 10 second token. That is a
-   * defensible default for a browser session that can refresh on demand, but
-   * for a long-lived service account it means an auth round trip every few
-   * seconds for the entire uptime of the server. Since local mode starts and
-   * administers the instance itself, the setting is ours to correct.
+   * PocketBase's own default is 86400s, so against a stock instance this
+   * reads the collection, sees the floor is already met, and returns false
+   * having changed nothing. It earns its place on an instance where the value
+   * has been lowered - by an operator trying something in the admin UI, or by
+   * tooling - because a service account on a short token means an auth round
+   * trip every few seconds for the entire uptime of the server.
    *
-   * Deliberately not applied to a remote instance: that database belongs to
-   * somebody else, and silently changing a global security setting on it
-   * would be overreach. Adaptive refresh covers that case instead.
+   * Only ever raises. A longer lifetime somebody chose on purpose is left
+   * alone, and so is a remote instance: that database belongs to somebody
+   * else, and silently changing a global security setting on it would be
+   * overreach. Adaptive refresh covers that case instead.
    *
    * Failure here is not fatal - it only means refreshes stay frequent - so
    * this reports the outcome rather than throwing.
    *
    * @param {Function} [reauth] Called once if the request is rejected for
-   *   authentication. This is not paranoia: with a 10 second token, the very
-   *   call that fixes the 10 second token can be the one that outlives it.
-   * @returns {Promise<boolean>} true if the duration was changed, which
+   *   authentication. Not paranoia: on the instance this is worth running
+   *   against, the token is short, so the very call that fixes the short
+   *   token can be the one that outlives it.
+   * @returns {Promise<boolean>} true if the duration was raised, which
    *   invalidates nothing but does leave the caller holding a short token
    *   that is worth replacing.
    */

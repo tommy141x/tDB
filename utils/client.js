@@ -306,9 +306,10 @@
   };
 
   /**
-   * On a local instance, correct PocketBase's 10 second superuser token
-   * lifetime before settling into the refresh loop. A remote instance is left
-   * exactly as its owner configured it.
+   * On a local instance, make sure the superuser token lifetime has not been
+   * left at some very short value before settling into the refresh loop.
+   * Normally a no-op - PocketBase's default already clears the floor. A remote
+   * instance is left exactly as its owner configured it.
    */
   const applyManagedTokenLifetime = async () => {
     if (isRemoteMode) return;
@@ -318,7 +319,7 @@
     );
 
     // The token already in hand was minted under the old duration, so trade
-    // it in - otherwise the refresh timer is scheduled against 10 seconds.
+    // it in - otherwise the refresh timer is scheduled against the short one.
     if (changed) await authManager.ensureAuthenticated(true);
   };
 

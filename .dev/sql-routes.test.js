@@ -94,7 +94,18 @@ async function main() {
 
   const server = spawn(
     PB_BIN,
-    ["serve", `--http=127.0.0.1:${PORT}`, "--dir", dataDir, "--hooksDir", hooksDir],
+    // --migrationsDir inside the throwaway dir: PocketBase defaults it to
+    // `<dataDir>/../pb_migrations`, which every temp dir here would share.
+    [
+      "serve",
+      `--http=127.0.0.1:${PORT}`,
+      "--dir",
+      dataDir,
+      "--hooksDir",
+      hooksDir,
+      "--migrationsDir",
+      path.join(dataDir, "migrations"),
+    ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
   let serverOutput = "";
