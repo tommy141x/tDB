@@ -245,6 +245,57 @@ async function main() {
     );
 
     // ----------------------------------------------------------------
+    console.log("\n=== The two adapters do not fight over shared export names");
+
+    // client.js registers the PocketBase adapter at priority 10 and oxmysql at
+    // 20, so for any name both claim, PocketBase is asked first. `update` is
+    // the dangerous one: record update and SQL UPDATE share it, and a misroute
+    // would break every MySQL.update call while looking like a working server.
+    const OxMySQLAdapter = require(path.join(ROOT, "adapters/oxmysql.js"));
+    const ox = new OxMySQLAdapter(pb, (fn) => fn, {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    });
+
+    const shared = adapter.supportedExports.filter((n) =>
+      ox.supportedExports.includes(n),
+    );
+    ok(
+      shared.length > 0,
+      `the adapters do share export names, so the order matters (${shared.join(", ")})`,
+    );
+
+    const sqlUpdate = ["UPDATE players SET money = ? WHERE id = ?", [1, 1]];
+    ok(
+      adapter.canHandle("update", sqlUpdate) === false,
+      "the PocketBase adapter declines a SQL UPDATE",
+    );
+    ok(
+      ox.canHandle("update", sqlUpdate) === true,
+      "the oxmysql adapter claims it",
+    );
+
+    const recordUpdate = ["players", "abc123def456", { score: 1 }];
+    ok(
+      adapter.canHandle("update", recordUpdate) === true,
+      "a record update still goes to the PocketBase adapter",
+    );
+
+    ok(
+      adapter.canHandle("update", ["UPDATE players SET money = 1"]) === false,
+      "a SQL UPDATE with no parameters is not mistaken for a record update",
+    );
+    ok(
+      adapter.canHandle("update", [
+        "UPDATE players SET money = 1 WHERE id = ?",
+        () => {},
+      ]) === false,
+      "a SQL UPDATE with a callback is not mistaken for a record update",
+    );
+
+    // ----------------------------------------------------------------
     console.log("\n=== Errors and concurrency");
 
     let err = null;
