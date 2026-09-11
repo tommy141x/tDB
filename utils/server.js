@@ -486,20 +486,106 @@ function probePort(port) {
   });
 }
 
-async function resolveInternalPort() {
-  const preferred = await probePort(PREFERRED_INTERNAL_PORT);
-  if (preferred) return preferred;
+async function resolveInternalPort(skipPreferred = false) {
+  if (!skipPreferred) {
+    const preferred = await probePort(PREFERRED_INTERNAL_PORT);
+    if (preferred) return preferred;
+  }
 
   const fallback = await probePort(0);
   if (fallback) {
-    logger.info(
-      `Port ${PREFERRED_INTERNAL_PORT} is in use on this machine — PocketBase will ` +
-        `use loopback port ${fallback} instead. Nothing needs changing: this port is ` +
-        "internal and tLib's router is told about it automatically.",
-    );
+    if (!skipPreferred) {
+      logger.info(
+        `Port ${PREFERRED_INTERNAL_PORT} is in use on this machine — PocketBase will ` +
+          `use loopback port ${fallback} instead. Nothing needs changing: this port is ` +
+          "internal and tLib's router is told about it automatically.",
+      );
+    }
     return fallback;
   }
   return null;
+}
+
+/** Bind-failure signatures, across platforms and both PocketBase's own wording
+ *  and Go's net package underneath it. Matched case-insensitively. */
+const BIND_CONFLICT = [
+  "address already in use",
+  "only one usage of each socket address",
+  "bind: permission denied",
+  "cannot assign requested address",
+];
+
+/**
+ * Wait until PocketBase has demonstrably bound its port, or died trying.
+ *
+ * Resolves as soon as the port accepts a TCP connection, so a healthy start
+ * costs roughly one poll interval rather than a fixed delay. A bind failure is
+ * detected by the process exiting — Go's listener fails immediately, so this is
+ * fast and does not depend on log-line wording for the DECISION, only for
+ * classifying the reason.
+ *
+ * A timeout resolves ok: the process is alive and not listening for some other
+ * reason, which retrying on a different port cannot fix — the health checks
+ * downstream are the right place to report that.
+ */
+function confirmBind(proc, port, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let stderrTail = "";
+    const deadline = Date.now() + timeoutMs;
+
+    const onStderr = (d) => {
+      stderrTail = (stderrTail + d.toString()).slice(-2000);
+    };
+    proc.stderr.on("data", onStderr);
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      proc.stderr.removeListener("data", onStderr);
+      proc.removeListener("exit", onExit);
+      proc.removeListener("error", onError);
+      resolve(result);
+    };
+
+    // A spawn failure (missing binary, no execute bit) may emit 'error' without
+    // a matching 'exit'. Without this the promise would hang until the timeout
+    // and then wrongly report ok.
+    function onError(err) {
+      finish({ ok: false, bindConflict: false, detail: err.message });
+    }
+    proc.once("error", onError);
+
+    function onExit(code) {
+      const detail = stderrTail.trim().split(/\r?\n/).slice(-3).join(" ").trim();
+      const haystack = detail.toLowerCase();
+      finish({
+        ok: false,
+        bindConflict: BIND_CONFLICT.some((sig) => haystack.includes(sig)),
+        detail: detail || `exit code ${code}`,
+      });
+    }
+    proc.once("exit", onExit);
+
+    const poll = () => {
+      if (settled) return;
+      const sock = net.connect({ port, host: "127.0.0.1" });
+      sock.once("connect", () => {
+        sock.destroy();
+        finish({ ok: true });
+      });
+      sock.once("error", () => {
+        sock.destroy();
+        if (settled) return;
+        if (Date.now() >= deadline) {
+          finish({ ok: true });
+          return;
+        }
+        setTimeout(poll, 100);
+      });
+    };
+    poll();
+  });
 }
 
 /**
@@ -1107,34 +1193,22 @@ async function startPocketBase() {
   // below). Config.ExposeAdmin therefore no longer selects a bind address; it
   // selects whether we ask for that mount at all.
   //
-  // The port is internal and no longer configured — resolved here and written
-  // back onto config so the client adapter and the tLib registration below both
-  // read the port PocketBase was actually given. Resolved AFTER clearOrphan
-  // above: an orphaned PocketBase from an unclean shutdown still holds 8090, so
-  // probing first would push this run onto a random port for no reason and
-  // leave the orphan sitting on the preferred one.
-  const resolvedPort = await resolveInternalPort();
-  if (!resolvedPort) {
-    startupStatus.errors.push(
-      "No free loopback port is available for PocketBase — this machine has exhausted its port range",
-    );
-    displayStartupStatus();
-    return;
-  }
-  config.Port = resolvedPort;
-
-  const bindAddress = `127.0.0.1:${config.Port}`;
-
+  // The port is internal and no longer configured. It is resolved further down,
+  // immediately before the spawn — NOT here. Everything between this point and
+  // the spawn (superuser provisioning, migrations, a startup backup) can take
+  // seconds, and a port proven free at the top of that window says nothing
+  // about the bottom of it.
+  //
+  // These two are assigned once the port exists. Declared here because the
+  // handlers and health checks further down close over them.
+  let bindAddress = "";
   // Every internal check (hooks health, the client adapter) talks to this.
   // It stays correct whether or not the admin UI is reachable from outside.
-  const localUrl = `http://127.0.0.1:${config.Port}`;
-
+  let localUrl = "";
   // Provisional. Replaced with the real routed URL once tLib accepts the mount.
-  let finalUrl = localUrl;
+  let finalUrl = "";
 
   startupStatus.exposeAdmin = config.ExposeAdmin;
-  startupStatus.bindAddress = bindAddress;
-  startupStatus.publicUrl = finalUrl;
 
   // Create/update superuser before starting server
   // No public IP to pass any more: PocketBase is loopback-only. This only
@@ -1165,31 +1239,93 @@ async function startPocketBase() {
   // instance next to it. PocketBase writes a migration file for every
   // collection change, so a shared directory means one instance's edits are
   // replayed into the next one that starts.
-  const args = [
-    "serve",
-    `--http=${bindAddress}`,
-    `--dir=${config.Advanced.DataDir}`,
-    `--publicDir=${config.Advanced.PublicDir}`,
-    `--migrationsDir=${config.Migrations.Dir}`,
-  ];
+  const buildArgs = () => {
+    const a = [
+      "serve",
+      `--http=${bindAddress}`,
+      `--dir=${config.Advanced.DataDir}`,
+      `--publicDir=${config.Advanced.PublicDir}`,
+      `--migrationsDir=${config.Migrations.Dir}`,
+    ];
+    if (config.Advanced.Dev) a.push("--dev");
+    if (!config.Advanced.AutoMigrate) a.push("--automigrate=false");
+    return a;
+  };
 
-  if (config.Advanced.Dev) {
-    args.push("--dev");
-  }
-
-  if (!config.Advanced.AutoMigrate) {
-    args.push("--automigrate=false");
-  }
-
-  // Start PocketBase
+  // -- Resolve the port and bind, together, with retries --
+  //
+  // resolveInternalPort() proves a port free by binding it and letting go, so
+  // between that release and PocketBase's own bind there is a window where
+  // something else can take it. Small, but not theoretical: two FXServer
+  // instances on one machine, each with tDB, starting together will both probe
+  // 8090, both see it free, and both try to bind it. One loses.
+  //
+  // So the probe is a fast path, not a guarantee, and PocketBase's own bind is
+  // the arbiter. A bind failure is fast and unambiguous (Go exits immediately
+  // with "bind:" on stderr), so losing the race costs one retry on a different
+  // port rather than a failed start the operator has no setting left to fix.
   const { spawn } = require("child_process");
-  pocketbaseProcess = spawn(pbPath, args, {
-    cwd: resourcePath,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const MAX_BIND_ATTEMPTS = 3;
+  let bound = false;
 
-  // Recorded immediately, so a hard kill of FXServer one millisecond from now
-  // still leaves the next start able to find this process.
+  for (let attempt = 1; attempt <= MAX_BIND_ATTEMPTS && !bound; attempt++) {
+    // After a lost race, stop asking for the preferred port -- something else
+    // clearly wants it, and a second collision on the same number is likelier
+    // than on an OS-chosen one.
+    const resolvedPort = await resolveInternalPort(attempt > 1);
+    if (!resolvedPort) {
+      startupStatus.errors.push(
+        "No free loopback port is available for PocketBase - this machine has exhausted its port range",
+      );
+      displayStartupStatus();
+      return;
+    }
+
+    config.Port = resolvedPort;
+    bindAddress = `127.0.0.1:${config.Port}`;
+    localUrl = `http://127.0.0.1:${config.Port}`;
+    finalUrl = localUrl;
+    startupStatus.bindAddress = bindAddress;
+    startupStatus.publicUrl = finalUrl;
+
+    pocketbaseProcess = spawn(pbPath, buildArgs(), {
+      cwd: resourcePath,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const outcome = await confirmBind(pocketbaseProcess, config.Port);
+    if (outcome.ok) {
+      bound = true;
+      break;
+    }
+
+    // Not a bind collision -- a real startup failure. Retrying on another port
+    // would fail the same way three times and bury the actual reason.
+    if (!outcome.bindConflict) {
+      startupStatus.errors.push(
+        `PocketBase exited during startup: ${outcome.detail || "no output"}`,
+      );
+      displayStartupStatus();
+      return;
+    }
+
+    if (attempt === MAX_BIND_ATTEMPTS) {
+      startupStatus.errors.push(
+        `PocketBase could not bind a loopback port after ${MAX_BIND_ATTEMPTS} attempts: ${outcome.detail}`,
+      );
+      displayStartupStatus();
+      return;
+    }
+
+    logger.warn(
+      `Lost the race for loopback port ${config.Port} - retrying on another port ` +
+        `(attempt ${attempt + 1}/${MAX_BIND_ATTEMPTS})`,
+    );
+  }
+
+  // Recorded only once the bind is confirmed. Writing it per attempt would let
+  // a losing attempt's exit handler clear the record belonging to the attempt
+  // that actually won.
   if (pocketbaseProcess.pid) {
     pidGuard.write(resourcePath, pocketbaseProcess.pid, pbPath, logger);
   }
