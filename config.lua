@@ -3,18 +3,21 @@ Config = {}
 -- ============================================================================
 -- ADMIN INTERFACE EXPOSURE
 -- ============================================================================
--- Controls whether the PocketBase admin UI is reachable from outside.
+-- Whether to publish the PocketBase admin UI through tLib's router.
 --
--- PocketBase ALWAYS binds to 127.0.0.1 and never opens a public port itself.
--- When exposure is on, tLib's router - which owns the server's one external
--- port - proxies Config.MountPath through to it. That means:
+-- tDB NEVER opens a port of its own. PocketBase always binds 127.0.0.1, so by
+-- itself it is headless: usable by this server's resources and unreachable
+-- from anywhere else. The only way in from outside is tLib, which owns the
+-- server's single external port and proxies Config.MountPath through to it.
 --
---   • Config.Port does NOT need to be open in your firewall (and should not be)
---   • Exposure requires tLib to be started; without it, nothing is reachable
---   • The admin UI lives at <tLib hub URL><MountPath>/_/
+-- true (default): register the mount on startup. The admin UI is then at
+--                 <tLib hub URL><MountPath>/_/ — on tLib's port, NOT
+--                 Config.Port, which stays internal and must not be forwarded.
+-- false:          stay headless. Nothing is registered and nothing outside
+--                 this machine can reach the database at all.
 --
--- false: loopback only. PocketBase is usable by this resource and nothing else.
--- true:  additionally mounted on the tLib router.
+-- Turning this off does not affect any script using tDB — those talk to it
+-- over loopback either way.
 -- ============================================================================
 Config.ExposeAdmin = true
 
@@ -31,9 +34,9 @@ Config.MountPath = "/db"
 -- ============================================================================
 -- PUBLIC URL
 -- ============================================================================
--- DEPRECATED and no longer used. The public address is the tLib router's, not
--- PocketBase's - set 'tlib_http_public_url' in server.cfg if you need to
--- override it. Kept so existing configs keep loading.
+-- DEPRECATED and ignored. tDB has no public address of its own - the one the
+-- admin UI appears on is tLib's. Override it with 'tlib_http_public_url' in
+-- server.cfg. Kept only so existing configs keep loading.
 -- ============================================================================
 Config.Host = "localhost"
 

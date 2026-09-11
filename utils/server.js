@@ -41,7 +41,12 @@ const startupStatus = {
   superuserPassword: "",
   bindAddress: "",
   publicUrl: "",
+  /** Config.ExposeAdmin — whether a mount was WANTED. */
   exposeAdmin: false,
+  /** Whether tLib actually accepted one. Distinct from exposeAdmin: wanting a
+   *  mount and having one are different states, and conflating them is what
+   *  made a failed registration print a loopback address under "Admin". */
+  mounted: false,
   isRemoteMode: false,
   healthCheckPassed: false,
   clientAuthenticated: null,
@@ -102,29 +107,17 @@ function getPocketBasePath() {
 }
 
 // ============================================================================
-// IP Detection
+// URL building
 // ============================================================================
-function getPublicIP() {
-  return new Promise((resolve) => {
-    https
-      .get("https://api.ipify.org", (resp) => {
-        let data = "";
-
-        resp.on("data", (chunk) => {
-          data += chunk;
-        });
-
-        resp.on("end", () => {
-          resolve(data.trim());
-        });
-      })
-      .on("error", (err) => {
-        logger.debug(`Failed to get public IP: ${err.message}`);
-        resolve(null);
-      });
-  });
-}
-
+//
+// There is deliberately no public-IP lookup here. tDB has no public address of
+// its own to discover — the admin UI appears on tLib's router, at whatever
+// address tLib reports. Asking an outside service (api.ipify.org) for our own
+// IP at every startup was a network call made on behalf of a URL this resource
+// no longer owns.
+//
+// This remains only for REMOTE mode, where the operator names a PocketBase
+// instance on another machine and that host string has to be turned into a URL.
 function buildSmartUrl(hostParam, port) {
   if (!hostParam || hostParam === "") {
     return null;
@@ -177,14 +170,17 @@ function displayStartupStatus() {
   // Build status content
   let boxContent = [title, ""];
 
-  // Mode
+  // Mode. "Published" means a mount is live, not merely requested — see
+  // startupStatus.mounted.
   let mode;
   if (startupStatus.isRemoteMode) {
     mode = colors.magenta("Remote");
+  } else if (startupStatus.mounted) {
+    mode = colors.cyan("Published via tLib");
   } else if (startupStatus.exposeAdmin) {
-    mode = colors.cyan("Public");
+    mode = colors.yellow("Headless (mount failed)");
   } else {
-    mode = colors.green("Internal");
+    mode = colors.green("Headless");
   }
   boxContent.push(`${colors.white("Mode:    ")} ${mode}`);
 
@@ -236,7 +232,7 @@ function displayStartupStatus() {
     if (startupStatus.isRemoteMode) {
       healthStatus = "✓ Connected";
       healthColor = colors.green;
-    } else if (startupStatus.exposeAdmin) {
+    } else if (startupStatus.mounted) {
       if (startupStatus.healthCheckPassed === true) {
         healthStatus = "✓ Started";
         healthColor = colors.green;
@@ -248,24 +244,29 @@ function displayStartupStatus() {
         // question and is not what failed here, so do not send the operator to
         // their router config for it.
         startupStatus.warnings.push(
-          "tLib's router did not forward the mount — check that tLib started",
+          "tLib accepted the mount but is not forwarding it — check tLib's log",
         );
       }
     } else {
-      // Not exposed, just show started
+      // Headless — whether by config or because the mount could not be made.
+      // The database itself is fully working either way; registerWithTLib has
+      // already said why if this was not the operator's choice.
       healthStatus = "✓ Started";
       healthColor = colors.green;
     }
   }
 
-  // Public URL (only if exposed and not remote)
-  if (startupStatus.exposeAdmin && !startupStatus.isRemoteMode) {
+  // Only advertise an Admin URL that someone can actually open. When headless
+  // there is no such URL — publicUrl is the loopback address, and printing it
+  // here would read as "the admin UI is at 127.0.0.1:8090", which is true only
+  // from a shell on the server and misleading everywhere else.
+  if (startupStatus.isRemoteMode || startupStatus.mounted) {
     boxContent.push(
       `${colors.white("Admin:   ")} ${colors.cyan(startupStatus.publicUrl + "/_/")}`,
     );
-  } else if (startupStatus.isRemoteMode) {
+  } else if (!startupStatus.exposeAdmin) {
     boxContent.push(
-      `${colors.white("Admin:   ")} ${colors.cyan(startupStatus.publicUrl + "/_/")}`,
+      `${colors.white("Admin:   ")} ${colors.gray("not published (ExposeAdmin = false)")}`,
     );
   }
 
@@ -468,12 +469,19 @@ function registerWithTLib() {
   const adv = config.Advanced || {};
   if (adv.RemoteHost && adv.RemotePort) return null;
 
-  if (!config.ExposeAdmin) return null;
+  // Staying headless is a supported choice, not a problem — say nothing.
+  if (!config.ExposeAdmin) {
+    logger.debug("ExposeAdmin is false — staying headless, no mount requested");
+    return null;
+  }
 
   try {
+    // tLib is a hard dependency, so this should not happen; if it does, the
+    // database still works for every script on this server and only the admin
+    // UI is missing. That is a warning, not a failed start.
     if (GetResourceState("tLib") !== "started") {
       startupStatus.warnings.push(
-        "tLib is not started - the admin UI will not be reachable from outside",
+        "tLib is not started — the database works, but the admin UI is not reachable",
       );
       return null;
     }
@@ -1191,6 +1199,7 @@ async function startPocketBase() {
       if (routed) {
         finalUrl = routed;
         startupStatus.publicUrl = routed;
+        startupStatus.mounted = true;
       }
 
       // Emit ready event for client.js to listen to immediately.
@@ -1242,10 +1251,9 @@ async function startPocketBase() {
       // works whether or not a mount exists.
       startupStatus.hooksHealthy = await checkHooksHealth(localUrl);
 
-      // Only meaningful once the router actually accepted a mount; finalUrl
-      // still equals localUrl when it did not, and checking that would report
-      // a healthy "public" URL that is not public at all.
-      if (config.ExposeAdmin && finalUrl !== localUrl) {
+      // Only meaningful once the router actually accepted a mount. Headless is
+      // not a degraded state and has nothing to probe.
+      if (startupStatus.mounted) {
         startupStatus.healthCheckPassed = await checkRouteHealth(finalUrl);
       }
 

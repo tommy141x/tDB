@@ -23,10 +23,11 @@ provide 'mysql-async'
 provide 'ghmattimysql'
 provide 'oxmysql'
 
--- Optional. PocketBase binds loopback only; tLib's router is what makes the
--- admin UI reachable from outside (Config.ExposeAdmin + Config.MountPath).
--- tDB runs fine without it — it is simply not externally reachable.
-dependency '/optional:tLib'
+-- tDB never opens a port of its own — PocketBase binds loopback, and tLib's
+-- router is the only thing that can make the admin UI reachable. Required
+-- rather than optional so the failure is "tLib is missing" at start, not an
+-- admin UI that silently never appears.
+dependency 'tLib'
 
 -- Testing script
 -- server_script 'tests.lua'

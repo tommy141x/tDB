@@ -17,9 +17,10 @@ local row = exports.oxmysql:single_async('SELECT * FROM players WHERE citizenid 
 
 ## Install
 
-1. Drop the folder into `resources/` and keep the name **`tDB`**.
-2. `ensure tDB` in `server.cfg` — before any resource that queries the database.
-3. Start the server.
+1. Install [tLib](../tLib) — tDB requires it, and `ensure` it first.
+2. Drop the folder into `resources/` and keep the name **`tDB`**.
+3. `ensure tDB` in `server.cfg` — before any resource that queries the database.
+4. Start the server.
 
 On first start tDB provisions PocketBase itself: it creates the superuser,
 writes the credentials into `config.lua`, and authenticates. **The PocketBase
@@ -198,9 +199,9 @@ migrations. This is for other people's MySQL dumps.
 Everything lives in `config.lua`. The defaults are meant to be usable as-is.
 
 ```lua
-Config.Port = 8090
-Config.ExposeAdmin = false   -- true publishes the admin UI on Config.Host
-Config.Host = "localhost"    -- "" auto-detects the public IP
+Config.Port = 8090           -- LOOPBACK only; never forward this
+Config.ExposeAdmin = true    -- publish the admin UI through tLib's port
+Config.MountPath = "/db"     -- the path tLib serves it under
 
 Config.Superuser = {         -- generated on first start if left empty
     Email = "",
@@ -416,16 +417,26 @@ exports.tDB:sendEmail('user@example.com', 'Welcome', '<h1>Hi</h1>', 'Hi')
 
 ### Admin UI
 
-Off by default; scripts do not need it. To reach it:
+On by default, and it needs no configuration: tDB registers a route with
+[tLib](../tLib), which owns the server's single external port, and the admin UI
+appears at `http://<your server>:7777/db/`. Sign in with `Config.Superuser`.
+
+**tDB never opens a port of its own.** PocketBase always binds `127.0.0.1`, so
+`Config.Port` (8090) is internal — it does not belong in your firewall, and
+forwarding it would expose the database directly. The only port involved is
+tLib's, which you are already forwarding for everything else it serves.
+
+To keep the database completely headless, so nothing outside the machine can
+reach it at all:
 
 ```lua
-Config.ExposeAdmin = true
-Config.Host = ""    -- auto-detect, or set a domain
+Config.ExposeAdmin = false
 ```
 
-Then open `http://<host>:8090/_/` and sign in with `Config.Superuser`. Opening
-the port to the internet means opening it in the firewall too — put it behind a
-reverse proxy or a tunnel if you can.
+Scripts are unaffected either way — they talk to tDB over loopback.
+
+Change `Config.MountPath` if `/db` collides with another resource's mount; tLib
+refuses overlapping mounts and names the resource that already owns the path.
 
 ---
 
