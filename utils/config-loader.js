@@ -29,6 +29,9 @@ module.exports = (function () {
         ExposeAdmin: false,
         MountPath: "/db",
         Host: "",
+        // Preferred loopback port, not a setting — see the note in the parser
+        // below and resolveInternalPort() in utils/server.js. Overwritten at
+        // startup with the port PocketBase was actually given.
         Port: 8090,
         AutoUpdate: false,
         Superuser: {
@@ -103,8 +106,13 @@ module.exports = (function () {
           const host = simpleMatch(/Config\.Host\s*=\s*"([^"]*)"/);
           if (host) this.config.Host = host;
 
-          const port = simpleMatch(/Config\.Port\s*=\s*(\d+)/);
-          if (port) this.config.Port = parseInt(port);
+          // Config.Port is deliberately NOT parsed. It is no longer an
+          // operator setting: PocketBase's port is loopback-internal, so
+          // startPocketBase() resolves it at runtime (preferring 8090, falling
+          // back to any free port) and writes it onto this.config.Port. A
+          // Config.Port left in an older config.lua is ignored rather than
+          // honoured, because honouring it could reintroduce the collision the
+          // runtime resolution exists to avoid.
 
           const autoUpdate = simpleMatch(
             /Config\.AutoUpdate\s*=\s*(true|false)/,

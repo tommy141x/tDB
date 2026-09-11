@@ -199,7 +199,6 @@ migrations. This is for other people's MySQL dumps.
 Everything lives in `config.lua`. The defaults are meant to be usable as-is.
 
 ```lua
-Config.Port = 8090           -- LOOPBACK only; never forward this
 Config.ExposeAdmin = true    -- publish the admin UI through tLib's port
 Config.MountPath = "/db"     -- the path tLib serves it under
 
@@ -421,10 +420,13 @@ On by default, and it needs no configuration: tDB registers a route with
 [tLib](../tLib), which owns the server's single external port, and the admin UI
 appears at `http://<your server>:7777/db/`. Sign in with `Config.Superuser`.
 
-**tDB never opens a port of its own.** PocketBase always binds `127.0.0.1`, so
-`Config.Port` (8090) is internal — it does not belong in your firewall, and
-forwarding it would expose the database directly. The only port involved is
-tLib's, which you are already forwarding for everything else it serves.
+**tDB never opens a port of its own,** and there is no port to configure.
+PocketBase binds `127.0.0.1:8090` — or any free port, if something else on the
+machine already holds 8090 — and tDB tells tLib's router which one it got. That
+port is internal: it does not belong in your firewall, and forwarding it would
+expose the database directly. The only port you ever set is tLib's
+(`setr tlib_http_port`), which you are already forwarding for everything else
+it serves.
 
 To keep the database completely headless, so nothing outside the machine can
 reach it at all:

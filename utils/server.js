@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
+const net = require("net");
 const crypto = require("crypto");
 const configLoader = require("./utils/config-loader.js");
 const { spawnWithTimeout } = require("./utils/process-utils.js");
@@ -447,6 +448,60 @@ async function upsertSuperuser(pbPath, email, password) {
   return { ok: saved, detail };
 }
 
+/** The loopback port PocketBase is given when nothing else on the machine wants
+ *  it. Historically Config.Port's default, kept as the first choice so a local
+ *  `curl 127.0.0.1:8090` still works the way every note about this ever written
+ *  says it does. */
+const PREFERRED_INTERNAL_PORT = 8090;
+
+/**
+ * Decide which loopback port to hand PocketBase.
+ *
+ * This replaced Config.Port as an operator setting. The port is internal:
+ * PocketBase binds 127.0.0.1, tLib owns the server's one external port and
+ * proxies the mount through to it, and the number is registered with tLib
+ * programmatically — so nobody ever types it, forwards it, or dials it, and it
+ * carries no operator intent worth asking for. Asking for it only created a way
+ * to collide with something else on the machine.
+ *
+ * Tries PREFERRED_INTERNAL_PORT, then asks the OS for any free port. Both
+ * branches prove availability by actually binding, then release — a small race
+ * against something else grabbing the port in the gap, which is why a failure
+ * to bind is reported by the caller rather than swallowed. `exclusive` keeps
+ * the probe from succeeding on a port already bound by another process via
+ * SO_REUSEADDR semantics, which would make the check meaningless.
+ *
+ * Returns null only if even an OS-chosen port could not be bound, which means
+ * the machine has no loopback ports left.
+ */
+function probePort(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", () => resolve(null));
+    srv.listen({ port, host: "127.0.0.1", exclusive: true }, () => {
+      const addr = srv.address();
+      const bound = addr && typeof addr === "object" ? addr.port : null;
+      srv.close(() => resolve(bound));
+    });
+  });
+}
+
+async function resolveInternalPort() {
+  const preferred = await probePort(PREFERRED_INTERNAL_PORT);
+  if (preferred) return preferred;
+
+  const fallback = await probePort(0);
+  if (fallback) {
+    logger.info(
+      `Port ${PREFERRED_INTERNAL_PORT} is in use on this machine — PocketBase will ` +
+        `use loopback port ${fallback} instead. Nothing needs changing: this port is ` +
+        "internal and tLib's router is told about it automatically.",
+    );
+    return fallback;
+  }
+  return null;
+}
+
 /**
  * Ask tLib's router to expose this PocketBase instance on the server's one
  * external port.
@@ -722,10 +777,9 @@ function validateConfig() {
   }
 
   // Local mode validations
-  // Validate port
-  if (config.Port < 1 || config.Port > 65535) {
-    errors.push(`Invalid port: ${config.Port} (must be 1-65535)`);
-  }
+  // No port validation. config.Port is not operator input any more — it is
+  // resolved at startup by resolveInternalPort(), which can only produce a port
+  // it has just successfully bound.
 
   // Validate superuser email format if provided
   if (config.Superuser.Email && !config.Superuser.Email.includes("@")) {
@@ -1053,8 +1107,22 @@ async function startPocketBase() {
   // below). Config.ExposeAdmin therefore no longer selects a bind address; it
   // selects whether we ask for that mount at all.
   //
-  // Config.Port is now an internal port. It does not need to be open in the
-  // firewall, and it should not be.
+  // The port is internal and no longer configured — resolved here and written
+  // back onto config so the client adapter and the tLib registration below both
+  // read the port PocketBase was actually given. Resolved AFTER clearOrphan
+  // above: an orphaned PocketBase from an unclean shutdown still holds 8090, so
+  // probing first would push this run onto a random port for no reason and
+  // leave the orphan sitting on the preferred one.
+  const resolvedPort = await resolveInternalPort();
+  if (!resolvedPort) {
+    startupStatus.errors.push(
+      "No free loopback port is available for PocketBase — this machine has exhausted its port range",
+    );
+    displayStartupStatus();
+    return;
+  }
+  config.Port = resolvedPort;
+
   const bindAddress = `127.0.0.1:${config.Port}`;
 
   // Every internal check (hooks health, the client adapter) talks to this.

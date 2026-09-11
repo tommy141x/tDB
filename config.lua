@@ -11,8 +11,8 @@ Config = {}
 -- server's single external port and proxies Config.MountPath through to it.
 --
 -- true (default): register the mount on startup. The admin UI is then at
---                 <tLib hub URL><MountPath>/_/ — on tLib's port, NOT
---                 Config.Port, which stays internal and must not be forwarded.
+--                 <tLib hub URL><MountPath>/_/ — on tLib's port. PocketBase's
+--                 own loopback port stays internal and must not be forwarded.
 -- false:          stay headless. Nothing is registered and nothing outside
 --                 this machine can reach the database at all.
 --
@@ -41,14 +41,21 @@ Config.MountPath = "/db"
 Config.Host = "localhost"
 
 -- ============================================================================
--- PORT
+-- PORT - there isn't one
 -- ============================================================================
--- The LOOPBACK port PocketBase listens on. Internal only - it is not exposed
--- to the internet and does not belong in your firewall rules. Change it only
--- if something else on this machine already uses 8090.
--- Default: 8090
+-- There is deliberately no port setting here. PocketBase binds 127.0.0.1 on
+-- port 8090, and if something on this machine already holds 8090 it silently
+-- takes a free port instead - nothing outside this machine addresses it, so
+-- the number is never typed, forwarded, or dialled.
+--
+-- The one port that IS a decision belongs to tLib, which owns the server's
+-- single external port and proxies Config.MountPath through to PocketBase.
+-- To change it, put this in server.cfg:
+--
+--     setr tlib_http_port 7777
+--
+-- (A 'Config.Port' left over from an older tDB is simply ignored.)
 -- ============================================================================
-Config.Port = 8090
 
 -- ============================================================================
 -- SUPERUSER CREDENTIALS
@@ -147,7 +154,7 @@ Config.Advanced = {
     -- When enabled:
     --   • No local PocketBase process will be started
     --   • Connects to remote instance using Config.Superuser credentials
-    --   • Config.Port, Migrations, Backup, SMTP, and S3 settings are ignored
+    --   • Migrations, Backup, SMTP, and S3 settings are ignored
     --   • Perfect for connecting multiple FiveM servers to one PocketBase
     --
     -- Examples:
