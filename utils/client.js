@@ -11,6 +11,7 @@
   } = require("./utils/auth-manager.js");
   const PocketBaseAdapter = require("./adapters/pocketbase.js");
   const OxMySQLAdapter = require("./adapters/oxmysql.js");
+  const httpTransport = require("./utils/http-transport.js");
 
   // ============================================================================
   // Export Router - Routes export calls to appropriate adapters
@@ -351,10 +352,15 @@
     //
     // Only one of the adapters' ~31 SDK call sites passed requestKey: null,
     // so this is set once on the client rather than trusting every site to
-    // remember. It is also the likely source of the "Invalid state: Reader
-    // released" warning at startup: aborting a fetch whose body is mid-read
-    // is exactly what that Node web-streams path trips over.
+    // remember.
     pb.autoCancellation(false);
+
+    // Send over node:http instead of the global fetch. In FiveM's Node
+    // (v26.3.0) every fetch carrying a request body leaks an unhandled
+    // "Invalid state: Reader released" rejection - and every query this
+    // resource serves is a POST with a body. See utils/http-transport.js for
+    // the measurements.
+    httpTransport.install(pb);
 
     // Initialize export router with the exports function
     const router = new ExportRouter(exports);

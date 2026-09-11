@@ -385,6 +385,13 @@ and repairs it in place if it goes missing. If you see the installer, the
 resource is not the one that started that instance — check for a second
 PocketBase already bound to the port.
 
+**"Unhandled promise rejection … Invalid state: Reader released".**
+Fixed. FiveM's Node runtime (v26.3.0) leaks one unhandled rejection for every
+`fetch()` that carries a request body, and every query tDB serves is a POST
+with a body — so this appeared once at startup and would have appeared once per
+query under load. tDB now sends over `node:http` instead. If you still see it,
+it is coming from a different resource, not this one.
+
 **"Batch requests are not allowed".**
 Enable the batch API in Admin → Settings.
 
