@@ -148,6 +148,51 @@ Known limits worth stating plainly:
 
 ---
 
+## Importing `.sql` files
+
+Scripts ship a `.sql` dump and expect you to load it into MySQL by hand. There is
+no MySQL here, so drop the file in `tDB/sql/` instead and restart:
+
+```
+sql/
+  01-qb-core.sql
+  02-qb-inventory.sql
+```
+
+Files run in filename order, on startup, **before readiness** — so anything
+waiting on `awaitConnection` finds its tables already there and a script never
+races its own schema. Number them only when order matters.
+
+- **A file runs once, ever.** Applying a dump twice duplicates every row its
+  `INSERT`s carry, so what has run is recorded in the `tdb_sql_imports` table.
+- **A file lands whole or not at all.** The whole file goes out in one
+  transaction. (Past 500 statements it is chunked and atomicity becomes
+  per-chunk; the importer says so when that happens.)
+- **A failure does not stop the server.** The file, the line and the statement
+  are reported, nothing is applied, the server starts, and it is retried on the
+  next restart.
+- **A file edited after it ran is reported, not re-run** — replaying a dump
+  replays its `INSERT`s. `tdb sql import <file> --force` when you do want that.
+- **mysqldump session noise is ignored**: `SET NAMES`, `LOCK TABLES`,
+  `/*!40000 ALTER TABLE ... DISABLE KEYS */`, `START TRANSACTION` and friends.
+
+Splitting is done by a scanner, not by `split(";")` — string literals with
+semicolons in them, backslash and doubled-quote escapes, backtick identifiers,
+`--`/`#`/block comments and `DELIMITER` blocks all survive intact.
+
+Console commands (server console only; see `Config.Sql`):
+
+```
+tdb sql status                  what has run, what is pending, what changed
+tdb sql import <file>           apply one file now
+tdb sql import <file> --force   apply it again
+```
+
+`Config.Migrations` is a different thing — that is PocketBase's own collection
+migrations. This is for other people's MySQL dumps.
+
+---
+
 ## Configuration
 
 Everything lives in `config.lua`. The defaults are meant to be usable as-is.
@@ -210,6 +255,22 @@ Config.Migrations = { AutoApply = true, Dir = "pb_migrations" }
 
 PocketBase writes a migration file whenever you change a collection in the admin
 UI, so schema changes travel with the resource.
+
+### The `.sql` drop folder
+
+```lua
+Config.Sql = {
+    Enabled = true,
+    Dir = "sql",          -- relative to the resource, or an absolute path
+    OnChanged = "warn",   -- "warn" | "error" | "apply"
+}
+```
+
+`OnChanged` decides what happens when a file's contents change after it was
+applied. `warn` and `error` differ only in log level; **neither re-runs it**.
+`apply` re-runs it automatically — which replays every `INSERT` in the file, so
+it is only sensible for dumps that are pure DDL. See
+[Importing `.sql` files](#importing-sql-files).
 
 ---
 

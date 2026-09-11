@@ -2,6 +2,8 @@
  * PocketBase FiveM Client
  */
 (function () {
+  const fs = require("fs");
+  const path = require("path");
   const PocketBase = require("./bin/pocketbase.cjs.js");
   const configLoader = require("./utils/config-loader.js");
   const {
@@ -12,6 +14,7 @@
   const PocketBaseAdapter = require("./adapters/pocketbase.js");
   const OxMySQLAdapter = require("./adapters/oxmysql.js");
   const httpTransport = require("./utils/http-transport.js");
+  const sqlImport = require("./utils/sql-import.js");
 
   // ============================================================================
   // Export Router - Routes export calls to appropriate adapters
@@ -151,6 +154,10 @@
 
   // Owns the superuser token lifecycle once the server reports ready.
   let authManager = null;
+
+  // Kept at module scope so the SQL importer can reach the translation and
+  // batch paths before the exports are open for business.
+  let oxmysqlAdapter = null;
 
   // Wait for PocketBase to be ready and authenticate
   let isReady = false;
@@ -303,7 +310,47 @@
 
     if (isAuthenticated) await applyManagedTokenLifetime();
 
+    // Before readiness, deliberately. Anything waiting on awaitConnection -
+    // which is every well-behaved consumer - then finds the schema already
+    // there, and a script that ships a .sql file never races its own tables.
+    if (isAuthenticated) await runSqlImports();
+
     notifyReady();
+  };
+
+  // Imports run once per resource start. A re-auth rebuilds the session, not
+  // the database.
+  let sqlImportsDone = false;
+
+  const runSqlImports = async () => {
+    if (sqlImportsDone || !config.Sql.Enabled || !oxmysqlAdapter) return;
+    sqlImportsDone = true;
+
+    const dir = path.isAbsolute(config.Sql.Dir)
+      ? config.Sql.Dir
+      : path.join(resourcePath, config.Sql.Dir);
+
+    try {
+      const summary = await sqlImport.run(oxmysqlAdapter, dir, clientLogger, {
+        onChanged: config.Sql.OnChanged,
+      });
+
+      if (summary.applied.length) {
+        clientLogger.info(
+          `SQL import: applied ${summary.applied.length} file(s) - ${summary.applied.join(", ")}`,
+        );
+      }
+      if (summary.failed.length) {
+        clientLogger.error(
+          `SQL import: ${summary.failed.length} file(s) FAILED and were rolled back - ` +
+            `${summary.failed.join(", ")}. Fix them and restart; see 'tdb sql status'.`,
+        );
+      }
+    } catch (error) {
+      // Never take the resource down over an import. A dump that cannot be
+      // read is something to go and fix, with the server still up.
+      clientLogger.error(`SQL import could not run: ${error.message}`);
+    }
   };
 
   /**
@@ -367,7 +414,7 @@
 
     // Register adapters after PocketBase is initialized
     const pbAdapter = new PocketBaseAdapter(pb, wrapAsync, clientLogger);
-    const oxmysqlAdapter = new OxMySQLAdapter(pb, wrapAsync, clientLogger);
+    oxmysqlAdapter = new OxMySQLAdapter(pb, wrapAsync, clientLogger);
 
     // Register adapters with priority (lower = higher priority)
     // PocketBase has priority 10 (checked first)
@@ -476,6 +523,117 @@
   global.pbInternalRestoreBackup = wrapAsync(async (key) => {
     return await pb.backups.restore(key);
   });
+
+  // ============================================================================
+  // Console commands
+  // ============================================================================
+
+  /**
+   * `tdb sql status`            what has been imported, and what is pending
+   * `tdb sql import <file>`     apply one file now
+   * `tdb sql import <file> --force`  apply it again even if it already ran
+   *
+   * Server console only - these read and write the database.
+   */
+  RegisterCommand(
+    "tdb",
+    async (source, args) => {
+      const say = (line) => console.log(`^2[tDB]^7 ${line}`);
+
+      if (source !== 0) return; // console only, never a player
+
+      if (args[0] !== "sql" || !args[1]) {
+        say("usage: tdb sql status | tdb sql import <file> [--force]");
+        return;
+      }
+
+      if (!isReady || !oxmysqlAdapter) {
+        say("not ready yet - wait for the startup banner");
+        return;
+      }
+
+      const dir = path.isAbsolute(config.Sql.Dir)
+        ? config.Sql.Dir
+        : path.join(resourcePath, config.Sql.Dir);
+
+      try {
+        if (args[1] === "status") {
+          await sqlImport.ensureLedger(oxmysqlAdapter);
+          const ledger = await sqlImport.readLedger(oxmysqlAdapter);
+          const onDisk = fs.existsSync(dir)
+            ? fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".sql")).sort()
+            : [];
+
+          say(`sql folder: ${dir}`);
+          if (!onDisk.length && !ledger.size) {
+            say("nothing imported, and no .sql files waiting");
+            return;
+          }
+
+          for (const filename of onDisk) {
+            const row = ledger.get(filename);
+            if (!row) {
+              say(`  PENDING   ${filename}`);
+              continue;
+            }
+            const current = sqlImport.checksum(
+              fs.readFileSync(path.join(dir, filename), "utf8"),
+            );
+            const drift = current === row.checksum ? "" : "  ^3(file changed since)^7";
+            const detail =
+              row.status === "applied"
+                ? `${row.statements} statement(s), ${row.duration_ms}ms`
+                : row.error;
+            say(`  ${row.status.toUpperCase().padEnd(9)} ${filename}  ${detail}${drift}`);
+          }
+
+          // Rows whose file is gone still matter - that is the history.
+          for (const [filename, row] of ledger) {
+            if (onDisk.includes(filename)) continue;
+            say(`  ${row.status.toUpperCase().padEnd(9)} ${filename}  ^8(file no longer present)^7`);
+          }
+          return;
+        }
+
+        if (args[1] === "import") {
+          const filename = args[2];
+          if (!filename) {
+            say("usage: tdb sql import <file> [--force]");
+            return;
+          }
+          const force = args.includes("--force");
+
+          if (!fs.existsSync(path.join(dir, filename))) {
+            say(`no such file: ${path.join(dir, filename)}`);
+            return;
+          }
+
+          const summary = await sqlImport.run(oxmysqlAdapter, dir, clientLogger, {
+            onChanged: force ? "apply" : config.Sql.OnChanged,
+            only: [filename],
+            force,
+          });
+
+          if (summary.applied.length) say(`applied ${filename}`);
+          else if (summary.failed.length) say(`FAILED ${filename} - rolled back, nothing applied`);
+          else if (summary.changed.length) say(`${filename} changed since it ran; use --force to re-apply`);
+          else say(`${filename} was already applied; use --force to re-apply`);
+          return;
+        }
+
+        say("usage: tdb sql status | tdb sql import <file> [--force]");
+      } catch (error) {
+        say(`^1command failed: ${error.message}^7`);
+      }
+    },
+    // Restricted, so it is gated on the `command.tdb` ACE. The live server
+    // console holds every ACE and runs it fine. Another resource calling
+    // ExecuteCommand does not, and FiveM denies it silently - no output, no
+    // "access denied" line, the handler simply never runs. If you want to
+    // drive this from a script or an admin tool, grant it:
+    //   add_ace resource.<that_resource> command.tdb allow
+    true,
+  );
 
   // ============================================================================
   // Cleanup

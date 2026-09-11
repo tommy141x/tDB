@@ -452,10 +452,18 @@ module.exports = (function () {
       return { sql, extraStatements };
     }
 
-    const tableMatch = /\bTABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([`"\[]?)([A-Za-z0-9_$]+)\1/i.exec(
-      mask,
-    );
-    const table = tableMatch ? tableMatch[2] : null;
+    // Read the name off the original statement, not the mask: codeMask blanks
+    // quoted identifiers, so `CREATE TABLE IF NOT EXISTS \`players\`` left
+    // nothing for the name group to match. The old pattern then backtracked
+    // out of its optional IF-NOT-EXISTS branch and captured "IF" - building
+    // every inline index on a table of that name. Anchoring at the start is
+    // what keeps this safe to run against the unmasked text: a string literal
+    // cannot precede the CREATE.
+    const tableMatch =
+      /^\s*CREATE\s+(?:TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[`"\[]([^`"\]]+)[`"\]]|([A-Za-z0-9_$]+))/i.exec(
+        sql,
+      );
+    const table = tableMatch ? tableMatch[1] || tableMatch[2] : null;
 
     let out = sql;
 
@@ -491,6 +499,18 @@ module.exports = (function () {
         }
         return `${col}${rest}`;
       },
+    );
+
+    // SQLite accepts AUTOINCREMENT only on a column declared exactly INTEGER
+    // PRIMARY KEY - a display width makes it a different type token and the
+    // statement is rejected with "AUTOINCREMENT is only allowed on an INTEGER
+    // PRIMARY KEY". mysqldump writes `int(11) NOT NULL AUTO_INCREMENT` for
+    // essentially every table it has ever produced, so the width has to go.
+    // Only on the auto-increment column: elsewhere the width is harmless and
+    // worth keeping as documentation of the original schema.
+    out = out.replace(
+      /\b(INT|INTEGER|BIGINT|MEDIUMINT|SMALLINT|TINYINT)\s*\(\s*\d+\s*\)([^,)]*?\bAUTO_INCREMENT\b)/gi,
+      (_m, type, rest) => `${type}${rest}`,
     );
 
     // Table options SQLite has no concept of.

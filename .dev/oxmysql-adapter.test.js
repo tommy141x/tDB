@@ -426,6 +426,24 @@ async function main() {
     ]);
     ok(objectTx === true, "transaction accepts { query, values } entries");
 
+    // A CREATE TABLE with an inline KEY becomes two statements, and the index
+    // cannot be created before the table it indexes. runTransaction used to
+    // queue the spun-off statements ahead of the one that produced them, so
+    // any DDL with an index inside a transaction failed - while the same
+    // statement through execute() worked, because that path had it right.
+    const ddlTx = await call("transaction", [
+      "CREATE TABLE IF NOT EXISTS `tx_ddl` (" +
+        "`id` int(11) NOT NULL AUTO_INCREMENT," +
+        "`tag` varchar(50) NOT NULL," +
+        "PRIMARY KEY (`id`), KEY `idx_tag` (`tag`)) ENGINE=InnoDB",
+      "INSERT INTO tx_ddl (tag) VALUES ('first')",
+    ]);
+    ok(ddlTx === true, "DDL with an inline KEY succeeds inside a transaction", show(ddlTx));
+    ok(
+      (await call("scalar", "SELECT COUNT(*) FROM tx_ddl")) === 1,
+      "and both the table and the row it needed are there",
+    );
+
     // ----------------------------------------------------------------
     console.log("\n=== MySQL dialect that SQLite does not share");
 

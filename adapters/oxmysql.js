@@ -379,10 +379,14 @@ class OxMySQLAdapter {
       for (const entry of OxMySQLAdapter.parseTransaction(queries, params)) {
         const translated = await this.translate(entry.sql, entry.params);
 
+        // The statement first, then what it spun off. An inline KEY becomes a
+        // CREATE INDEX on a table that does not exist yet if these run the
+        // other way round - which is how they used to be ordered here, while
+        // execute() below had it right.
+        statements.push({ sql: translated.sql, params: translated.params });
         for (const extra of translated.extraStatements) {
           statements.push({ sql: extra });
         }
-        statements.push({ sql: translated.sql, params: translated.params });
       }
 
       await this.send("/api/tdb/batch", {

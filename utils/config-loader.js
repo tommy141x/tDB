@@ -38,6 +38,11 @@ module.exports = (function () {
           AutoApply: true,
           Dir: "pb_migrations",
         },
+        Sql: {
+          Enabled: true,
+          Dir: "sql",
+          OnChanged: "warn",
+        },
         Backup: {
           Enabled: false,
           OnStartup: true,
@@ -151,6 +156,25 @@ module.exports = (function () {
 
             const dir = migrationsContent.match(/Dir\s*=\s*"([^"]*)"/);
             if (dir) this.config.Migrations.Dir = dir[1];
+          }
+
+          // Parse Sql import config
+          const sqlSection = this.configContent.match(
+            /Config\.Sql\s*=\s*\{([^}]+)\}/s,
+          );
+          if (sqlSection) {
+            const sqlContent = sqlSection[1];
+
+            const enabled = sqlContent.match(/Enabled\s*=\s*(true|false)/);
+            if (enabled) this.config.Sql.Enabled = enabled[1] === "true";
+
+            const sqlDir = sqlContent.match(/Dir\s*=\s*"([^"]*)"/);
+            if (sqlDir) this.config.Sql.Dir = sqlDir[1];
+
+            const onChanged = sqlContent.match(
+              /OnChanged\s*=\s*"(warn|error|apply)"/,
+            );
+            if (onChanged) this.config.Sql.OnChanged = onChanged[1];
           }
 
           // Parse Advanced config

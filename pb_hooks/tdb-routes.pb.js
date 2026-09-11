@@ -135,11 +135,21 @@ routerAdd(
             throw new BadRequestError(`Statement ${i} has no sql`);
           }
 
-          results.push(
-            statement.expect === "rows"
-              ? sqlLib.selectRows(db, statement.sql, statement.params)
-              : sqlLib.executeStatement(db, statement.sql, statement.params),
-          );
+          // Name the statement that failed. A caller running one query at a
+          // time knows which it was; one importing a 900-line dump does not,
+          // and "near FULLTEXT: syntax error" on its own is not actionable.
+          try {
+            results.push(
+              statement.expect === "rows"
+                ? sqlLib.selectRows(db, statement.sql, statement.params)
+                : sqlLib.executeStatement(db, statement.sql, statement.params),
+            );
+          } catch (statementError) {
+            throw new Error(
+              `Statement ${i + 1} of ${statements.length}: ` +
+                (statementError.message || String(statementError)),
+            );
+          }
         }
         return results;
       };

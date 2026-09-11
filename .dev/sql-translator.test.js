@@ -268,6 +268,69 @@ async function main() {
   }
 
   // ------------------------------------------------------------------
+  section("DDL as mysqldump actually writes it");
+
+  // The fixture above is hand-written: an unquoted table name and a width-less
+  // INT. Both of those hid a bug. A real dump backticks every identifier and
+  // writes int(11), and that shape failed two different ways.
+  const dumpDb = freshDb();
+  const dumpSql =
+    "CREATE TABLE IF NOT EXISTS `dump_players` (\n" +
+    "  `id` int(11) NOT NULL AUTO_INCREMENT,\n" +
+    "  `citizenid` varchar(50) NOT NULL,\n" +
+    "  `money` int(11) NOT NULL DEFAULT 0,\n" +
+    "  PRIMARY KEY (`id`),\n" +
+    "  KEY `idx_citizenid` (`citizenid`)\n" +
+    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci";
+  const dump = translator.translate(dumpSql, [], { resolveConflictTarget });
+
+  // codeMask blanks quoted identifiers, so the old name pattern found nothing
+  // to match, backtracked out of its optional IF-NOT-EXISTS branch, and
+  // captured "IF" - putting every inline index on a table called IF.
+  ok(
+    dump.extraStatements.every((s) => !/\bON\s+"IF"/i.test(s)),
+    "an index is built on the table, not on the word IF",
+    JSON.stringify(dump.extraStatements),
+  );
+  ok(
+    dump.extraStatements.some((s) => /ON\s+"dump_players"/i.test(s)),
+    "the backticked table name is read correctly through IF NOT EXISTS",
+    JSON.stringify(dump.extraStatements),
+  );
+
+  // SQLite takes AUTOINCREMENT only on a column declared exactly INTEGER
+  // PRIMARY KEY; int(11) is a different type token and is rejected outright.
+  ok(
+    !/INTEGER\s*\(\s*\d+\s*\)[^,)]*AUTOINCREMENT/i.test(dump.sql),
+    "the display width is dropped from the auto-increment column",
+    dump.sql,
+  );
+
+  try {
+    dumpDb.exec(dump.sql);
+    for (const extra of dump.extraStatements) dumpDb.exec(extra);
+    ok(true, "a dump-shaped CREATE TABLE executes on SQLite");
+
+    dumpDb.exec("INSERT INTO dump_players (citizenid, money) VALUES ('ABC', 10)");
+    dumpDb.exec("INSERT INTO dump_players (citizenid, money) VALUES ('DEF', 20)");
+    const ids = dumpDb.prepare("SELECT id FROM dump_players ORDER BY id").all();
+    ok(
+      ids.length === 2 && ids[0].id === 1 && ids[1].id === 2,
+      "AUTO_INCREMENT still assigns ids",
+      JSON.stringify(ids),
+    );
+  } catch (e) {
+    ok(false, "a dump-shaped CREATE TABLE executes on SQLite", `${e.message}\n      -> ${dump.sql}`);
+  }
+
+  // Statement order matters: the index cannot be created before the table.
+  ok(
+    /^\s*CREATE\s+TABLE/i.test(dump.sql),
+    "the table statement is the main one, and extras follow it",
+    dump.sql.slice(0, 60),
+  );
+
+  // ------------------------------------------------------------------
   section("The safety gate rejects rather than corrupts");
 
   function expectThrow(label, sql, opts = {}) {
