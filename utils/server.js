@@ -500,13 +500,18 @@ function registerWithTLib() {
       // PocketBase realtime is SSE over plain HTTP, not WebSocket.
       websocket: false,
       title: "Database",
+      icon: "database",
+      description: "PocketBase collections, records and admin",
+      accent: "#22c07a",
       // PocketBase serves nothing at its root — pb_public is empty — so the
       // bare mount would answer with its JSON "File not found", which reads
       // like the router is broken. The admin UI is at /_/.
       index: "/_/",
-      // Routable but absent from the public hub index: an anonymous listing
-      // advertising "PocketBase admin here" is a map for an attacker.
-      listed: false,
+      // Listed on the hub. ExposeAdmin is already the decision about whether
+      // this is public at all — once it is, the mount is reachable by anyone
+      // who guesses "/db", so omitting it from the index would hide it from
+      // the operator and nobody else. Set ExposeAdmin = false to stay headless.
+      listed: true,
     });
 
     if (!result || result.ok !== true) {
