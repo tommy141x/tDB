@@ -241,12 +241,14 @@ function displayStartupStatus() {
         healthStatus = "✓ Started";
         healthColor = colors.green;
       } else if (startupStatus.healthCheckPassed === false) {
-        healthStatus = "✗ Public URL Not Accessible";
+        healthStatus = "✗ Not Reachable Through tLib";
         healthColor = colors.red;
-        // Config.Port is loopback and deliberately not forwarded — the port to
-        // check is tLib's router port ('tlib_http_port', default 7777).
+        // This is a ROUTING failure, checked over loopback — the admin UI is
+        // not reachable even from this machine. Port forwarding is a separate
+        // question and is not what failed here, so do not send the operator to
+        // their router config for it.
         startupStatus.warnings.push(
-          "Check that tLib's router port is open and forwarded",
+          "tLib's router did not forward the mount — check that tLib started",
         );
       }
     } else {
@@ -322,28 +324,57 @@ function displayStartupStatus() {
 // ============================================================================
 // Health Check
 // ============================================================================
-async function checkPublicUrlHealth(url) {
+/**
+ * Verify that tLib's router actually forwards our mount to us.
+ *
+ * Deliberately NOT a request to the public URL. That URL's host is the
+ * server's WAN address, which on most networks is unreachable from the machine
+ * itself (NAT hairpinning is off by default), so probing it reports a failure
+ * on a perfectly working setup. Whether the port is reachable from the
+ * internet is a port-forwarding question that cannot be answered from in here
+ * at all.
+ *
+ * What CAN be answered, and is the part likely to be misconfigured, is whether
+ * the router is up and routing our prefix to our process. So the request goes
+ * to the router over loopback, carrying the same mount the public URL uses.
+ */
+async function checkRouteHealth(publicUrl) {
+  const routerPort = getRouterPort();
+  if (routerPort === null) return false;
+
+  let mount;
+  try {
+    // The mount is the public URL's path — the router's own base contributes
+    // none, so whatever path survives is exactly what it matches on.
+    mount = new URL(publicUrl).pathname.replace(/\/+$/, "");
+  } catch {
+    return false;
+  }
+
   return new Promise((resolve) => {
-    const urlObj = new URL(url);
-    const protocol = urlObj.protocol === "https:" ? https : require("http");
-
-    const healthUrl = `${url}/api/health`;
-
-    protocol
-      .get(healthUrl, { timeout: 5000 }, (resp) => {
-        if (resp.statusCode === 200) {
-          resolve(true);
-        } else {
-          resolve(false);
-        }
-      })
-      .on("error", () => {
-        resolve(false);
-      })
-      .on("timeout", () => {
-        resolve(false);
-      });
+    require("http")
+      .get(
+        `http://127.0.0.1:${routerPort}${mount}/api/health`,
+        { timeout: 5000 },
+        (resp) => resolve(resp.statusCode === 200),
+      )
+      .on("error", () => resolve(false))
+      .on("timeout", () => resolve(false));
   });
+}
+
+/** The port tLib's router is bound to, or null if it cannot be determined. */
+function getRouterPort() {
+  try {
+    if (GetResourceState("tLib") !== "started") return null;
+    const base = globalThis.exports.tLib.GetHubUrl();
+    if (typeof base !== "string" || !base) return null;
+    const u = new URL(base);
+    if (u.port) return Number(u.port);
+    return u.protocol === "https:" ? 443 : 80;
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================================
@@ -461,6 +492,10 @@ function registerWithTLib() {
       // PocketBase realtime is SSE over plain HTTP, not WebSocket.
       websocket: false,
       title: "Database",
+      // PocketBase serves nothing at its root — pb_public is empty — so the
+      // bare mount would answer with its JSON "File not found", which reads
+      // like the router is broken. The admin UI is at /_/.
+      index: "/_/",
       // Routable but absent from the public hub index: an anonymous listing
       // advertising "PocketBase admin here" is a map for an attacker.
       listed: false,
@@ -1211,7 +1246,7 @@ async function startPocketBase() {
       // still equals localUrl when it did not, and checking that would report
       // a healthy "public" URL that is not public at all.
       if (config.ExposeAdmin && finalUrl !== localUrl) {
-        startupStatus.healthCheckPassed = await checkPublicUrlHealth(finalUrl);
+        startupStatus.healthCheckPassed = await checkRouteHealth(finalUrl);
       }
 
       // Display status after everything is ready
