@@ -3,39 +3,46 @@ Config = {}
 -- ============================================================================
 -- ADMIN INTERFACE EXPOSURE
 -- ============================================================================
--- Controls whether the PocketBase admin UI is publicly accessible
+-- Controls whether the PocketBase admin UI is reachable from outside.
 --
--- false (default - RECOMMENDED):
---   • PocketBase only accessible by this FiveM resource
---   • No public access to admin UI or API
---   • Binds to 127.0.0.1 (localhost only)
---   • Most secure option for production
+-- PocketBase ALWAYS binds to 127.0.0.1 and never opens a public port itself.
+-- When exposure is on, tLib's router - which owns the server's one external
+-- port - proxies Config.MountPath through to it. That means:
 --
--- true (only if you need external access):
---   • Admin UI accessible from external clients
---   • Binds to 0.0.0.0 (all network interfaces)
---   • Requires proper firewall configuration
---   • Public URL will be displayed on startup
+--   • Config.Port does NOT need to be open in your firewall (and should not be)
+--   • Exposure requires tLib to be started; without it, nothing is reachable
+--   • The admin UI lives at <tLib hub URL><MountPath>/_/
+--
+-- false: loopback only. PocketBase is usable by this resource and nothing else.
+-- true:  additionally mounted on the tLib router.
 -- ============================================================================
 Config.ExposeAdmin = true
 
 -- ============================================================================
--- PUBLIC URL (only used when ExposeAdmin = true)
+-- MOUNT PATH (only used when ExposeAdmin = true)
 -- ============================================================================
--- Leave empty ("") to auto-detect your server's public IP
--- Or specify your server's IP/domain manually
---
--- Examples:
---   "" - Auto-detect public IP
---   "192.168.1.100" - Use specific IP
---   "myserver.com" - Use domain name
+-- Path prefix the tLib router serves PocketBase under.
+-- Change it only if it collides with another resource's mount - tLib refuses
+-- overlapping mounts rather than silently shadowing one, and logs which
+-- resource already owns the path.
+-- ============================================================================
+Config.MountPath = "/db"
+
+-- ============================================================================
+-- PUBLIC URL
+-- ============================================================================
+-- DEPRECATED and no longer used. The public address is the tLib router's, not
+-- PocketBase's - set 'tlib_http_public_url' in server.cfg if you need to
+-- override it. Kept so existing configs keep loading.
 -- ============================================================================
 Config.Host = "localhost"
 
 -- ============================================================================
 -- PORT
 -- ============================================================================
--- The port PocketBase will listen on
+-- The LOOPBACK port PocketBase listens on. Internal only - it is not exposed
+-- to the internet and does not belong in your firewall rules. Change it only
+-- if something else on this machine already uses 8090.
 -- Default: 8090
 -- ============================================================================
 Config.Port = 8090
@@ -51,8 +58,8 @@ Config.Port = 8090
 -- ============================================================================
 Config.Superuser = {
     -- Leave empty for auto-generation on first startup
-    Email = "",
-    Password = "",
+    Email = "admin@localhost.local",
+    Password = "K5FpzGrGb+N2Xrue1Q5D",
 }
 
 -- ============================================================================
@@ -75,6 +82,31 @@ Config.Migrations = {
     -- Directory where migration files are stored
     -- Default: "pb_migrations"
     Dir = "pb_migrations",
+}
+
+-- ============================================================================
+-- SQL FILE IMPORT
+-- ============================================================================
+-- Scripts normally ship a .sql file you are expected to load into MySQL by
+-- hand. Drop it in tDB's sql/ folder instead and it is applied on startup,
+-- before any other resource can query.
+--
+-- A file runs once, ever, and lands whole or not at all. What has run is
+-- recorded in the tdb_sql_imports table - see `tdb sql status`.
+-- ============================================================================
+Config.Sql = {
+    -- Import .sql files on startup
+    Enabled = true,
+
+    -- Folder to take them from, relative to this resource
+    Dir = "sql",
+
+    -- What to do with a file that changed after it was already applied.
+    -- Re-running a dump replays every INSERT in it, so this is not automatic.
+    --   "warn"  (recommended): report it and move on
+    --   "error": report it loudly; still does not re-run it
+    --   "apply": re-run the whole file
+    OnChanged = "warn",
 }
 
 -- ============================================================================

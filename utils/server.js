@@ -4,6 +4,9 @@ const https = require("https");
 const crypto = require("crypto");
 const configLoader = require("./utils/config-loader.js");
 const { spawnWithTimeout } = require("./utils/process-utils.js");
+// Resolved from the resource root, not from this file — FiveM's Node runtime
+// loads server_scripts with the resource directory as the base.
+const pidGuard = require("./utils/pid-guard.js");
 
 // ============================================================================
 // Color Utilities
@@ -240,7 +243,11 @@ function displayStartupStatus() {
       } else if (startupStatus.healthCheckPassed === false) {
         healthStatus = "✗ Public URL Not Accessible";
         healthColor = colors.red;
-        startupStatus.warnings.push("Check firewall/port forwarding settings");
+        // Config.Port is loopback and deliberately not forwarded — the port to
+        // check is tLib's router port ('tlib_http_port', default 7777).
+        startupStatus.warnings.push(
+          "Check that tLib's router port is open and forwarded",
+        );
       }
     } else {
       // Not exposed, just show started
@@ -406,6 +413,71 @@ async function upsertSuperuser(pbPath, email, password) {
     `exit code ${result.code}`;
 
   return { ok: saved, detail };
+}
+
+/**
+ * Ask tLib's router to expose this PocketBase instance on the server's one
+ * external port.
+ *
+ * PocketBase binds loopback and is unreachable from outside on its own. tLib
+ * owns the single public port and proxies `<mount>/...` here.
+ *
+ * Returns the routed public URL, or null if no mount was made (tLib absent,
+ * admin not exposed, remote mode, or the router refused).
+ *
+ * Note on `exports`: these files are CommonJS modules, where `exports` is
+ * module.exports and shadows FiveM's global export proxy. Reaching it through
+ * globalThis is required, not stylistic.
+ */
+function registerWithTLib() {
+  // Remote mode: PocketBase is somewhere else entirely and already has its own
+  // URL. tLib only exposes services on this machine — proxying to an
+  // operator-supplied remote host is exactly the SSRF shape its loopback-only
+  // rule exists to prevent. So: no mount.
+  const adv = config.Advanced || {};
+  if (adv.RemoteHost && adv.RemotePort) return null;
+
+  if (!config.ExposeAdmin) return null;
+
+  try {
+    if (GetResourceState("tLib") !== "started") {
+      startupStatus.warnings.push(
+        "tLib is not started - the admin UI will not be reachable from outside",
+      );
+      return null;
+    }
+
+    const result = globalThis.exports.tLib.RegisterWebApp({
+      id: "db",
+      mount: config.MountPath || "/db",
+      port: config.Port,
+      host: "127.0.0.1",
+      // PocketBase serves its admin at /_/ and its API at /api/ with no base
+      // path option, so it must see the unprefixed paths. That works because
+      // its admin UI is subpath-relative: assets are emitted as ./assets/... and
+      // its SDK client is constructed with a relative baseURL ("../"), which
+      // resolves against window.location.pathname. Verified against 0.40.3.
+      stripPrefix: true,
+      // PocketBase realtime is SSE over plain HTTP, not WebSocket.
+      websocket: false,
+      title: "Database",
+      // Routable but absent from the public hub index: an anonymous listing
+      // advertising "PocketBase admin here" is a map for an attacker.
+      listed: false,
+    });
+
+    if (!result || result.ok !== true) {
+      startupStatus.warnings.push(
+        `tLib refused the /db mount: ${(result && result.error) || "unknown error"}`,
+      );
+      return null;
+    }
+
+    return result.url;
+  } catch (err) {
+    startupStatus.warnings.push(`Could not register with tLib: ${err.message}`);
+    return null;
+  }
 }
 
 async function createSuperuser(pbPath, publicIP) {
@@ -909,44 +981,53 @@ async function startPocketBase() {
 
   startupStatus.executablePath = pbPath;
 
+  // Clear a PocketBase left over from an unclean shutdown before anything else
+  // touches the data directory.
+  //
+  // This has to precede createSuperuser and applyPendingMigrations, not just the
+  // `serve` spawn: those run the binary against the same SQLite directory, so an
+  // orphan still holding it makes them fail first, and the resulting error
+  // points at the database rather than at the real cause.
+  if (!(await pidGuard.clearOrphan(resourcePath, pbPath, logger))) {
+    startupStatus.errors.push(
+      "A PocketBase process from a previous run is still running and could not be stopped",
+    );
+    displayStartupStatus();
+    return;
+  }
+
   // Check for updates
   await checkAndUpdate(pbPath);
 
-  // Determine binding address and URL based on ExposeAdmin setting
-  let bindAddress;
-  let finalUrl;
-  let publicIP = null;
+  // PocketBase ALWAYS binds loopback now. It never opens a public port of its
+  // own — external reachability is tLib's decision, not PocketBase's, and it
+  // is granted by registering a mount on the tLib router (see registerWithTLib
+  // below). Config.ExposeAdmin therefore no longer selects a bind address; it
+  // selects whether we ask for that mount at all.
+  //
+  // Config.Port is now an internal port. It does not need to be open in the
+  // firewall, and it should not be.
+  const bindAddress = `127.0.0.1:${config.Port}`;
+
+  // Every internal check (hooks health, the client adapter) talks to this.
+  // It stays correct whether or not the admin UI is reachable from outside.
+  const localUrl = `http://127.0.0.1:${config.Port}`;
+
+  // Provisional. Replaced with the real routed URL once tLib accepts the mount.
+  let finalUrl = localUrl;
 
   startupStatus.exposeAdmin = config.ExposeAdmin;
-
-  if (config.ExposeAdmin) {
-    // Admin exposed: bind to 0.0.0.0 and generate public URL
-    bindAddress = `0.0.0.0:${config.Port}`;
-
-    if (!config.Host || config.Host === "") {
-      publicIP = await getPublicIP();
-      if (!publicIP) {
-        startupStatus.warnings.push(
-          "Could not detect public IP - configure Config.Host manually",
-        );
-        finalUrl = `http://0.0.0.0:${config.Port}`;
-      } else {
-        finalUrl = `http://${publicIP}:${config.Port}`;
-      }
-    } else {
-      finalUrl = buildSmartUrl(config.Host, config.Port);
-    }
-  } else {
-    // Admin not exposed: bind to localhost only
-    bindAddress = `127.0.0.1:${config.Port}`;
-    finalUrl = `http://localhost:${config.Port}`;
-  }
-
   startupStatus.bindAddress = bindAddress;
   startupStatus.publicUrl = finalUrl;
 
   // Create/update superuser before starting server
-  const superuserSuccess = await createSuperuser(pbPath, publicIP);
+  // No public IP to pass any more: PocketBase is loopback-only. This only
+  // affects the auto-generated superuser email on a first run with empty
+  // credentials (admin@localhost.local instead of admin@<ip>.local), and those
+  // credentials are written back to config.lua — so existing installs, which
+  // already have credentials, are unaffected. Not deriving it from a public IP
+  // is also the more stable choice on a host whose address changes.
+  const superuserSuccess = await createSuperuser(pbPath, null);
   if (!superuserSuccess) {
     displayStartupStatus();
     return;
@@ -991,6 +1072,12 @@ async function startPocketBase() {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+  // Recorded immediately, so a hard kill of FXServer one millisecond from now
+  // still leaves the next start able to find this process.
+  if (pocketbaseProcess.pid) {
+    pidGuard.write(resourcePath, pocketbaseProcess.pid, pbPath, logger);
+  }
+
   pocketbaseProcess.stdout.on("data", (data) => {
     const lines = data.toString().split("\n");
 
@@ -998,8 +1085,10 @@ async function startPocketBase() {
       line = line.trim();
       if (!line) continue;
 
-      // Replace 0.0.0.0 URLs with the actual public URL
-      line = line.replace(/http:\/\/0\.0\.0\.0:\d+/g, finalUrl);
+      // PocketBase logs its own bind address, which is now always loopback and
+      // therefore not a link anyone outside can use. Point it at the routed URL
+      // instead. A no-op when there is no mount, since finalUrl is localUrl.
+      line = line.replace(/http:\/\/(?:0\.0\.0\.0|127\.0\.0\.1):\d+/g, finalUrl);
 
       // Skip the default PocketBase startup messages - we'll show our own
       if (
@@ -1035,13 +1124,17 @@ async function startPocketBase() {
   pocketbaseProcess.stderr.on("data", (data) => {
     let output = data.toString().trim();
     if (output) {
-      // Replace 0.0.0.0 URLs with the actual public URL in error messages too
-      output = output.replace(/http:\/\/0\.0\.0\.0:\d+/g, finalUrl);
+      // Same rewrite as stdout — see above.
+      output = output.replace(/http:\/\/(?:0\.0\.0\.0|127\.0\.0\.1):\d+/g, finalUrl);
       logger.warn(output);
     }
   });
 
   pocketbaseProcess.on("close", (code) => {
+    // The process is gone, so the record now describes nothing. Removing it here
+    // rather than only in stopPocketBase covers the case where PocketBase exits
+    // on its own — otherwise the next start would probe a dead pid.
+    pidGuard.clear(resourcePath);
     if (code !== 0 && code !== null) {
       logger.error(`PocketBase exited with code ${code}`);
     } else {
@@ -1057,9 +1150,20 @@ async function startPocketBase() {
   // Give it a moment to start, then perform health check and display status
   setTimeout(async () => {
     if (pocketbaseProcess && !pocketbaseProcess.killed) {
-      // Emit ready event for client.js to listen to immediately
+      // PocketBase is listening — only now is a mount valid. Registering
+      // earlier would advertise a route that 502s.
+      const routed = registerWithTLib();
+      if (routed) {
+        finalUrl = routed;
+        startupStatus.publicUrl = routed;
+      }
+
+      // Emit ready event for client.js to listen to immediately.
+      // `url` stays the loopback address: this is what in-process consumers
+      // (the oxmysql adapter, hooks) talk to, and it must not depend on the
+      // router being up.
       emit("pocketbase:server:ready", {
-        url: finalUrl,
+        url: localUrl,
         port: config.Port,
         exposeAdmin: config.ExposeAdmin,
       });
@@ -1099,11 +1203,14 @@ async function startPocketBase() {
         }
       }
 
-      // Check if hooks are healthy
-      startupStatus.hooksHealthy = await checkHooksHealth(finalUrl);
+      // Hooks are an internal concern — always check them over loopback, which
+      // works whether or not a mount exists.
+      startupStatus.hooksHealthy = await checkHooksHealth(localUrl);
 
-      // Perform health check if admin is exposed
-      if (config.ExposeAdmin) {
+      // Only meaningful once the router actually accepted a mount; finalUrl
+      // still equals localUrl when it did not, and checking that would report
+      // a healthy "public" URL that is not public at all.
+      if (config.ExposeAdmin && finalUrl !== localUrl) {
         startupStatus.healthCheckPassed = await checkPublicUrlHealth(finalUrl);
       }
 

@@ -27,6 +27,7 @@ module.exports = (function () {
 
       this.config = {
         ExposeAdmin: false,
+        MountPath: "/db",
         Host: "",
         Port: 8090,
         AutoUpdate: false,
@@ -95,6 +96,9 @@ module.exports = (function () {
             /Config\.ExposeAdmin\s*=\s*(true|false)/,
           );
           if (exposeAdmin) this.config.ExposeAdmin = exposeAdmin === "true";
+
+          const mountPath = simpleMatch(/Config\.MountPath\s*=\s*"([^"]*)"/);
+          if (mountPath) this.config.MountPath = mountPath;
 
           const host = simpleMatch(/Config\.Host\s*=\s*"([^"]*)"/);
           if (host) this.config.Host = host;
