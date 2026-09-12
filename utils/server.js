@@ -8,6 +8,7 @@ const { spawnWithTimeout } = require("./utils/process-utils.js");
 // Resolved from the resource root, not from this file — FiveM's Node runtime
 // loads server_scripts with the resource directory as the base.
 const pidGuard = require("./utils/pid-guard.js");
+const settings = require("./utils/settings.js");
 
 // ============================================================================
 // Color Utilities
@@ -306,21 +307,9 @@ function displayStartupStatus() {
     });
   }
 
-  // Draw box
-  const maxLength = Math.max(
-    ...boxContent.map((line) => line.replace(/\^\d/g, "").length),
-  );
-  const border = "═".repeat(maxLength + 4);
-
-  logger.raw("");
-  logger.raw(`╔${border}╗`);
-  boxContent.forEach((line) => {
-    const stripped = line.replace(/\^\d/g, "");
-    const padding = " ".repeat(maxLength - stripped.length);
-    logger.raw(`║  ${line}${padding}  ║`);
-  });
-  logger.raw(`╚${border}╝`);
-  logger.raw("");
+  // Lua owns the shared tLib version/banner display. Keep database diagnostics
+  // here, but do not draw a second resource-specific startup box.
+  emit("tdb:startupStatus", boxContent.join("\n"));
 }
 
 // ============================================================================
@@ -629,7 +618,7 @@ function registerWithTLib() {
 
     const result = globalThis.exports.tLib.RegisterWebApp({
       id: "db",
-      mount: config.MountPath || "/db",
+      mount: "/db",
       port: config.Port,
       host: "127.0.0.1",
       // PocketBase serves its admin at /_/ and its API at /api/ with no base
@@ -1013,125 +1002,25 @@ async function scheduleBackups() {
 // ============================================================================
 // Settings Management (SMTP/S3)
 // ============================================================================
-async function configureSettings() {
-  if (!config.Advanced.SMTP.Enabled && !config.Advanced.S3.Enabled) {
-    return;
-  }
+// The rules, and the measurement that forces them, are in utils/settings.js.
+// The short version: settings only ever travel config.lua -> PocketBase,
+// because PocketBase will not hand back the SMTP password or the S3 secret,
+// so a sync in the other direction blanks them.
+async function reconcileSettings() {
+  // Somebody else's instance is not ours to reconfigure.
+  if (startupStatus.isRemoteMode) return;
 
-  try {
-    const settings = await global.pbInternalGetSettings();
-    let needsUpdate = false;
-    const updates = {};
+  const outcome = await settings.reconcile(
+    {
+      getSettings: () => global.pbInternalGetSettings(),
+      updateSettings: (patch) => global.pbInternalUpdateSettings(patch),
+    },
+    config.Advanced,
+    logger,
+  );
 
-    // Configure SMTP
-    if (config.Advanced.SMTP.Enabled) {
-      if (
-        settings.smtp?.host !== config.Advanced.SMTP.Host ||
-        settings.smtp?.port !== config.Advanced.SMTP.Port ||
-        settings.smtp?.username !== config.Advanced.SMTP.Username ||
-        settings.smtp?.password !== config.Advanced.SMTP.Password
-      ) {
-        updates.smtp = {
-          enabled: true,
-          host: config.Advanced.SMTP.Host,
-          port: config.Advanced.SMTP.Port,
-          username: config.Advanced.SMTP.Username,
-          password: config.Advanced.SMTP.Password,
-          authMethod: "PLAIN",
-          tls: config.Advanced.SMTP.TLS,
-          localName: config.Advanced.SMTP.LocalName || "localhost",
-        };
-        needsUpdate = true;
-      }
-    }
-
-    // Configure S3
-    if (config.Advanced.S3.Enabled) {
-      if (
-        settings.s3?.bucket !== config.Advanced.S3.Bucket ||
-        settings.s3?.region !== config.Advanced.S3.Region ||
-        settings.s3?.endpoint !== config.Advanced.S3.Endpoint
-      ) {
-        updates.s3 = {
-          enabled: true,
-          bucket: config.Advanced.S3.Bucket,
-          region: config.Advanced.S3.Region,
-          endpoint: config.Advanced.S3.Endpoint,
-          accessKey: config.Advanced.S3.AccessKey,
-          secret: config.Advanced.S3.SecretKey,
-          forcePathStyle: config.Advanced.S3.ForcePathStyle,
-        };
-        needsUpdate = true;
-      }
-    }
-
-    if (needsUpdate) {
-      await global.pbInternalUpdateSettings(updates);
-      logger.debug("PocketBase settings updated from config");
-    }
-  } catch (err) {
-    startupStatus.warnings.push(`Failed to configure settings: ${err.message}`);
-  }
-}
-
-async function syncSettingsToConfig() {
-  if (!config.Advanced.SMTP.Enabled && !config.Advanced.S3.Enabled) {
-    return;
-  }
-
-  try {
-    const settings = await global.pbInternalGetSettings();
-    let needsUpdate = false;
-    const updates = {};
-
-    // Check SMTP changes
-    if (config.Advanced.SMTP.Enabled && settings.smtp) {
-      if (
-        settings.smtp.host !== config.Advanced.SMTP.Host ||
-        settings.smtp.port !== config.Advanced.SMTP.Port ||
-        settings.smtp.username !== config.Advanced.SMTP.Username ||
-        settings.smtp.password !== config.Advanced.SMTP.Password
-      ) {
-        updates.SMTP = {
-          Host: settings.smtp.host || "",
-          Port: settings.smtp.port || 587,
-          Username: settings.smtp.username || "",
-          Password: settings.smtp.password || "",
-          LocalName: settings.smtp.localName || "",
-          TLS: settings.smtp.tls !== false,
-        };
-        needsUpdate = true;
-      }
-    }
-
-    // Check S3 changes
-    if (config.Advanced.S3.Enabled && settings.s3) {
-      if (
-        settings.s3.bucket !== config.Advanced.S3.Bucket ||
-        settings.s3.region !== config.Advanced.S3.Region ||
-        settings.s3.endpoint !== config.Advanced.S3.Endpoint ||
-        settings.s3.accessKey !== config.Advanced.S3.AccessKey ||
-        settings.s3.secret !== config.Advanced.S3.SecretKey
-      ) {
-        updates.S3 = {
-          Bucket: settings.s3.bucket || "",
-          Region: settings.s3.region || "",
-          Endpoint: settings.s3.endpoint || "",
-          AccessKey: settings.s3.accessKey || "",
-          SecretKey: settings.s3.secret || "",
-          ForcePathStyle: settings.s3.forcePathStyle === true,
-        };
-        needsUpdate = true;
-      }
-    }
-
-    if (needsUpdate) {
-      await configLoader.updateAdvancedSettings(updates);
-      logger.info("Config.lua updated with latest PocketBase settings");
-    }
-  } catch (err) {
-    logger.warn(`Failed to sync settings to config: ${err.message}`);
-  }
+  // Surfaced in the startup box, not just the log, so an overwrite is seen.
+  for (const warning of outcome.warnings) startupStatus.warnings.push(warning);
 }
 
 // ============================================================================
@@ -1466,13 +1355,13 @@ async function startPocketBase() {
         startupStatus.healthCheckPassed = await checkRouteHealth(finalUrl);
       }
 
+      // Before the banner, and awaited. It was a floating 2s setTimeout, which
+      // meant a drift warning it raised landed after the status box had already
+      // printed - and was dropped entirely if the resource stopped first.
+      await reconcileSettings();
+
       // Display status after everything is ready
       displayStartupStatus();
-
-      // Configure SMTP/S3 settings after startup
-      setTimeout(async () => {
-        await configureSettings();
-      }, 2000);
 
       // Schedule periodic backups
       await scheduleBackups();
@@ -1539,18 +1428,16 @@ async function connectToRemotePocketBase() {
 }
 
 async function stopPocketBase() {
-  // Don't try to sync settings or stop process in remote mode
   if (startupStatus.isRemoteMode) {
     logger.info("Disconnecting from remote PocketBase...");
     return;
   }
 
-  // Sync settings to config before stopping
-  try {
-    await syncSettingsToConfig();
-  } catch (err) {
-    logger.warn(`Failed to sync settings on shutdown: ${err.message}`);
-  }
+  // Nothing is written back to config.lua here any more. Shutdown used to read
+  // the instance's settings and rewrite config.lua from them, which blanked the
+  // SMTP password and S3 secret (PocketBase never returns those) and replayed a
+  // config.lua snapshot taken at boot over any edit made since. Settings now
+  // travel one way, at startup - see reconcileSettings().
 
   if (pocketbaseProcess && !pocketbaseProcess.killed) {
     logger.info("Shutting down PocketBase...");

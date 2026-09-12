@@ -200,7 +200,6 @@ Everything lives in `config.lua`. The defaults are meant to be usable as-is.
 
 ```lua
 Config.ExposeAdmin = true    -- publish the admin UI through tLib's port
-Config.MountPath = "/db"     -- the path tLib serves it under
 
 Config.Superuser = {         -- generated on first start if left empty
     Email = "",
@@ -239,22 +238,51 @@ Config.Backup = {
 
 Backups land in `pb_data/backups`.
 
-### SMTP, S3, migrations
+### SMTP and S3 — who wins, config.lua or the admin UI
 
 ```lua
 Config.Advanced = {
-    SMTP = { Enabled = true, Host = "smtp.example.com", Port = 587,
+    SMTP = { Manage = false, Enabled = true, Host = "smtp.example.com", Port = 587,
              Username = "", Password = "", TLS = true },
 
-    S3 = { Enabled = true, Bucket = "", Region = "", Endpoint = "",
+    S3 = { Manage = false, Enabled = true, Bucket = "", Region = "", Endpoint = "",
            AccessKey = "", SecretKey = "", ForcePathStyle = false },
 }
+```
 
+`Manage` decides who owns the setting, and it is `false` by default:
+
+| | Behaviour |
+|---|---|
+| `Manage = false` (default) | tDB never touches it. Set it in the admin UI and it stays exactly as you left it. Everything else in the block is ignored — tDB says so on startup if you filled it in. |
+| `Manage = true`, `Enabled = true` | **config.lua is the truth.** Every field is applied on every start, secrets included. An admin-UI edit is reported and then overwritten. |
+| `Manage = true`, `Enabled = false` | config.lua is still the truth, and the truth is "off". Genuinely disables it on the instance. |
+
+**Settings only ever travel config.lua → PocketBase, never back**, and that is
+forced by PocketBase rather than chosen. `GET /api/settings` omits `smtp.password`
+and `s3.secret` entirely — they come back `undefined`, not masked. So writing the
+instance's settings into config.lua cannot preserve the two values that matter
+most; it replaces real credentials with empty strings. Re-prove it any time with
+`node .dev/probe-settings-roundtrip.js`.
+
+The practical consequence: **if you configure SMTP or S3 in the admin UI, leave
+`Manage = false`.** Only set it to `true` if you want config.lua to be the
+authority — which is the right choice when you want the resource to be
+reproducible, since the folder plus config.lua then fully describes the instance.
+
+Everything tDB does not manage is unaffected: collections, records, logs and
+on-demand backups stay entirely yours in the admin UI.
+
+### Migrations
+
+```lua
 Config.Migrations = { AutoApply = true, Dir = "pb_migrations" }
 ```
 
 PocketBase writes a migration file whenever you change a collection in the admin
-UI, so schema changes travel with the resource.
+UI, so schema changes travel with the resource. Collection edits made in the UI
+are never reverted — they become migrations, which is a different mechanism from
+the `Manage` switch above.
 
 ### The `.sql` drop folder
 
@@ -437,8 +465,8 @@ Config.ExposeAdmin = false
 
 Scripts are unaffected either way — they talk to tDB over loopback.
 
-Change `Config.MountPath` if `/db` collides with another resource's mount; tLib
-refuses overlapping mounts and names the resource that already owns the path.
+tDB owns the `/db` route. When exposed, its admin panel is at `/db/_/` on
+tLib's public URL and port. There are no tDB host, port, or mount settings.
 
 ---
 

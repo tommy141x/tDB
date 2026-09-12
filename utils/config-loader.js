@@ -27,8 +27,6 @@ module.exports = (function () {
 
       this.config = {
         ExposeAdmin: false,
-        MountPath: "/db",
-        Host: "",
         // Preferred loopback port, not a setting — see the note in the parser
         // below and resolveInternalPort() in utils/server.js. Overwritten at
         // startup with the port PocketBase was actually given.
@@ -61,7 +59,11 @@ module.exports = (function () {
           AutoMigrate: true,
           PublicDir: "pb_public",
           DataDir: "pb_data",
+          // Manage defaults to false: unless asked, tDB does not touch these
+          // settings on the instance at all, so the admin UI owns them and
+          // nothing can drift. See reconcileSettings() in utils/server.js.
           SMTP: {
+            Manage: false,
             Enabled: false,
             Host: "",
             Port: 587,
@@ -71,6 +73,7 @@ module.exports = (function () {
             TLS: true,
           },
           S3: {
+            Manage: false,
             Enabled: false,
             Bucket: "",
             Region: "",
@@ -99,12 +102,6 @@ module.exports = (function () {
             /Config\.ExposeAdmin\s*=\s*(true|false)/,
           );
           if (exposeAdmin) this.config.ExposeAdmin = exposeAdmin === "true";
-
-          const mountPath = simpleMatch(/Config\.MountPath\s*=\s*"([^"]*)"/);
-          if (mountPath) this.config.MountPath = mountPath;
-
-          const host = simpleMatch(/Config\.Host\s*=\s*"([^"]*)"/);
-          if (host) this.config.Host = host;
 
           // Config.Port is deliberately NOT parsed. It is no longer an
           // operator setting: PocketBase's port is loopback-internal, so
@@ -219,6 +216,9 @@ module.exports = (function () {
           );
           if (smtpSection) {
             const smtpContent = smtpSection[1];
+            const manage = smtpContent.match(/Manage\s*=\s*(true|false)/);
+            if (manage) this.config.Advanced.SMTP.Manage = manage[1] === "true";
+
             const enabled = smtpContent.match(/Enabled\s*=\s*(true|false)/);
             if (enabled)
               this.config.Advanced.SMTP.Enabled = enabled[1] === "true";
@@ -248,6 +248,9 @@ module.exports = (function () {
           const s3Section = this.configContent.match(/S3\s*=\s*\{([^}]+)\}/s);
           if (s3Section) {
             const s3Content = s3Section[1];
+            const manage = s3Content.match(/Manage\s*=\s*(true|false)/);
+            if (manage) this.config.Advanced.S3.Manage = manage[1] === "true";
+
             const enabled = s3Content.match(/Enabled\s*=\s*(true|false)/);
             if (enabled)
               this.config.Advanced.S3.Enabled = enabled[1] === "true";
@@ -298,14 +301,17 @@ module.exports = (function () {
      */
     updateSuperuserCredentials(email, password) {
       try {
-        if (!this.configContent) {
+        if (!this.configPath || !fs.existsSync(this.configPath)) {
           console.log(
             "^1[Config Loader]^7 Cannot update config - config file not loaded",
           );
           return false;
         }
 
-        let updatedContent = this.configContent;
+        // Re-read rather than editing the copy taken at load(). This can run
+        // long after startup (the superuser repair path), and writing the boot
+        // snapshot back would silently revert anything edited by hand since.
+        let updatedContent = fs.readFileSync(this.configPath, "utf8");
         updatedContent = updatedContent.replace(
           /(Email\s*=\s*)"([^"]*)"/,
           `$1"${email}"`,
@@ -337,142 +343,6 @@ module.exports = (function () {
      */
     get() {
       return this.config;
-    }
-
-    /**
-     * Update advanced settings (SMTP/S3) in config file
-     * @param {object} updates - Object with SMTP and/or S3 updates
-     * @returns {boolean} Success status
-     */
-    updateAdvancedSettings(updates) {
-      try {
-        if (!this.configContent) {
-          console.log(
-            "^1[Config Loader]^7 Cannot update config - config file not loaded",
-          );
-          return false;
-        }
-
-        let updatedContent = this.configContent;
-
-        // Update SMTP settings
-        if (updates.SMTP) {
-          const smtpSection = updatedContent.match(/SMTP\s*=\s*\{([^}]+)\}/s);
-          if (smtpSection) {
-            let newSMTP = smtpSection[1];
-
-            if (updates.SMTP.Host !== undefined) {
-              newSMTP = newSMTP.replace(
-                /Host\s*=\s*"[^"]*"/,
-                `Host = "${updates.SMTP.Host}"`,
-              );
-            }
-            if (updates.SMTP.Port !== undefined) {
-              newSMTP = newSMTP.replace(
-                /Port\s*=\s*\d+/,
-                `Port = ${updates.SMTP.Port}`,
-              );
-            }
-            if (updates.SMTP.Username !== undefined) {
-              newSMTP = newSMTP.replace(
-                /Username\s*=\s*"[^"]*"/,
-                `Username = "${updates.SMTP.Username}"`,
-              );
-            }
-            if (updates.SMTP.Password !== undefined) {
-              newSMTP = newSMTP.replace(
-                /Password\s*=\s*"[^"]*"/,
-                `Password = "${updates.SMTP.Password}"`,
-              );
-            }
-            if (updates.SMTP.LocalName !== undefined) {
-              newSMTP = newSMTP.replace(
-                /LocalName\s*=\s*"[^"]*"/,
-                `LocalName = "${updates.SMTP.LocalName}"`,
-              );
-            }
-            if (updates.SMTP.TLS !== undefined) {
-              newSMTP = newSMTP.replace(
-                /TLS\s*=\s*(true|false)/,
-                `TLS = ${updates.SMTP.TLS}`,
-              );
-            }
-
-            updatedContent = updatedContent.replace(
-              /SMTP\s*=\s*\{[^}]+\}/s,
-              `SMTP = {${newSMTP}}`,
-            );
-          }
-        }
-
-        // Update S3 settings
-        if (updates.S3) {
-          const s3Section = updatedContent.match(/S3\s*=\s*\{([^}]+)\}/s);
-          if (s3Section) {
-            let newS3 = s3Section[1];
-
-            if (updates.S3.Bucket !== undefined) {
-              newS3 = newS3.replace(
-                /Bucket\s*=\s*"[^"]*"/,
-                `Bucket = "${updates.S3.Bucket}"`,
-              );
-            }
-            if (updates.S3.Region !== undefined) {
-              newS3 = newS3.replace(
-                /Region\s*=\s*"[^"]*"/,
-                `Region = "${updates.S3.Region}"`,
-              );
-            }
-            if (updates.S3.Endpoint !== undefined) {
-              newS3 = newS3.replace(
-                /Endpoint\s*=\s*"[^"]*"/,
-                `Endpoint = "${updates.S3.Endpoint}"`,
-              );
-            }
-            if (updates.S3.AccessKey !== undefined) {
-              newS3 = newS3.replace(
-                /AccessKey\s*=\s*"[^"]*"/,
-                `AccessKey = "${updates.S3.AccessKey}"`,
-              );
-            }
-            if (updates.S3.SecretKey !== undefined) {
-              newS3 = newS3.replace(
-                /SecretKey\s*=\s*"[^"]*"/,
-                `SecretKey = "${updates.S3.SecretKey}"`,
-              );
-            }
-            if (updates.S3.ForcePathStyle !== undefined) {
-              newS3 = newS3.replace(
-                /ForcePathStyle\s*=\s*(true|false)/,
-                `ForcePathStyle = ${updates.S3.ForcePathStyle}`,
-              );
-            }
-
-            updatedContent = updatedContent.replace(
-              /S3\s*=\s*\{[^}]+\}/s,
-              `S3 = {${newS3}}`,
-            );
-          }
-        }
-
-        fs.writeFileSync(this.configPath, updatedContent, "utf8");
-
-        // Update cached config and content
-        this.configContent = updatedContent;
-        if (updates.SMTP) {
-          Object.assign(this.config.Advanced.SMTP, updates.SMTP);
-        }
-        if (updates.S3) {
-          Object.assign(this.config.Advanced.S3, updates.S3);
-        }
-
-        return true;
-      } catch (err) {
-        console.log(
-          `^1[Config Loader]^7 Failed to update advanced settings: ${err.message}`,
-        );
-        return false;
-      }
     }
   }
 
