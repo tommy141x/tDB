@@ -218,6 +218,41 @@ section("A real refusal is reported");
 }
 
 // --------------------------------------------------------------------------
+section("An accepted mount with no URL is not a publication");
+{
+  for (const [label, result] of [
+    ["no url field", { ok: true }],
+    ["an empty url", { ok: true, url: "" }],
+    ["whitespace", { ok: true, url: "   " }],
+    ["a non-string url", { ok: true, url: 7 }],
+  ]) {
+    const h = harness(result);
+    h.publisher.want(true);
+    h.publisher.handleStatus(READY);
+    ok(
+      h.publisher.published === false,
+      `ok:true with ${label} does not count as published`,
+      JSON.stringify(h.events),
+    );
+    ok(
+      h.warnings().some((w) => w.includes("returned no URL")),
+      `...and says so (${label})`,
+      JSON.stringify(h.events),
+    );
+  }
+  // Why it matters: the caller prints publishedUrl as the Admin link, and with
+  // nothing to print it falls back to the loopback address - a link that works
+  // only from a shell on the server.
+  const h = harness({ ok: true, url: "https://play.example.com/db" });
+  h.publisher.want(true);
+  h.publisher.handleStatus(READY);
+  ok(
+    typeof h.publisher.publishedUrl === "string" && h.publisher.publishedUrl.length > 0,
+    "a real publication always carries a non-empty URL",
+  );
+}
+
+// --------------------------------------------------------------------------
 section("A mount that goes away stops being advertised");
 {
   const h = harness(accepted);
@@ -289,6 +324,51 @@ ok(
     "bind EADDRINUSE",
   "tLib's own error wins when it gave one",
 );
+
+// --------------------------------------------------------------------------
+section("How server.js wires the lifecycle up");
+{
+  // Normalised: server.js is CRLF on disk, so a \n literal matches nothing.
+  const src = require("fs")
+    .readFileSync(require("path").join(ROOT, "utils/server.js"), "utf8")
+    .replace(/\r\n/g, "\n");
+
+  const watch = src.slice(
+    src.indexOf("function watchTLibStatus()"),
+    src.indexOf("let routeProbeGeneration"),
+  );
+  const startHandler = watch.slice(watch.indexOf('on("onResourceStart"'));
+
+  ok(watch.includes('on("onResourceStop"'), "tLib stopping is handled at all");
+  ok(
+    watch.indexOf('on("onResourceStop"') < watch.indexOf('on("onResourceStart"'),
+    "the reset is bound to stop, before start",
+  );
+  ok(
+    !startHandler.includes("handleTLibRestart"),
+    "the start handler does NOT reset - tLib emits its status as it comes up with no " +
+      "ordering guarantee against onResourceStart, so resetting there can tear down a " +
+      "mount this same fresh tLib already granted and then register against it twice",
+  );
+  ok(
+    startHandler.includes("handleStatus(readTLibHttpStatus())"),
+    "it only asks where things stand",
+  );
+
+  ok(
+    /generation !== routeProbeGeneration \|\| !publisher\.published/.test(src),
+    "a health probe result is discarded if the mount changed while it was in flight",
+  );
+  ok(
+    /routeProbeGeneration\+\+/.test(src.slice(src.indexOf("onUnpublished:"))),
+    "withdrawing a mount invalidates any probe already running against it",
+  );
+
+  ok(
+    !/getRouterPort/.test(src),
+    "the port-guessing health check is gone entirely",
+  );
+}
 
 // --------------------------------------------------------------------------
 console.log(`\n==== ${pass} passed, ${fail} failed ====`);

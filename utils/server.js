@@ -716,24 +716,23 @@ const publisher = tlibPublication.createPublisher({
   mount: TLIB_MOUNT,
   register: registerWithTLib,
   logger,
+  // Always a non-empty URL: the publisher refuses a mount it cannot advertise.
   onPublished: (url) => {
     startupStatus.mounted = true;
-    if (url) {
-      finalUrl = url;
-      startupStatus.publicUrl = url;
-    }
+    finalUrl = url;
+    startupStatus.publicUrl = url;
     // The startup box has already printed by the time a late or retried mount
     // lands, so it cannot carry this. Say it in the log instead, otherwise the
     // last thing the operator saw was "waiting for tLib" and nothing since.
-    if (startupBoxPrinted) {
-      logger.info(`Admin UI is published at ${(url || finalUrl) + "/_/"}`);
-    }
+    if (startupBoxPrinted) logger.info(`Admin UI is published at ${url}/_/`);
   },
   onUnpublished: () => {
     // Stop advertising an Admin URL for a route that no longer exists. The
     // database is unaffected - scripts never went through the router.
     startupStatus.mounted = false;
     startupStatus.healthCheckPassed = null;
+    // Discard any probe still in flight against the mount just withdrawn.
+    routeProbeGeneration++;
     if (localUrl) {
       finalUrl = localUrl;
       startupStatus.publicUrl = localUrl;
@@ -757,27 +756,44 @@ function watchTLibStatus() {
     if (publisher.published && !wasPublished) revalidateRoute();
   });
 
-  // tLib restarting takes its registry with it, so the mount we hold is void.
-  on("onResourceStart", (resource) => {
-    if (resource !== "tLib") return;
-    publisher.handleTLibRestart();
-    publisher.handleStatus(readTLibHttpStatus());
-    if (publisher.published) revalidateRoute();
-  });
-
+  // The reset belongs on STOP, not on start. tLib emits its status as it comes
+  // up, and there is no ordering guarantee between that event and the
+  // onResourceStart dispatched to us - so a start handler that resets
+  // unconditionally can tear down a mount this same fresh tLib already granted
+  // us a moment earlier, and then register a second time against the same
+  // registry. Stop clears; start only asks where things stand.
   on("onResourceStop", (resource) => {
     if (resource !== "tLib") return;
     publisher.handleTLibRestart();
   });
+
+  on("onResourceStart", (resource) => {
+    if (resource !== "tLib") return;
+    publisher.handleStatus(readTLibHttpStatus());
+    if (publisher.published) revalidateRoute();
+  });
 }
+
+// Bumped whenever the thing being probed changes. A probe waits up to 5s, and
+// tLib can stop inside that window - so a result is only allowed to land if
+// it still describes the mount we currently hold.
+let routeProbeGeneration = 0;
 
 /** Re-probe the mount after it is (re)published, and refresh the status box. */
 async function revalidateRoute() {
+  const generation = ++routeProbeGeneration;
   const url = publisher.healthUrl();
+
   // No listener address means the probe cannot run, which is not the same as
   // the probe failing. Reporting "not reachable" for something never dialled
   // would send the operator to debug a route that is probably fine.
-  startupStatus.healthCheckPassed = url ? await checkRouteHealth(url) : null;
+  const result = url ? await checkRouteHealth(url) : null;
+
+  // Superseded, or the mount went away while we were waiting on it. Writing
+  // this answer now would describe a route that no longer exists.
+  if (generation !== routeProbeGeneration || !publisher.published) return;
+
+  startupStatus.healthCheckPassed = result;
 }
 
 async function createSuperuser(pbPath, publicIP) {

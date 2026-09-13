@@ -148,10 +148,25 @@ module.exports = (function () {
       }
 
       if (result && result.ok === true) {
+        // An accepted mount with no URL is not something to celebrate. The
+        // caller's whole use for this is to print a link, and with nothing to
+        // print it would fall back to showing the loopback address under
+        // "Admin" - a link that works from a shell on the server and nowhere
+        // else. Treat it as a refusal and say what happened.
+        const url = typeof result.url === "string" ? result.url.trim() : "";
+        if (!url) {
+          pending = false;
+          onWarning(
+            `tLib accepted the ${mount} mount but returned no URL for it - ` +
+              `the admin UI cannot be advertised`,
+          );
+          return false;
+        }
+
         published = true;
         pending = false;
         warnedPendingFor = null;
-        publishedUrl = result.url || null;
+        publishedUrl = url;
         logger.debug?.(`Admin UI published at ${publishedUrl}`);
         onPublished(publishedUrl);
         return true;
