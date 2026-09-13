@@ -368,6 +368,44 @@ section("How server.js wires the lifecycle up");
     !/getRouterPort/.test(src),
     "the port-guessing health check is gone entirely",
   );
+
+  // ------------------------------------------------------------------
+  section("A tLib too old to report readiness publishes nothing");
+
+  const legacy = src.slice(
+    src.indexOf("function readTLibHttpStatus()"),
+    src.indexOf("function registerWithTLib()"),
+  );
+
+  // A call, not the word - the comment above readTLibHttpStatus names GetHubUrl
+  // precisely to record why it is not used, and that comment should not fail a
+  // test written to keep it true.
+  ok(
+    !/GetHubUrl\s*\(/.test(src),
+    "GetHubUrl is never called - it answered with a provisional localhost URL while " +
+      "autodetection ran and kept answering after a failed bind, so it never meant 'serving'",
+  );
+  ok(
+    /ready:\s*false/.test(legacy),
+    "the legacy branch reports NOT ready, so no mount is attempted and no URL is advertised",
+    legacy.slice(legacy.indexOf("tlibTooOld = true")),
+  );
+  ok(
+    !/ready:\s*true/.test(legacy),
+    "it never synthesises readiness it cannot verify",
+  );
+  ok(
+    /Update tLib/.test(legacy) && /startupStatus\.warnings\.push/.test(legacy),
+    "and the operator is told plainly, in the startup warnings, what to do about it",
+  );
+  ok(
+    /The database is unaffected/.test(legacy),
+    "...including that this costs them the admin UI and nothing else",
+  );
+  ok(
+    !/exposeAdmin\s*=|ExposeAdmin\s*=\s*(true|false)/.test(legacy),
+    "the operator's ExposeAdmin setting is read, never rewritten",
+  );
 }
 
 // --------------------------------------------------------------------------

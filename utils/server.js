@@ -198,6 +198,11 @@ function displayStartupStatus() {
     mode = colors.magenta("Remote");
   } else if (startupStatus.mounted) {
     mode = colors.cyan("Published via tLib");
+  } else if (startupStatus.exposeAdmin && tlibTooOld) {
+    // Distinct from pending: this one never resolves on its own, so calling it
+    // "waiting" would leave the operator watching a console that will never
+    // say anything more.
+    mode = colors.yellow("Not published (tLib too old)");
   } else if (startupStatus.exposeAdmin && publisher.pending) {
     // Waiting on tLib's HTTP, not broken by it. The mount is claimed as soon
     // as tLib reports ready, so this line is a snapshot of a moment, not a
@@ -299,6 +304,12 @@ function displayStartupStatus() {
   } else if (!startupStatus.exposeAdmin) {
     boxContent.push(
       `${colors.white("Admin:   ")} ${colors.gray("not published (ExposeAdmin = false)")}`,
+    );
+  } else if (tlibTooOld) {
+    // ExposeAdmin is on and stays on — the operator asked for this and their
+    // setting is not being rewritten. It just cannot be honoured yet.
+    boxContent.push(
+      `${colors.white("Admin:   ")} ${colors.yellow("unavailable until tLib is updated")}`,
     );
   }
 
@@ -609,43 +620,57 @@ const TLIB_MOUNT = "/db";
  * Feature-detected, because bumping tLib's required version is not this
  * change's to make.
  *
- * On an older tLib there is no readiness signal at all. GetHubUrl is NOT a
- * substitute: it answered with a provisional localhost URL while autodetection
- * was still running, and kept answering after a failed bind, so "non-empty"
- * never meant "serving". Believing it would put a URL that does not work under
- * "Admin" in the startup box — the exact class of lie this change removes.
+ * An older tLib cannot report readiness at all, and on that version the admin
+ * UI is simply not published. That is deliberate, and it is the stricter of
+ * the two options:
  *
- * So legacy gets the behaviour tDB always had: register once, advertise only
- * the URL tLib hands back, and say plainly that health is unknown. localUrl
- * stays null, which makes the probe return "not checked" rather than guess a
- * port.
+ *   - GetHubUrl is not a readiness signal. It answered with a provisional
+ *     localhost URL while autodetection was still running, and kept answering
+ *     after a failed bind, so "non-empty" never meant "serving".
+ *   - Registering anyway and advertising whatever URL comes back has the same
+ *     problem one step later: nothing here can tell a real public URL from a
+ *     provisional one, so the startup box would print a link that may well go
+ *     nowhere. Printing a dead admin link is the class of bug this whole
+ *     change exists to remove, and doing it in a fallback path is no better
+ *     than doing it in the main one.
+ *
+ * The cost is real and bounded: on a mismatched tLib the admin UI is
+ * unavailable until tLib is updated. tDB's actual job is unaffected - the
+ * database, every oxmysql export and every script talking to it go over
+ * loopback and never touch the router. And tLib is a hard dependency from the
+ * same suite, so a tLib this old is a half-finished update, not a
+ * configuration anyone is meant to run.
+ *
+ * Consistent with the rest of the suite: tRadio does the same.
  */
-let warnedLegacyTLib = false;
+let tlibTooOld = false;
 
 function readTLibHttpStatus() {
   try {
     if (GetResourceState("tLib") !== "started") return null;
     const api = globalThis.exports.tLib;
 
-    if (typeof api.GetHttpStatus === "function") return api.GetHttpStatus();
+    if (typeof api.GetHttpStatus === "function") {
+      tlibTooOld = false;
+      return api.GetHttpStatus();
+    }
 
-    if (!warnedLegacyTLib) {
-      warnedLegacyTLib = true;
+    if (!tlibTooOld) {
+      tlibTooOld = true;
       startupStatus.warnings.push(
         "tLib is too old to report HTTP readiness (no GetHttpStatus) - the admin " +
-          "mount is registered once, without retry, and its health is not checked. " +
-          "Update tLib.",
+          "UI is not published. The database is unaffected. Update tLib.",
       );
     }
+    // Not ready, and never will be on this version. No mount is attempted and
+    // no URL is advertised.
     return {
-      // Not a claim that tLib is serving - it is an admission that this tLib
-      // cannot say, so the one-shot attempt happens exactly as it used to.
-      ready: true,
-      listenerState: "unknown",
-      publicUrlState: "unknown",
+      ready: false,
+      listenerState: "unsupported",
+      publicUrlState: "unsupported",
       publicUrl: null,
       localUrl: null,
-      error: null,
+      error: "tLib is too old to report HTTP readiness - update tLib",
     };
   } catch (err) {
     logger.debug(`Could not read tLib HTTP status: ${err.message}`);

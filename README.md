@@ -485,10 +485,19 @@ coming up when PocketBase is already serving, and it can go away later. So:
 Either way the database is unaffected: scripts talk to tDB over loopback and
 never go through the router.
 
-On a tLib old enough to have no `GetHttpStatus`, there is no readiness signal
-to use. tDB registers once, does not retry, and reports the route's health as
-**not checked** rather than guessing — and says so in the startup warnings.
-Update tLib.
+**On a tLib too old to report HTTP readiness** (no `GetHttpStatus`), the admin
+UI is not published at all. The startup box says so, and the warning tells you
+to update tLib.
+
+That is deliberate rather than a missing fallback. The older tLib has no way to
+say whether it is actually serving, so any URL it hands back might be a
+provisional one that goes nowhere — and printing a dead admin link is the exact
+problem this behaviour exists to prevent. `Config.ExposeAdmin` is left exactly
+as you set it; it simply cannot be honoured until tLib is updated.
+
+**The database is unaffected.** Every oxmysql export, every script, and the
+whole query path go over loopback and never touch tLib's router. Only the admin
+UI is missing.
 
 ---
 
