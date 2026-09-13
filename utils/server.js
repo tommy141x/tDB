@@ -9,6 +9,7 @@ const { spawnWithTimeout } = require("./utils/process-utils.js");
 // loads server_scripts with the resource directory as the base.
 const pidGuard = require("./utils/pid-guard.js");
 const settings = require("./utils/settings.js");
+const tlibPublication = require("./utils/tlib-publication.js");
 
 // ============================================================================
 // Color Utilities
@@ -50,12 +51,24 @@ const startupStatus = {
    *  made a failed registration print a loopback address under "Admin". */
   mounted: false,
   isRemoteMode: false,
-  healthCheckPassed: false,
+  /** true / false / null, where null means "not checked". Three states, because
+   *  an unchecked route and a broken one are different things and a very old
+   *  tLib cannot tell us where its listener is. */
+  healthCheckPassed: null,
   clientAuthenticated: null,
   hooksHealthy: null,
   errors: [],
   warnings: [],
 };
+
+// Where PocketBase itself is listening. Every internal check (hooks health,
+// the client adapter) talks to this, and it stays correct whether or not the
+// admin UI is reachable from outside.
+let localUrl = "";
+// What the operator is shown, and what PocketBase's own log lines are rewritten
+// to. Starts as the loopback address and becomes the routed URL once tLib
+// accepts the mount - and goes back if that mount is ever withdrawn.
+let finalUrl = "";
 
 // The credentials the local instance is actually provisioned with, kept so a
 // repair can re-apply them, and a latch so repair runs at most once per start.
@@ -158,7 +171,13 @@ function buildSmartUrl(hostParam, port) {
 // ============================================================================
 // Status Display
 // ============================================================================
+// Set once the box has printed. After that, anything that changes publication
+// has to report itself in the log - the box is not reprinted.
+let startupBoxPrinted = false;
+
 function displayStartupStatus() {
+  startupBoxPrinted = true;
+
   // Determine title based on errors
   let title;
   if (startupStatus.errors.length > 0) {
@@ -179,6 +198,12 @@ function displayStartupStatus() {
     mode = colors.magenta("Remote");
   } else if (startupStatus.mounted) {
     mode = colors.cyan("Published via tLib");
+  } else if (startupStatus.exposeAdmin && publisher.pending) {
+    // Waiting on tLib's HTTP, not broken by it. The mount is claimed as soon
+    // as tLib reports ready, so this line is a snapshot of a moment, not a
+    // verdict — saying "failed" here sent people to debug a listener that was
+    // simply half a second behind PocketBase.
+    mode = colors.yellow("Waiting for tLib's HTTP listener");
   } else if (startupStatus.exposeAdmin) {
     mode = colors.yellow("Headless (mount failed)");
   } else {
@@ -248,6 +273,11 @@ function displayStartupStatus() {
         startupStatus.warnings.push(
           "tLib accepted the mount but is not forwarding it — check tLib's log",
         );
+      } else {
+        // null: never dialled. Only happens on a tLib too old to report where
+        // its listener is, which has already produced its own warning.
+        healthStatus = "✓ Started (route not checked)";
+        healthColor = colors.green;
       }
     } else {
       // Headless — whether by config or because the mount could not be made.
@@ -327,45 +357,34 @@ function displayStartupStatus() {
  *
  * What CAN be answered, and is the part likely to be misconfigured, is whether
  * the router is up and routing our prefix to our process. So the request goes
- * to the router over loopback, carrying the same mount the public URL uses.
+ * to tLib's own listener, carrying the same mount the public URL uses.
+ *
+ * The address comes from tLib's status snapshot (localUrl), never from the
+ * public origin. Deriving it from the public URL is what this used to do, and
+ * it was wrong in the ordinary case: behind a proxy the public origin is
+ * https://host with no port, so the old code fell back to 443 and probed
+ * 127.0.0.1:443 — reporting a broken admin route on a working setup.
+ *
+ * @param {string|null} url absolute health URL, from publisher.healthUrl()
  */
-async function checkRouteHealth(publicUrl) {
-  const routerPort = getRouterPort();
-  if (routerPort === null) return false;
+async function checkRouteHealth(url) {
+  if (!url) return false;
 
-  let mount;
+  let target;
   try {
-    // The mount is the public URL's path — the router's own base contributes
-    // none, so whatever path survives is exactly what it matches on.
-    mount = new URL(publicUrl).pathname.replace(/\/+$/, "");
+    target = new URL(url);
   } catch {
     return false;
   }
 
+  const transport = target.protocol === "https:" ? https : require("http");
+
   return new Promise((resolve) => {
-    require("http")
-      .get(
-        `http://127.0.0.1:${routerPort}${mount}/api/health`,
-        { timeout: 5000 },
-        (resp) => resolve(resp.statusCode === 200),
-      )
+    transport
+      .get(url, { timeout: 5000 }, (resp) => resolve(resp.statusCode === 200))
       .on("error", () => resolve(false))
       .on("timeout", () => resolve(false));
   });
-}
-
-/** The port tLib's router is bound to, or null if it cannot be determined. */
-function getRouterPort() {
-  try {
-    if (GetResourceState("tLib") !== "started") return null;
-    const base = globalThis.exports.tLib.GetHubUrl();
-    if (typeof base !== "string" || !base) return null;
-    const u = new URL(base);
-    if (u.port) return Number(u.port);
-    return u.protocol === "https:" ? 443 : 80;
-  } catch {
-    return null;
-  }
 }
 
 // ============================================================================
@@ -578,84 +597,187 @@ function confirmBind(proc, port, timeoutMs = 15000) {
 }
 
 /**
+ * The mount tDB asks tLib for. One constant: the registration and the health
+ * probe have to agree on it, and they used to agree only because the probe
+ * re-derived it by parsing the public URL's path.
+ */
+const TLIB_MOUNT = "/db";
+
+/**
+ * Read tLib's HTTP status snapshot.
+ *
+ * Feature-detected, because bumping tLib's required version is not this
+ * change's to make.
+ *
+ * On an older tLib there is no readiness signal at all. GetHubUrl is NOT a
+ * substitute: it answered with a provisional localhost URL while autodetection
+ * was still running, and kept answering after a failed bind, so "non-empty"
+ * never meant "serving". Believing it would put a URL that does not work under
+ * "Admin" in the startup box — the exact class of lie this change removes.
+ *
+ * So legacy gets the behaviour tDB always had: register once, advertise only
+ * the URL tLib hands back, and say plainly that health is unknown. localUrl
+ * stays null, which makes the probe return "not checked" rather than guess a
+ * port.
+ */
+let warnedLegacyTLib = false;
+
+function readTLibHttpStatus() {
+  try {
+    if (GetResourceState("tLib") !== "started") return null;
+    const api = globalThis.exports.tLib;
+
+    if (typeof api.GetHttpStatus === "function") return api.GetHttpStatus();
+
+    if (!warnedLegacyTLib) {
+      warnedLegacyTLib = true;
+      startupStatus.warnings.push(
+        "tLib is too old to report HTTP readiness (no GetHttpStatus) - the admin " +
+          "mount is registered once, without retry, and its health is not checked. " +
+          "Update tLib.",
+      );
+    }
+    return {
+      // Not a claim that tLib is serving - it is an admission that this tLib
+      // cannot say, so the one-shot attempt happens exactly as it used to.
+      ready: true,
+      listenerState: "unknown",
+      publicUrlState: "unknown",
+      publicUrl: null,
+      localUrl: null,
+      error: null,
+    };
+  } catch (err) {
+    logger.debug(`Could not read tLib HTTP status: ${err.message}`);
+    return null;
+  }
+}
+
+/**
  * Ask tLib's router to expose this PocketBase instance on the server's one
  * external port.
  *
  * PocketBase binds loopback and is unreachable from outside on its own. tLib
  * owns the single public port and proxies `<mount>/...` here.
  *
- * Returns the routed public URL, or null if no mount was made (tLib absent,
- * admin not exposed, remote mode, or the router refused).
+ * Returns tLib's raw result so the publisher can tell a refusal from a
+ * not-ready-yet; it no longer decides anything itself.
  *
  * Note on `exports`: these files are CommonJS modules, where `exports` is
  * module.exports and shadows FiveM's global export proxy. Reaching it through
  * globalThis is required, not stylistic.
  */
 function registerWithTLib() {
-  // Remote mode: PocketBase is somewhere else entirely and already has its own
-  // URL. tLib only exposes services on this machine — proxying to an
-  // operator-supplied remote host is exactly the SSRF shape its loopback-only
-  // rule exists to prevent. So: no mount.
-  const adv = config.Advanced || {};
-  if (adv.RemoteHost && adv.RemotePort) return null;
-
-  // Staying headless is a supported choice, not a problem — say nothing.
-  if (!config.ExposeAdmin) {
-    logger.debug("ExposeAdmin is false — staying headless, no mount requested");
-    return null;
+  // tLib is a hard dependency, so this should not happen; if it does, the
+  // database still works for every script on this server and only the admin
+  // UI is missing. That is a warning, not a failed start.
+  if (GetResourceState("tLib") !== "started") {
+    return {
+      ok: false,
+      retryable: true,
+      error: "tLib is not started",
+    };
   }
 
-  try {
-    // tLib is a hard dependency, so this should not happen; if it does, the
-    // database still works for every script on this server and only the admin
-    // UI is missing. That is a warning, not a failed start.
-    if (GetResourceState("tLib") !== "started") {
-      startupStatus.warnings.push(
-        "tLib is not started — the database works, but the admin UI is not reachable",
-      );
-      return null;
+  return globalThis.exports.tLib.RegisterWebApp({
+    id: "db",
+    mount: TLIB_MOUNT,
+    port: config.Port,
+    host: "127.0.0.1",
+    // PocketBase serves its admin at /_/ and its API at /api/ with no base
+    // path option, so it must see the unprefixed paths. That works because
+    // its admin UI is subpath-relative: assets are emitted as ./assets/... and
+    // its SDK client is constructed with a relative baseURL ("../"), which
+    // resolves against window.location.pathname. Verified against 0.40.3.
+    stripPrefix: true,
+    // PocketBase realtime is SSE over plain HTTP, not WebSocket.
+    websocket: false,
+    title: "Database",
+    icon: "database",
+    description: "PocketBase collections, records and admin",
+    accent: "#22c07a",
+    // PocketBase serves nothing at its root — pb_public is empty — so the
+    // bare mount would answer with its JSON "File not found", which reads
+    // like the router is broken. The admin UI is at /_/.
+    index: "/_/",
+    // Listed on the hub. ExposeAdmin is already the decision about whether
+    // this is public at all — once it is, the mount is reachable by anyone
+    // who guesses "/db", so omitting it from the index would hide it from
+    // the operator and nobody else. Set ExposeAdmin = false to stay headless.
+    listed: true,
+  });
+}
+
+/**
+ * Owns whether the admin UI is currently published, and keeps the startup box
+ * honest about it. See utils/tlib-publication.js for the state machine.
+ */
+const publisher = tlibPublication.createPublisher({
+  mount: TLIB_MOUNT,
+  register: registerWithTLib,
+  logger,
+  onPublished: (url) => {
+    startupStatus.mounted = true;
+    if (url) {
+      finalUrl = url;
+      startupStatus.publicUrl = url;
     }
-
-    const result = globalThis.exports.tLib.RegisterWebApp({
-      id: "db",
-      mount: "/db",
-      port: config.Port,
-      host: "127.0.0.1",
-      // PocketBase serves its admin at /_/ and its API at /api/ with no base
-      // path option, so it must see the unprefixed paths. That works because
-      // its admin UI is subpath-relative: assets are emitted as ./assets/... and
-      // its SDK client is constructed with a relative baseURL ("../"), which
-      // resolves against window.location.pathname. Verified against 0.40.3.
-      stripPrefix: true,
-      // PocketBase realtime is SSE over plain HTTP, not WebSocket.
-      websocket: false,
-      title: "Database",
-      icon: "database",
-      description: "PocketBase collections, records and admin",
-      accent: "#22c07a",
-      // PocketBase serves nothing at its root — pb_public is empty — so the
-      // bare mount would answer with its JSON "File not found", which reads
-      // like the router is broken. The admin UI is at /_/.
-      index: "/_/",
-      // Listed on the hub. ExposeAdmin is already the decision about whether
-      // this is public at all — once it is, the mount is reachable by anyone
-      // who guesses "/db", so omitting it from the index would hide it from
-      // the operator and nobody else. Set ExposeAdmin = false to stay headless.
-      listed: true,
-    });
-
-    if (!result || result.ok !== true) {
-      startupStatus.warnings.push(
-        `tLib refused the /db mount: ${(result && result.error) || "unknown error"}`,
-      );
-      return null;
+    // The startup box has already printed by the time a late or retried mount
+    // lands, so it cannot carry this. Say it in the log instead, otherwise the
+    // last thing the operator saw was "waiting for tLib" and nothing since.
+    if (startupBoxPrinted) {
+      logger.info(`Admin UI is published at ${(url || finalUrl) + "/_/"}`);
     }
+  },
+  onUnpublished: () => {
+    // Stop advertising an Admin URL for a route that no longer exists. The
+    // database is unaffected - scripts never went through the router.
+    startupStatus.mounted = false;
+    startupStatus.healthCheckPassed = null;
+    if (localUrl) {
+      finalUrl = localUrl;
+      startupStatus.publicUrl = localUrl;
+    }
+  },
+  onWarning: (message) => {
+    startupStatus.warnings.push(message);
+    logger.warn(message);
+  },
+});
 
-    return result.url;
-  } catch (err) {
-    startupStatus.warnings.push(`Could not register with tLib: ${err.message}`);
-    return null;
-  }
+/**
+ * Subscribe first, then query — the contract's ordering. A status transition
+ * landing between the two is then caught by the subscription instead of being
+ * missed by a query that ran a moment too early.
+ */
+function watchTLibStatus() {
+  on("tLib:http:status", (snapshot) => {
+    const wasPublished = publisher.published;
+    publisher.handleStatus(snapshot);
+    if (publisher.published && !wasPublished) revalidateRoute();
+  });
+
+  // tLib restarting takes its registry with it, so the mount we hold is void.
+  on("onResourceStart", (resource) => {
+    if (resource !== "tLib") return;
+    publisher.handleTLibRestart();
+    publisher.handleStatus(readTLibHttpStatus());
+    if (publisher.published) revalidateRoute();
+  });
+
+  on("onResourceStop", (resource) => {
+    if (resource !== "tLib") return;
+    publisher.handleTLibRestart();
+  });
+}
+
+/** Re-probe the mount after it is (re)published, and refresh the status box. */
+async function revalidateRoute() {
+  const url = publisher.healthUrl();
+  // No listener address means the probe cannot run, which is not the same as
+  // the probe failing. Reporting "not reachable" for something never dialled
+  // would send the operator to debug a route that is probably fine.
+  startupStatus.healthCheckPassed = url ? await checkRouteHealth(url) : null;
 }
 
 async function createSuperuser(pbPath, publicIP) {
@@ -1088,14 +1210,11 @@ async function startPocketBase() {
   // seconds, and a port proven free at the top of that window says nothing
   // about the bottom of it.
   //
-  // These two are assigned once the port exists. Declared here because the
-  // handlers and health checks further down close over them.
+  // Assigned once the port exists. `localUrl` and `finalUrl` are module-level
+  // (see their declarations near startupStatus): the publication callbacks run
+  // long after this function returns, when tLib's HTTP goes up or comes back,
+  // and they need the loopback address to fall back to.
   let bindAddress = "";
-  // Every internal check (hooks health, the client adapter) talks to this.
-  // It stays correct whether or not the admin UI is reachable from outside.
-  let localUrl = "";
-  // Provisional. Replaced with the real routed URL once tLib accepts the mount.
-  let finalUrl = "";
 
   startupStatus.exposeAdmin = config.ExposeAdmin;
 
@@ -1293,11 +1412,18 @@ async function startPocketBase() {
     if (pocketbaseProcess && !pocketbaseProcess.killed) {
       // PocketBase is listening — only now is a mount valid. Registering
       // earlier would advertise a route that 502s.
-      const routed = registerWithTLib();
-      if (routed) {
-        finalUrl = routed;
-        startupStatus.publicUrl = routed;
-        startupStatus.mounted = true;
+      //
+      // Whether we want one at all is the operator's setting, untouched here.
+      if (config.ExposeAdmin) {
+        publisher.want(true);
+        // Subscribe before querying. A transition landing between the two is
+        // then caught by the subscription rather than lost, which is the
+        // difference between "the admin UI came up a second late" and "the
+        // admin UI never came up this boot".
+        watchTLibStatus();
+        publisher.handleStatus(readTLibHttpStatus());
+      } else {
+        logger.debug("ExposeAdmin is false — staying headless, no mount requested");
       }
 
       // Emit ready event for client.js to listen to immediately.
@@ -1350,10 +1476,10 @@ async function startPocketBase() {
       startupStatus.hooksHealthy = await checkHooksHealth(localUrl);
 
       // Only meaningful once the router actually accepted a mount. Headless is
-      // not a degraded state and has nothing to probe.
-      if (startupStatus.mounted) {
-        startupStatus.healthCheckPassed = await checkRouteHealth(finalUrl);
-      }
+      // not a degraded state and has nothing to probe, and neither is a mount
+      // still pending on a tLib listener that has not finished coming up —
+      // revalidateRoute() picks that up when it does.
+      if (startupStatus.mounted) await revalidateRoute();
 
       // Before the banner, and awaited. It was a floating 2s setTimeout, which
       // meant a drift warning it raised landed after the status box had already

@@ -468,6 +468,28 @@ Scripts are unaffected either way — they talk to tDB over loopback.
 tDB owns the `/db` route. When exposed, its admin panel is at `/db/_/` on
 tLib's public URL and port. There are no tDB host, port, or mount settings.
 
+**The mount is not a one-shot request.** tLib's HTTP listener can still be
+coming up when PocketBase is already serving, and it can go away later. So:
+
+- If tLib is not ready yet, the startup box says **Waiting for tLib's HTTP
+  listener** — not "mount failed". Nothing is wrong; the mount is claimed as
+  soon as tLib reports ready, and the admin URL is logged then.
+- If tLib stops or restarts, tDB stops advertising the admin URL and re-claims
+  the mount when it comes back. It does not keep printing a link to a route
+  that no longer exists.
+- The route's health is checked against **tLib's own listener**, not the public
+  URL. The public address is usually unreachable from the server itself, and
+  behind a reverse proxy it has no port to probe — checking it reported a
+  perfectly working admin route as broken.
+
+Either way the database is unaffected: scripts talk to tDB over loopback and
+never go through the router.
+
+On a tLib old enough to have no `GetHttpStatus`, there is no readiness signal
+to use. tDB registers once, does not retry, and reports the route's health as
+**not checked** rather than guessing — and says so in the startup warnings.
+Update tLib.
+
 ---
 
 ## Troubleshooting
