@@ -27,8 +27,17 @@ module.exports = (function () {
 
       this.config = {
         ExposeAdmin: false,
+        // Whether the mount appears in tLib's hub index. Defaults to TRUE,
+        // unlike ExposeAdmin beside it, and deliberately: this key is newer
+        // than the resource, so an install whose config.lua predates it must
+        // keep behaving exactly as it does today. Defaulting to false would
+        // silently drop every existing server out of the hub on update.
+        //
+        // Not a security control. See the note on `listed` in server.js:
+        // an unlisted mount is still registered and still answers.
+        ShowInHub: true,
         // Preferred loopback port, not a setting — see the note in the parser
-        // below and resolveInternalPort() in utils/server.js. Overwritten at
+        // below and resolveInternalPort() in server/utils/server.js. Overwritten at
         // startup with the port PocketBase was actually given.
         Port: 8090,
         AutoUpdate: false,
@@ -61,7 +70,7 @@ module.exports = (function () {
           DataDir: "pb_data",
           // Manage defaults to false: unless asked, tDB does not touch these
           // settings on the instance at all, so the admin UI owns them and
-          // nothing can drift. See reconcileSettings() in utils/server.js.
+          // nothing can drift. See reconcileSettings() in server/utils/server.js.
           SMTP: {
             Manage: false,
             Enabled: false,
@@ -102,6 +111,11 @@ module.exports = (function () {
             /Config\.ExposeAdmin\s*=\s*(true|false)/,
           );
           if (exposeAdmin) this.config.ExposeAdmin = exposeAdmin === "true";
+
+          // Absent from config.lua leaves the default (true) in place, which
+          // is what keeps an install that predates this key listed.
+          const showInHub = simpleMatch(/Config\.ShowInHub\s*=\s*(true|false)/);
+          if (showInHub) this.config.ShowInHub = showInHub === "true";
 
           // Config.Port is deliberately NOT parsed. It is no longer an
           // operator setting: PocketBase's port is loopback-internal, so

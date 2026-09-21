@@ -4,17 +4,17 @@
 (function () {
   const fs = require("fs");
   const path = require("path");
-  const PocketBase = require("./bin/pocketbase.cjs.js");
-  const configLoader = require("./utils/config-loader.js");
+  const PocketBase = require("./server/vendor/pocketbase.cjs.js");
+  const configLoader = require("./server/utils/config-loader.js");
   const {
     AuthManager,
     isAuthError,
     ensureSuperuserTokenDuration,
-  } = require("./utils/auth-manager.js");
-  const PocketBaseAdapter = require("./adapters/pocketbase.js");
-  const OxMySQLAdapter = require("./adapters/oxmysql.js");
-  const httpTransport = require("./utils/http-transport.js");
-  const sqlImport = require("./utils/sql-import.js");
+  } = require("./server/utils/auth-manager.js");
+  const PocketBaseAdapter = require("./server/adapters/pocketbase.js");
+  const OxMySQLAdapter = require("./server/adapters/oxmysql.js");
+  const httpTransport = require("./server/utils/http-transport.js");
+  const sqlImport = require("./server/utils/sql-import.js");
 
   // ============================================================================
   // Export Router - Routes export calls to appropriate adapters
@@ -90,7 +90,7 @@
 
   // Polyfill EventSource for Node.js environment
   if (typeof EventSource === "undefined") {
-    const EventSourcePolyfill = require("./bin/eventsource.min.js");
+    const EventSourcePolyfill = require("./server/vendor/eventsource.min.js");
     global.EventSource =
       EventSourcePolyfill.EventSourcePolyfill || EventSourcePolyfill;
   }

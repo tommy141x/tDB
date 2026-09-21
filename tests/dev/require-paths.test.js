@@ -28,7 +28,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const ROOT = path.resolve(__dirname, "..");
+const ROOT = path.resolve(__dirname, "..", "..");
 
 let pass = 0;
 let fail = 0;
@@ -65,11 +65,24 @@ function manifestServerScripts() {
 
 // The resource's own sources. bin/ is vendored - third-party bundles resolve
 // among themselves and are not ours to police.
+// server/vendor is deliberately not scanned: it is third-party code shipped as
+// it was published, and its internal requires are not ours to police.
+const SOURCE_DIRS = ["server/utils", "server/adapters"];
+
 function ownSources() {
   const files = [];
-  for (const dir of ["utils", "adapters"]) {
+  for (const dir of SOURCE_DIRS) {
     const full = path.join(ROOT, dir);
-    if (!fs.existsSync(full)) continue;
+    if (!fs.existsSync(full)) {
+      // Hard error rather than `continue`. Skipping a missing directory is how
+      // this check reported "0 relative require(s) inspected" as a pass after
+      // the sources moved under server/ -- a silent all-clear over a tree it
+      // could no longer find, which is the one outcome a path test must never
+      // produce.
+      throw new Error(
+        `source directory ${dir} does not exist; update SOURCE_DIRS after a move`,
+      );
+    }
     for (const name of fs.readdirSync(full)) {
       if (name.endsWith(".js")) files.push(path.join(full, name));
     }

@@ -14,7 +14,7 @@
 const path = require("path");
 
 const ROOT = require("./fivem-require.js");
-const pub = require(path.join(ROOT, "utils/tlib-publication.js"));
+const pub = require(path.join(ROOT, "server/utils/tlib-publication.js"));
 
 let pass = 0;
 let fail = 0;
@@ -330,7 +330,7 @@ section("How server.js wires the lifecycle up");
 {
   // Normalised: server.js is CRLF on disk, so a \n literal matches nothing.
   const src = require("fs")
-    .readFileSync(require("path").join(ROOT, "utils/server.js"), "utf8")
+    .readFileSync(require("path").join(ROOT, "server/utils/server.js"), "utf8")
     .replace(/\r\n/g, "\n");
 
   const watch = src.slice(
@@ -405,6 +405,47 @@ section("How server.js wires the lifecycle up");
   ok(
     !/exposeAdmin\s*=|ExposeAdmin\s*=\s*(true|false)/.test(legacy),
     "the operator's ExposeAdmin setting is read, never rewritten",
+  );
+
+  // ------------------------------------------------------------------
+  section("Listing on the hub is separate from being exposed");
+
+  const loaderSrc = require("fs")
+    .readFileSync(require("path").join(ROOT, "server/utils/config-loader.js"), "utf8")
+    .replace(/\r\n/g, "\n");
+  const defaults = loaderSrc.slice(
+    loaderSrc.indexOf("this.config = {"),
+    loaderSrc.indexOf("// Parse top-level config"),
+  );
+
+  ok(
+    /ShowInHub:\s*true/.test(defaults),
+    "ShowInHub defaults to TRUE - this key is newer than the resource, and an install " +
+      "whose config.lua predates it must stay listed rather than silently vanish from the hub",
+  );
+  ok(
+    /Config\\\.ShowInHub\\s\*=\\s\*\(true\|false\)/.test(loaderSrc),
+    "and it is parsed out of config.lua",
+  );
+  ok(
+    /listed:\s*config\.ShowInHub !== false/.test(src),
+    "the flag reaches RegisterWebApp's `listed`, via !== false so an absent key means listed",
+  );
+
+  // The two settings must stay independent: delisting is cosmetic, and the
+  // registration itself is still gated only by ExposeAdmin.
+  const registerBody = src.slice(
+    src.indexOf("function registerWithTLib()"),
+    src.indexOf("* Owns whether the admin UI is currently published"),
+  );
+  ok(
+    !/ShowInHub/.test(registerBody.slice(0, registerBody.indexOf("listed:"))),
+    "ShowInHub does not gate whether we register - hiding is not the same as not serving",
+  );
+  ok(
+    /not a security|NOT a security/i.test(src.slice(src.indexOf("listed: config.ShowInHub"), src.indexOf("listed: config.ShowInHub") + 40)) ||
+      /NOT a security control/.test(registerBody),
+    "and the code says so, so nobody later mistakes it for one",
   );
 }
 

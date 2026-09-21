@@ -3,7 +3,7 @@
  *
  * A FiveM script normally arrives with a `.sql` dump you are expected to load
  * into MySQL by hand before it will start. There is no MySQL here, so tDB does
- * that job itself: drop the file in `sql/`, restart, and the schema is there.
+ * that job itself: drop the file in `sql/` at the resource root, restart, and the schema is there.
  *
  * The rules, in order of how much trouble they save:
  *

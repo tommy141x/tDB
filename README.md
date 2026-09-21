@@ -22,6 +22,20 @@ local row = exports.oxmysql:single_async('SELECT * FROM players WHERE citizenid 
 3. `ensure tDB` in `server.cfg` — before any resource that queries the database.
 4. Start the server.
 
+A **release download already contains the PocketBase binary**. Working from a
+git clone you need to fetch it once, because the binary is no longer committed:
+
+```bash
+bun scripts/fetch-runtime.ts          # this platform
+bun scripts/fetch-runtime.ts --all    # both, for building a release
+```
+
+It downloads the pinned version into `.runtime/` and verifies it against the
+checksums PocketBase publishes with the release, failing rather than warning on
+a mismatch. Upgrading PocketBase is a one-line change to `PB_VERSION` in that
+script, which keeps every platform on the same build — previously each was
+replaced by hand and Linux and Windows had drifted onto 0.40.3 and 0.40.4.
+
 On first start tDB provisions PocketBase itself: it creates the superuser,
 writes the credentials into `config.lua`, and authenticates. **The PocketBase
 web installer never appears**, and if the superuser account is ever lost or
@@ -200,6 +214,7 @@ Everything lives in `config.lua`. The defaults are meant to be usable as-is.
 
 ```lua
 Config.ExposeAdmin = true    -- publish the admin UI through tLib's port
+Config.ShowInHub   = true    -- list it in tLib's hub (cosmetic, not security)
 
 Config.Superuser = {         -- generated on first start if left empty
     Email = "",
@@ -463,6 +478,23 @@ reach it at all:
 Config.ExposeAdmin = false
 ```
 
+### Hiding it from the hub
+
+tLib's hub lists the apps it serves. A server running several of them may not
+want the database admin panel among the things players see:
+
+```lua
+Config.ShowInHub = false   -- default: true
+```
+
+> **This is not a security setting.** It removes the hub entry and nothing
+> else. The mount is still registered and `/db` still answers to anyone who
+> requests it — delisting hides the admin UI from you, not from them. If you
+> want it genuinely unreachable, use `Config.ExposeAdmin = false`.
+
+Leaving the key out entirely keeps the current behaviour, so an existing
+`config.lua` needs no edit.
+
 Scripts are unaffected either way — they talk to tDB over loopback.
 
 tDB owns the `/db` route. When exposed, its admin panel is at `/db/_/` on
@@ -541,7 +573,7 @@ Only affects the admin UI. Script access is local and unaffected.
 
 Bundles the Windows and Linux AMD64 [PocketBase](https://github.com/pocketbase/pocketbase/releases)
 binaries (0.40.3, MIT, by Gani Georgiev), and the Polyglot SQL transpiler
-(`@polyglot-sql/sdk`, MIT, by TobiLG) as WebAssembly in `bin/polyglot/`.
+(`@polyglot-sql/sdk`, MIT, by TobiLG) as WebAssembly in `server/vendor/polyglot/`.
 
 - PocketBase docs — https://pocketbase.io/docs/
 - PocketBase JS SDK — https://github.com/pocketbase/js-sdk

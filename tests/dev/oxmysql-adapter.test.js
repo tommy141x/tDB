@@ -18,12 +18,12 @@ const { spawn, spawnSync } = require("child_process");
 // itself: only manifest server_scripts get the resource root as their base.
 const ROOT = require("./fivem-require.js");
 
-const OxMySQLAdapter = require(path.join(ROOT, "adapters/oxmysql.js"));
-const PocketBase = require(path.join(ROOT, "bin/pocketbase.cjs.js"));
+const OxMySQLAdapter = require(path.join(ROOT, "server/adapters/oxmysql.js"));
+const PocketBase = require(path.join(ROOT, "server/vendor/pocketbase.cjs.js"));
 
 const PB_BIN = path.join(
   ROOT,
-  process.platform === "win32" ? "bin/pocketbase-win.exe" : "bin/pocketbase-linux",
+  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux",
 );
 const PORT = 8161;
 const URL = `http://127.0.0.1:${PORT}`;

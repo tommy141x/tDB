@@ -19,13 +19,13 @@ const { spawn, spawnSync } = require("child_process");
 
 const ROOT = require("./fivem-require.js");
 
-const PocketBase = require(path.join(ROOT, "bin/pocketbase.cjs.js"));
-const OxMySQLAdapter = require(path.join(ROOT, "adapters/oxmysql.js"));
-const httpTransport = require(path.join(ROOT, "utils/http-transport.js"));
+const PocketBase = require(path.join(ROOT, "server/vendor/pocketbase.cjs.js"));
+const OxMySQLAdapter = require(path.join(ROOT, "server/adapters/oxmysql.js"));
+const httpTransport = require(path.join(ROOT, "server/utils/http-transport.js"));
 
 const PB_BIN = path.join(
   ROOT,
-  process.platform === "win32" ? "bin/pocketbase-win.exe" : "bin/pocketbase-linux",
+  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux",
 );
 const PORT = 8182;
 const URL_BASE = `http://127.0.0.1:${PORT}`;
@@ -319,10 +319,10 @@ async function main() {
     // --------------------------------------------------------------------
     console.log("\n=== the resource actually installs it");
 
-    const clientSource = fs.readFileSync(path.join(ROOT, "utils/client.js"), "utf8");
+    const clientSource = fs.readFileSync(path.join(ROOT, "server/utils/client.js"), "utf8");
     ok(
       /httpTransport\.install\(pb\)/.test(clientSource),
-      "utils/client.js installs the transport on the client it hands out",
+      "server/utils/client.js installs the transport on the client it hands out",
     );
   } finally {
     server.kill();

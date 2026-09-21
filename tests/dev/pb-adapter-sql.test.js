@@ -18,12 +18,12 @@ const { spawn, spawnSync } = require("child_process");
 // itself: only manifest server_scripts get the resource root as their base.
 const ROOT = require("./fivem-require.js");
 
-const PocketBaseAdapter = require(path.join(ROOT, "adapters/pocketbase.js"));
-const PocketBase = require(path.join(ROOT, "bin/pocketbase.cjs.js"));
+const PocketBaseAdapter = require(path.join(ROOT, "server/adapters/pocketbase.js"));
+const PocketBase = require(path.join(ROOT, "server/vendor/pocketbase.cjs.js"));
 
 const PB_BIN = path.join(
   ROOT,
-  process.platform === "win32" ? "bin/pocketbase-win.exe" : "bin/pocketbase-linux",
+  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux",
 );
 const PORT = 8171;
 const URL = `http://127.0.0.1:${PORT}`;
@@ -254,7 +254,7 @@ async function main() {
     // 20, so for any name both claim, PocketBase is asked first. `update` is
     // the dangerous one: record update and SQL UPDATE share it, and a misroute
     // would break every MySQL.update call while looking like a working server.
-    const OxMySQLAdapter = require(path.join(ROOT, "adapters/oxmysql.js"));
+    const OxMySQLAdapter = require(path.join(ROOT, "server/adapters/oxmysql.js"));
     const ox = new OxMySQLAdapter(pb, (fn) => fn, {
       debug: () => {},
       info: () => {},

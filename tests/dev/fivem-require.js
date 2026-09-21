@@ -7,17 +7,17 @@
  *
  *   - A script listed in fxmanifest's server_scripts is evaluated against a
  *     synthetic `<resource>//dummy.js`, so ITS requires resolve from the
- *     resource root: "./utils/config-loader.js".
+ *     resource root: "./server/utils/config-loader.js".
  *   - Anything those scripts pull in is an ordinary CommonJS module and
  *     resolves from its own directory: a file in utils/ says "./x.js", and a
  *     file in adapters/ says "../utils/x.js".
  *
  * An earlier version of this shim rewrote "./utils/..." to the resource root
  * for every requiring file, which quietly made both spellings work here. That
- * is why utils/auth-manager.js shipped with require("./utils/process-utils.js")
+ * is why server/utils/auth-manager.js shipped with require("./server/utils/process-utils.js")
  * - green in every harness, and a hard load failure on the server:
  *
- *     Error loading script utils/client.js in resource tDB:
+ *     Error loading script server/utils/client.js in resource tDB:
  *     Cannot find module './utils/process-utils.js'
  *
  * So the rewrite is applied ONLY to the manifest scripts. A nested module that
@@ -30,7 +30,7 @@ const fs = require("fs");
 const path = require("path");
 const Module = require("module");
 
-const ROOT = path.resolve(__dirname, "..");
+const ROOT = path.resolve(__dirname, "..", "..");
 
 // The files FiveM loads as server_scripts, read from the manifest rather than
 // hardcoded, so adding one to fxmanifest.lua does not silently change how the

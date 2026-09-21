@@ -17,13 +17,13 @@ const { spawn, spawnSync } = require("child_process");
 
 const ROOT = require("./fivem-require.js");
 
-const PocketBase = require(path.join(ROOT, "bin/pocketbase.cjs.js"));
-const OxMySQLAdapter = require(path.join(ROOT, "adapters/oxmysql.js"));
-const sqlImport = require(path.join(ROOT, "utils/sql-import.js"));
+const PocketBase = require(path.join(ROOT, "server/vendor/pocketbase.cjs.js"));
+const OxMySQLAdapter = require(path.join(ROOT, "server/adapters/oxmysql.js"));
+const sqlImport = require(path.join(ROOT, "server/utils/sql-import.js"));
 
 const PB_BIN = path.join(
   ROOT,
-  process.platform === "win32" ? "bin/pocketbase-win.exe" : "bin/pocketbase-linux",
+  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux",
 );
 const PORT = 8184;
 const URL_BASE = `http://127.0.0.1:${PORT}`;
@@ -456,7 +456,7 @@ INSERT INTO staging (id) VALUES (2);
     // --------------------------------------------------------------------
     console.log("\n=== The resource wires it in");
 
-    const clientSource = fs.readFileSync(path.join(ROOT, "utils/client.js"), "utf8");
+    const clientSource = fs.readFileSync(path.join(ROOT, "server/utils/client.js"), "utf8");
     ok(
       /await runSqlImports\(\);[\s\S]{0,80}notifyReady\(\)/.test(clientSource),
       "imports run before readiness, so consumers cannot race the schema",

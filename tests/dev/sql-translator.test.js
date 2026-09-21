@@ -14,7 +14,7 @@ const { DatabaseSync } = require("node:sqlite");
 // only manifest server_scripts get the resource root as their base.
 const ROOT = require("./fivem-require.js");
 
-const translator = require(path.join(ROOT, "utils/sql-translator.js"));
+const translator = require(path.join(ROOT, "server/utils/sql-translator.js"));
 
 let pass = 0;
 let fail = 0;

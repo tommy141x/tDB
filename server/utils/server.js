@@ -3,13 +3,13 @@ const path = require("path");
 const https = require("https");
 const net = require("net");
 const crypto = require("crypto");
-const configLoader = require("./utils/config-loader.js");
-const { spawnWithTimeout } = require("./utils/process-utils.js");
+const configLoader = require("./server/utils/config-loader.js");
+const { spawnWithTimeout } = require("./server/utils/process-utils.js");
 // Resolved from the resource root, not from this file — FiveM's Node runtime
 // loads server_scripts with the resource directory as the base.
-const pidGuard = require("./utils/pid-guard.js");
-const settings = require("./utils/settings.js");
-const tlibPublication = require("./utils/tlib-publication.js");
+const pidGuard = require("./server/utils/pid-guard.js");
+const settings = require("./server/utils/settings.js");
+const tlibPublication = require("./server/utils/tlib-publication.js");
 
 // ============================================================================
 // Color Utilities
@@ -100,7 +100,7 @@ function getPocketBasePath() {
   const os = getOS();
   if (!os) return null;
 
-  const binPath = path.join(resourcePath, "bin");
+  const binPath = path.join(resourcePath, ".runtime");
   const exeName = os === "windows" ? "pocketbase-win.exe" : "pocketbase-linux";
   const fullPath = path.join(binPath, exeName);
 
@@ -725,11 +725,21 @@ function registerWithTLib() {
     // bare mount would answer with its JSON "File not found", which reads
     // like the router is broken. The admin UI is at /_/.
     index: "/_/",
-    // Listed on the hub. ExposeAdmin is already the decision about whether
-    // this is public at all — once it is, the mount is reachable by anyone
-    // who guesses "/db", so omitting it from the index would hide it from
-    // the operator and nobody else. Set ExposeAdmin = false to stay headless.
-    listed: true,
+    // Whether the mount gets an entry in tLib's hub index.
+    //
+    // NOT a security control, and the docs say so in those words. ExposeAdmin
+    // has already decided whether this is public; once it is, the mount is
+    // registered and answers to anyone who requests "/db" whether or not it
+    // is listed. Delisting hides it from the operator and from nobody else.
+    // ExposeAdmin = false is the way to actually not serve it.
+    //
+    // What it is good for is a server running several tLib apps that wants
+    // the hub to show the ones players use, not the database admin panel.
+    //
+    // `!== false` rather than a bare read: an old config.lua has no such key,
+    // and absent must mean listed, exactly as it behaved before the key
+    // existed.
+    listed: config.ShowInHub !== false,
   });
 }
 

@@ -23,17 +23,17 @@ const { spawn, spawnSync } = require("child_process");
 // only manifest server_scripts get the resource root as their base.
 const ROOT = require("./fivem-require.js");
 
-const PocketBase = require(path.join(ROOT, "bin/pocketbase.cjs.js"));
+const PocketBase = require(path.join(ROOT, "server/vendor/pocketbase.cjs.js"));
 const {
   AuthManager,
   getTokenExpiryMs,
   ensureSuperuserTokenDuration,
   MANAGED_TOKEN_DURATION_SECONDS,
-} = require(path.join(ROOT, "utils/auth-manager.js"));
+} = require(path.join(ROOT, "server/utils/auth-manager.js"));
 
 const PB_BIN = path.join(
   ROOT,
-  process.platform === "win32" ? "bin/pocketbase-win.exe" : "bin/pocketbase-linux",
+  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux",
 );
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "tdb-authtest-"));
 const PORT = 8099;

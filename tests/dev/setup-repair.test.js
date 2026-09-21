@@ -18,10 +18,10 @@ const fs = require("fs");
 const os = require("os");
 const { spawn, spawnSync } = require("child_process");
 
-const ROOT = path.resolve(__dirname, "..");
+const ROOT = path.resolve(__dirname, "..", "..");
 const PB_BIN = path.join(
   ROOT,
-  process.platform === "win32" ? "bin/pocketbase-win.exe" : "bin/pocketbase-linux",
+  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux",
 );
 const EMAIL = "setup@example.com";
 const PASSWORD = "setup-password-123";

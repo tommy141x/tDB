@@ -4,10 +4,10 @@ const fs = require("fs");
 const os = require("os");
 const { spawn, spawnSync } = require("child_process");
 
-const ROOT = path.resolve(__dirname, "..");
+const ROOT = path.resolve(__dirname, "..", "..");
 const PB_BIN = path.join(
   ROOT,
-  process.platform === "win32" ? "bin/pocketbase-win.exe" : "bin/pocketbase-linux",
+  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux",
 );
 const PORT = 8232;
 const URL = `http://127.0.0.1:${PORT}`;

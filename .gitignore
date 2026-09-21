@@ -1,12 +1,21 @@
-# PocketBase data directory (contains database)
-pb_data/
+node_modules/
 
-# PocketBase migrations (generated based on collection changes)
+# Generated output. One root, so a new build artifact never needs a new rule
+# here and can never reach a release by being forgotten.
+.build/
+
+# Fetched at setup, never authored. The PocketBase release binaries live here
+# and are reproducible from a pinned version + checksum, so they have no
+# business in history.
+.runtime/
+
+# PocketBase's own state. pb_data is a live database, pb_migrations is
+# generated from it.
+pb_data/
 pb_migrations/
 
-# Backup files
+# Scratch, stale copies and backups.
 *.backup
 *.bak
-
-# Log files
+*.old
 *.log

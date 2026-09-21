@@ -10,6 +10,15 @@
 --
 -- Scripts that call exports.oxmysql:query(...) need no change at all - tDB
 -- declares `provide 'oxmysql'`, which routes that export name here.
+--
+-- THIS PATH IS FROZEN. lib/MySQL.lua mirrors oxmysql's own lib/MySQL.lua
+-- character for character so that swapping one word in a manifest is the
+-- entire migration. It is a compatibility contract with an external ecosystem,
+-- not this repo's folder convention, so it deliberately sits outside the
+-- client/server/shared layout the rest of tDB follows. Moving it under
+-- server/ would cost tDB the drop-in property it leads with. Same reasoning
+-- applies to pb_hooks/ (PocketBase's --hooksDir) and sql/ (the documented
+-- folder users drop .sql files into).
 
 -- The resource this file lives in. It cannot be discovered at runtime:
 -- GetCurrentResourceName() returns the resource that *loaded* the file, not

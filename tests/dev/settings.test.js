@@ -18,11 +18,11 @@ const { spawn, spawnSync } = require("child_process");
 const { DatabaseSync } = require("node:sqlite");
 
 const ROOT = require("./fivem-require.js");
-const settings = require(path.join(ROOT, "utils/settings.js"));
+const settings = require(path.join(ROOT, "server/utils/settings.js"));
 
 const PB_BIN = path.join(
   ROOT,
-  process.platform === "win32" ? "bin/pocketbase-win.exe" : "bin/pocketbase-linux",
+  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux",
 );
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "tdb-settings-"));
 const PORT = 8093;
@@ -371,9 +371,9 @@ async function main() {
   // ------------------------------------------------------------------
   section("Nothing writes settings back into config.lua");
 
-  const serverSrc = fs.readFileSync(path.join(ROOT, "utils/server.js"), "utf8");
-  const loaderSrc = fs.readFileSync(path.join(ROOT, "utils/config-loader.js"), "utf8");
-  const settingsSrc = fs.readFileSync(path.join(ROOT, "utils/settings.js"), "utf8");
+  const serverSrc = fs.readFileSync(path.join(ROOT, "server/utils/server.js"), "utf8");
+  const loaderSrc = fs.readFileSync(path.join(ROOT, "server/utils/config-loader.js"), "utf8");
+  const settingsSrc = fs.readFileSync(path.join(ROOT, "server/utils/settings.js"), "utf8");
 
   ok(
     !/syncSettingsToConfig/.test(serverSrc),

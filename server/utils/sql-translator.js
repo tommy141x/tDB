@@ -33,7 +33,7 @@
 module.exports = (function () {
   // Relative to this file: a required module resolves from its own directory,
   // unlike a manifest server_script, which resolves from the resource root.
-  const polyglot = require("../bin/polyglot/index.cjs");
+  const polyglot = require("../vendor/polyglot/index.cjs");
 
   // ==========================================================================
   // WASM lifecycle

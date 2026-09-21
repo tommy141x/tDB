@@ -22,13 +22,13 @@ const { spawn, spawnSync } = require("child_process");
 
 const ROOT = require("./fivem-require.js");
 
-const PocketBase = require(path.join(ROOT, "bin/pocketbase.cjs.js"));
-const PocketBaseAdapter = require(path.join(ROOT, "adapters/pocketbase.js"));
-const OxMySQLAdapter = require(path.join(ROOT, "adapters/oxmysql.js"));
+const PocketBase = require(path.join(ROOT, "server/vendor/pocketbase.cjs.js"));
+const PocketBaseAdapter = require(path.join(ROOT, "server/adapters/pocketbase.js"));
+const OxMySQLAdapter = require(path.join(ROOT, "server/adapters/oxmysql.js"));
 
 const PB_BIN = path.join(
   ROOT,
-  process.platform === "win32" ? "bin/pocketbase-win.exe" : "bin/pocketbase-linux",
+  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux",
 );
 const PORT = 8181;
 const URL = `http://127.0.0.1:${PORT}`;
@@ -123,12 +123,12 @@ async function main() {
     // This harness builds its own client, so it would happily pass while the
     // resource shipped without the call. Pin the resource itself.
     const clientSource = fs.readFileSync(
-      path.join(ROOT, "utils/client.js"),
+      path.join(ROOT, "server/utils/client.js"),
       "utf8",
     );
     ok(
       /pb\.autoCancellation\(false\)/.test(clientSource),
-      "utils/client.js disables autoCancellation on the client it hands out",
+      "server/utils/client.js disables autoCancellation on the client it hands out",
     );
 
     const pb = new PocketBase(URL);

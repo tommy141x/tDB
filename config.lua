@@ -1,61 +1,8 @@
 Config = {}
 
--- ============================================================================
--- ADMIN INTERFACE EXPOSURE
--- ============================================================================
--- Whether to publish the PocketBase admin UI through tLib's router.
---
--- tDB NEVER opens a port of its own. PocketBase always binds 127.0.0.1, so by
--- itself it is headless: usable by this server's resources and unreachable
--- from anywhere else. The only way in from outside is tLib, which owns the
--- server's single external port and proxies Config.MountPath through to it.
---
--- true (default): register the mount on startup. The admin UI is then at
---                 <tLib hub URL><MountPath>/_/ — on tLib's port. PocketBase's
---                 own loopback port stays internal and must not be forwarded.
--- false:          stay headless. Nothing is registered and nothing outside
---                 this machine can reach the database at all.
---
--- Turning this off does not affect any script using tDB — those talk to it
--- over loopback either way.
--- ============================================================================
+-- Publish the PocketBase admin panel at /db/_/ on tLib's public URL and port.
+-- Disable to keep tDB private; server resources can still use it internally.
 Config.ExposeAdmin = true
-
--- ============================================================================
--- MOUNT PATH (only used when ExposeAdmin = true)
--- ============================================================================
--- Path prefix the tLib router serves PocketBase under.
--- Change it only if it collides with another resource's mount - tLib refuses
--- overlapping mounts rather than silently shadowing one, and logs which
--- resource already owns the path.
--- ============================================================================
-Config.MountPath = "/db"
-
--- ============================================================================
--- PUBLIC URL
--- ============================================================================
--- DEPRECATED and ignored. tDB has no public address of its own - the one the
--- admin UI appears on is tLib's. Override it with 'tlib_http_public_url' in
--- server.cfg. Kept only so existing configs keep loading.
--- ============================================================================
-Config.Host = "localhost"
-
--- ============================================================================
--- PORT - there isn't one
--- ============================================================================
--- There is deliberately no port setting here. PocketBase binds 127.0.0.1 on
--- port 8090, and if something on this machine already holds 8090 it silently
--- takes a free port instead - nothing outside this machine addresses it, so
--- the number is never typed, forwarded, or dialled.
---
--- The one port that IS a decision belongs to tLib, which owns the server's
--- single external port and proxies Config.MountPath through to PocketBase.
--- To change it, put this in server.cfg:
---
---     setr tlib_http_port 7777
---
--- (A 'Config.Port' left over from an older tDB is simply ignored.)
--- ============================================================================
 
 -- ============================================================================
 -- SUPERUSER CREDENTIALS
@@ -79,7 +26,7 @@ Config.Superuser = {
 -- false (recommended): Manual updates for stability
 -- true: Automatic updates to latest version
 -- ============================================================================
-Config.AutoUpdate = false
+Config.AutoUpdate = true
 
 -- ============================================================================
 -- MIGRATION CONFIGURATION
@@ -91,7 +38,7 @@ Config.Migrations = {
 
     -- Directory where migration files are stored
     -- Default: "pb_migrations"
-    Dir = "pb_migrations",
+    Dir = ".runtime/pb_migrations",
 }
 
 -- ============================================================================
@@ -177,11 +124,34 @@ Config.Advanced = {
     PublicDir = "pb_public",
 
     -- Directory for database and internal data
-    DataDir = "pb_data",
+    DataDir = ".runtime/pb_data",
+
+    -- ========================================================================
+    -- SMTP AND S3
+    -- ========================================================================
+    -- Both blocks work the same way, and `Manage` is the important switch.
+    --
+    --   Manage = false (default)
+    --       tDB never touches this setting on the PocketBase instance. Set it
+    --       in the admin UI and it stays exactly as you left it. Everything
+    --       below is then ignored - tDB says so on startup if you filled it in.
+    --
+    --   Manage = true
+    --       config.lua is the truth. Every field below is applied on every
+    --       start, so the instance always matches this file. An edit made in
+    --       the admin UI is reported and then overwritten.
+    --       Enabled = false here genuinely turns the feature off.
+    --
+    -- Settings only ever travel config.lua -> PocketBase, never back. They
+    -- cannot travel back: PocketBase does not hand out the SMTP password or
+    -- the S3 secret once set, so reading its settings and writing them here
+    -- would replace your real credentials with empty strings.
+    -- ========================================================================
 
     -- SMTP Email Configuration (optional)
-    -- Configure email sending for password resets, verifications, etc.
+    -- Email sending for password resets, verifications, etc.
     SMTP = {
+        Manage = false,
         Enabled = false,
         Host = "smtp.gmail.com",
         Port = 587,
@@ -194,8 +164,9 @@ Config.Advanced = {
     },
 
     -- S3 Storage Configuration (optional)
-    -- Configure S3-compatible storage for file uploads
+    -- S3-compatible storage for file uploads
     S3 = {
+        Manage = false,
         Enabled = false,
         Bucket = "",
         Region = "",
