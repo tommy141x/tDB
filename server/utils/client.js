@@ -1,6 +1,5 @@
-/**
- * PocketBase FiveM Client
- */
+// The client half: owns the PocketBase SDK instance, the adapters behind the
+// exports, and the superuser session.
 (function () {
   const fs = require("fs");
   const path = require("path");
@@ -15,104 +14,35 @@
   const OxMySQLAdapter = require("./server/adapters/oxmysql.js");
   const httpTransport = require("./server/utils/http-transport.js");
   const sqlImport = require("./server/utils/sql-import.js");
+  const pbAdopt = require("./server/utils/pb-adopt.js");
+  const { describeRouteError } = require("./server/utils/route-error.js");
 
-  // ============================================================================
-  // Export Router - Routes export calls to appropriate adapters
-  // ============================================================================
+  const ExportRouter = require("./server/utils/export-router.js");
 
-  class ExportRouter {
-    constructor(exportsFn) {
-      this.adapters = [];
-      this.exportNames = new Set();
-      this.exportsFn = exportsFn;
-    }
-
-    registerAdapter(adapter, priority = 100) {
-      if (!adapter.canHandle || typeof adapter.canHandle !== "function") {
-        throw new Error(
-          "Adapter must implement canHandle(exportName, args) method",
-        );
-      }
-      if (!adapter.handle || typeof adapter.handle !== "function") {
-        throw new Error(
-          "Adapter must implement handle(exportName, args) method",
-        );
-      }
-      if (!adapter.name) {
-        throw new Error("Adapter must have a name property");
-      }
-
-      this.adapters.push({ adapter, priority });
-      this.adapters.sort((a, b) => a.priority - b.priority);
-
-      clientLogger.info(
-        `Registered adapter: ${adapter.name} (priority: ${priority})`,
-      );
-    }
-
-    registerExports(exportNames) {
-      for (const exportName of exportNames) {
-        this.createExport(exportName);
-      }
-    }
-
-    createExport(exportName) {
-      if (this.exportNames.has(exportName)) {
-        clientLogger.warn(
-          `Export '${exportName}' already registered, skipping...`,
-        );
-        return;
-      }
-
-      this.exportNames.add(exportName);
-      const router = this;
-
-      this.exportsFn(exportName, function (...args) {
-        for (const { adapter } of router.adapters) {
-          try {
-            if (adapter.canHandle(exportName, args)) {
-              return adapter.handle(exportName, args);
-            }
-          } catch (error) {
-            clientLogger.error(
-              `Error in adapter '${adapter.name}' for export '${exportName}':`,
-              error,
-            );
-            throw error;
-          }
-        }
-        throw new Error(
-          `No adapter could handle export '${exportName}' with arguments: ${JSON.stringify(args.slice(0, 2))}...`,
-        );
-      });
-    }
-  }
-
-  // Polyfill EventSource for Node.js environment
+  // The SDK's realtime subscriptions need it and Node does not have one.
   if (typeof EventSource === "undefined") {
     const EventSourcePolyfill = require("./server/vendor/eventsource.min.js");
-    global.EventSource =
-      EventSourcePolyfill.EventSourcePolyfill || EventSourcePolyfill;
+    global.EventSource = EventSourcePolyfill.EventSourcePolyfill || EventSourcePolyfill;
   }
 
-  // ============================================================================
-  // Logger
-  // ============================================================================
+  // `debug` is filtered, the other levels are not - same contract and same
+  // `Config.Debug` as the `[PocketBase]` logger in server.js. Assigned below
+  // where the config is read, so anything logged before then stays filtered.
+  let debugEnabled = false;
+
   const clientLogger = {
     info: (msg) => console.log(`^2[PocketBase Client]^7 ${msg}`),
     warn: (msg) => console.log(`^3[PocketBase Client]^7 ${msg}`),
     error: (msg) => console.log(`^1[PocketBase Client]^7 ${msg}`),
-    debug: (msg) => console.log(`^5[PocketBase Client]^7 ${msg}`),
-    silent: () => {}, // No-op for silent operations
+    debug: (msg) => {
+      if (debugEnabled) console.log(`^5[PocketBase Client]^7 ${msg}`);
+    },
+    silent: () => {},
   };
 
-  // ============================================================================
-  // Log Throttling
-  // ============================================================================
   // A script polling on a timer turns one persistent fault into hundreds of
-  // identical console lines per minute, which buries whatever else the server
-  // is trying to tell you. Identical messages collapse into a periodic line
-  // carrying the suppressed count instead.
+  // identical console lines a minute. Collapse repeats into one periodic line
+  // carrying the suppressed count.
   const LOG_THROTTLE_WINDOW_MS = 60 * 1000;
   const throttleState = new Map();
 
@@ -127,7 +57,7 @@
       clientLogger[level](
         suppressed > 0
           ? `${message} ^8(repeated ${suppressed} more time${suppressed === 1 ? "" : "s"} in the last minute)^7`
-          : message,
+          : message
       );
       return;
     }
@@ -135,69 +65,53 @@
     entry.suppressed++;
   }
 
-  // ============================================================================
-  // Configuration
-  // ============================================================================
   const resourceName = GetCurrentResourceName();
   const resourcePath = GetResourcePath(resourceName);
 
-  // Load config using shared loader
   const config = configLoader.load(resourcePath);
+  debugEnabled = config.Debug === true;
 
-  // Determine PocketBase URL - will be set based on server mode (local or remote)
+  // Set once the server announces its mode (local or remote).
   let pbUrl = null;
   let pb = null;
 
-  // Whether we are talking to somebody else's instance. Gates the settings we
-  // are only entitled to change on an instance this resource starts itself.
+  // Somebody else's instance, so we are not entitled to change its settings.
   let isRemoteMode = false;
 
-  // Owns the superuser token lifecycle once the server reports ready.
   let authManager = null;
 
-  // Kept at module scope so the SQL importer can reach the translation and
-  // batch paths before the exports are open for business.
+  // Module scope so the SQL importer can reach the translation and batch paths
+  // before the exports are open for business.
   let oxmysqlAdapter = null;
 
-  // Wait for PocketBase to be ready and authenticate
   let isReady = false;
   let isAuthenticated = false;
   const readyCallbacks = [];
 
   const notifyReady = () => {
     isReady = true;
-    // Call all pending callbacks
-    readyCallbacks.forEach((callback) => callback());
+    readyCallbacks.forEach((callback) => {
+      callback();
+    });
     readyCallbacks.length = 0;
   };
 
-  /**
-   * Wraps async exports so that every call gets consistent readiness checks,
-   * transparent recovery from an expired superuser session, and non-spammy
-   * error reporting.
-   *
-   * @param {function} fn The operation to run.
-   * @param {string} [label] Name used in error messages. Most callers pass an
-   *   anonymous arrow, whose `fn.name` is "" - that is why the original error
-   *   lines read as "[PocketBase Client] : <message>" with nothing before the
-   *   colon.
-   */
+  // Readiness check, one transparent retry after a session expiry, throttled
+  // error reporting. `label` matters because most callers pass an anonymous
+  // arrow, whose `fn.name` is "", leaving errors with nothing before the colon.
   function wrapAsync(fn, label) {
     const name = label || fn.name || "request";
 
     return async (...args) => {
       if (!isReady || !pb) {
-        throw new Error(
-          "PocketBase client not ready yet - wait for isReady() to return true",
-        );
+        throw new Error("PocketBase client not ready yet - wait for isReady() to return true");
       }
 
       try {
         return await fn(...args);
       } catch (error) {
-        // A 401/403 here usually means the superuser token expired rather
-        // than that the caller did anything wrong. Re-authenticate once and
-        // replay the call; only a second failure is a real error.
+        // A 401/403 usually means the superuser token expired, not that the
+        // caller erred. Re-auth once and replay; only a second failure is real.
         if (isAuthError(error) && authManager) {
           const recovered = await authManager.ensureAuthenticated(true);
 
@@ -215,25 +129,19 @@
     };
   }
 
-  /**
-   * Log an export failure once per throttle window, then rethrow it so the
-   * caller still sees the failure.
-   */
+  // Logs once per throttle window, then rethrows so the caller still sees it.
   function handleCallError(error, name) {
     // 404 is a normal answer to "does this record exist?", not a fault.
     if (error.status !== 404) {
       logThrottled(
         "error",
         `${name}:${error.status || 0}:${error.message}`,
-        `${name}: ${error.message}`,
+        `${name}: ${error.message}`
       );
     }
     throw error;
   }
 
-  /**
-   * Register a callback to be called when client is ready
-   */
   function onReady(callback) {
     if (isReady) {
       callback();
@@ -242,84 +150,142 @@
     }
   }
 
-  // ============================================================================
-  // State Exports - Available Immediately
-  // ============================================================================
+  // State exports, available before the adapters are wired up.
 
-  /**
-   * Check if client is ready (connected AND authenticated)
-   * @export
-   */
   exports("isReady", () => {
     return isReady;
   });
 
-  /**
-   * Register callback to be called when client is ready
-   * @export
-   */
   exports("onReady", (callback) => {
     onReady(callback);
   });
 
-  /**
-   * Check if authenticated (may be ready but not authenticated)
-   * @export
-   */
   exports("isClientAuthenticated", () => {
-    // Report the live session state, not just the outcome of the initial
-    // login - the token is refreshed on a timer and can lapse and recover.
+    // Live session state, not the outcome of the initial login: the token is
+    // refreshed on a timer and can lapse and recover.
     return authManager ? authManager.isAuthenticated : isAuthenticated;
   });
 
-  /**
-   * Get PocketBase URL
-   * @export
-   */
   exports("getUrl", () => {
     return pbUrl;
   });
 
-  /**
-   * Wait for connection to be ready (OxMySQL compatibility)
-   * Returns a promise that resolves when the client is ready
-   * @export
-   */
-  exports("awaitConnection", () => {
-    return new Promise((resolve) => {
+  // oxmysql compatibility.
+  const awaitConnection = () =>
+    new Promise((resolve) => {
       if (isReady) {
         resolve(true);
       } else {
         onReady(() => resolve(true));
       }
     });
-  });
 
-  /**
-   * Authenticate and hand the session to the AuthManager, which keeps the
-   * token refreshed for as long as the resource runs.
-   */
-  const tryAuthenticate = async (credentials) => {
-    authManager = new AuthManager(
-      pb,
-      credentials || config.Superuser,
-      clientLogger,
+  exports("awaitConnection", awaitConnection);
+
+  // oxmysql registers every method three times (`x`, `x_async`, `xSync`), and
+  // that loop covers isReady and awaitConnection too. Scripts do call the
+  // suffixed forms, so the plain name alone is not the whole contract.
+  exports("awaitConnection_async", awaitConnection);
+  exports("awaitConnectionSync", awaitConnection);
+  exports("isReady_async", async () => isReady);
+  exports("isReadySync", async () => isReady);
+
+  // A dedicated connection held open across a caller-supplied callback, with
+  // BEGIN/COMMIT around it. tDB reaches PocketBase over stateless HTTP and
+  // PocketBase's own runInTransaction is scoped to one request, so there is
+  // nothing to hold. Refused by name rather than left to read as a typo.
+  const startTransactionUnsupported = () => {
+    throw new Error(
+      "tDB does not support startTransaction: it needs a connection held " +
+        "across your callback, and tDB talks to PocketBase over stateless " +
+        "HTTP. Use transaction(queries) or exports.tDB:runTransaction(ops), " +
+        "which are atomic but need the statements up front."
     );
+  };
+
+  exports("startTransaction", startTransactionUnsupported);
+  exports("startTransaction_async", startTransactionUnsupported);
+  exports("startTransactionSync", startTransactionUnsupported);
+
+  // Every data export is registered now, before PocketBase is up, because that
+  // is when oxmysql has them and when ported scripts call them. A call landing
+  // before the adapters exist waits on awaitConnection instead of failing.
+  // Only the names are needed here, so neither adapter list touches a client.
+  const router = new ExportRouter(exports, awaitConnection, clientLogger, on);
+
+  const STATE_EXPORTS = new Set([
+    "isReady",
+    "onReady",
+    "awaitConnection",
+    "isClientAuthenticated",
+    "getUrl",
+  ]);
+
+  const dataExportNames = new Set([
+    ...OxMySQLAdapter.buildExportList(),
+    ...PocketBaseAdapter.exportNames(),
+  ]);
+
+  for (const name of STATE_EXPORTS) dataExportNames.delete(name);
+
+  router.registerExports(Array.from(dataExportNames));
+
+  // And again under the names of the resources tDB replaces. `provide` in the
+  // manifest does NOT alias exports - measured on a live server, where
+  // `GetResourceState('oxmysql')` reported `started` while
+  // `exports.oxmysql:scalar(...)` answered "No such export". Without this,
+  // every script that was never ported to tDB fails, which is every script
+  // this compatibility layer exists for.
+  const aliased = OxMySQLAdapter.aliasedResources();
+  for (const [resourceName, methods] of Object.entries(aliased)) {
+    router.registerAliases(
+      resourceName,
+      methods.filter((name) => !STATE_EXPORTS.has(name))
+    );
+  }
+
+  // Hands the session to AuthManager, which keeps the token refreshed for as
+  // long as the resource runs.
+  const tryAuthenticate = async (credentials) => {
+    authManager = new AuthManager(pb, credentials || config.Superuser, clientLogger);
 
     isAuthenticated = await authManager.start();
 
     if (isAuthenticated) await applyManagedTokenLifetime();
 
-    // Before readiness, deliberately. Anything waiting on awaitConnection -
-    // which is every well-behaved consumer - then finds the schema already
-    // there, and a script that ships a .sql file never races its own tables.
+    // Before readiness, deliberately: anything waiting on awaitConnection then
+    // finds the schema already there and never races its own tables.
     if (isAuthenticated) await runSqlImports();
 
     notifyReady();
+
+    // After readiness on purpose. A new view costs ~38ms, so a first run over a
+    // freshly imported dump would otherwise delay every resource waiting on the
+    // database. Idempotent, so later boots are a no-op.
+    if (isAuthenticated) adoptTables();
   };
 
-  // Imports run once per resource start. A re-auth rebuilds the session, not
-  // the database.
+  // The ledger holds the statement that stopped each file, which is the one
+  // thing that makes a failure actionable, so it travels with the filename.
+  const reportSqlFailures = async (failedFiles) => {
+    if (typeof global.tdbReportSqlFailures !== "function") return;
+
+    const failures = [];
+    try {
+      const ledger = await sqlImport.readLedger(oxmysqlAdapter);
+      for (const file of failedFiles || []) {
+        const row = ledger.get(file);
+        failures.push({ file, error: row ? row.error : null });
+      }
+    } catch (_) {
+      // Without the ledger the filename alone is still worth surfacing.
+      for (const file of failedFiles || []) failures.push({ file, error: null });
+    }
+
+    global.tdbReportSqlFailures(failures);
+  };
+
+  // Once per resource start. A re-auth rebuilds the session, not the database.
   let sqlImportsDone = false;
 
   const runSqlImports = async () => {
@@ -337,125 +303,177 @@
 
       if (summary.applied.length) {
         clientLogger.info(
-          `SQL import: applied ${summary.applied.length} file(s) - ${summary.applied.join(", ")}`,
+          `SQL import: applied ${summary.applied.length} file(s) - ${summary.applied.join(", ")}`
+        );
+      }
+      if (summary.partial.length) {
+        clientLogger.warn(
+          `SQL import: ${summary.partial.length} file(s) applied with trigger(s) skipped - ` +
+            `${summary.partial.join(", ")}. See 'tdb sql status'.`
         );
       }
       if (summary.failed.length) {
         clientLogger.error(
           `SQL import: ${summary.failed.length} file(s) FAILED and were rolled back - ` +
-            `${summary.failed.join(", ")}. Fix them and restart; see 'tdb sql status'.`,
+            `${summary.failed.join(", ")}. Fix them and restart; see 'tdb sql status'.`
         );
       }
+
+      // Hand the outcome to the startup box, so a failure is a state the
+      // operator cannot miss rather than one console line at boot. Reported
+      // even when empty, which clears a previous failure after a fix.
+      await reportSqlFailures(summary.failed);
     } catch (error) {
-      // Never take the resource down over an import. A dump that cannot be
-      // read is something to go and fix, with the server still up.
+      // Never take the resource down over an import; an unreadable dump is
+      // something to go and fix with the server still up.
       clientLogger.error(`SQL import could not run: ${error.message}`);
     }
   };
 
-  /**
-   * On a local instance, make sure the superuser token lifetime has not been
-   * left at some very short value before settling into the refresh loop.
-   * Normally a no-op - PocketBase's default already clears the floor. A remote
-   * instance is left exactly as its owner configured it.
-   */
+  const adoptDeps = () => ({
+    query: (sql, params) => oxmysqlAdapter.handle("query", [sql, params || []]),
+    exec: (sql, params) => oxmysqlAdapter.handle("update", [sql, params || []]),
+    // No MySQL translation: used to put back triggers read out of sqlite_master,
+    // which are already SQLite and would not survive being parsed as MySQL.
+    rawExec: (sql) =>
+      pb.send("/api/tdb/execute", {
+        method: "POST",
+        body: { sql, params: {} },
+        requestKey: null,
+      }),
+    collections: {
+      getFullList: () => pb.collections.getFullList({ requestKey: null }),
+      getOne: (name) => pb.collections.getOne(name, { requestKey: null }),
+      create: (data) => pb.collections.create(data),
+      update: (id, data) => pb.collections.update(id, data),
+      delete: (id) => pb.collections.delete(id),
+    },
+    logger: clientLogger,
+  });
+
+  // Hands raw tables to PocketBase so they appear as editable collections.
+  //
+  // This rewrites tables, so it takes a PocketBase backup first -- once, before
+  // the first table is touched, not per table. Idempotent afterwards: a table
+  // PocketBase already owns is not planned again, so a steady-state boot does
+  // nothing. Failure never propagates; the database is usable either way.
+  const adoptTables = async (announce) => {
+    try {
+      const planned = await pbAdopt.plan(adoptDeps());
+
+      if (!planned.length) {
+        if (announce) announce("every table is already a collection");
+        return { adopted: [], failed: [], triggers: 0, unsupported: [] };
+      }
+
+      // Lowercase, and `.zip`. PocketBase validates the backup name against a
+      // lowercase pattern, so an ISO timestamp's `T` and `Z` were rejected with
+      // `name: Must be in a valid format` - which refused adoption on every
+      // boot while reporting only PocketBase's generic validation message.
+      // Measured: the same name lowercased is accepted, and the extension is
+      // required.
+      const backupName = `pre-adopt-${new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .toLowerCase()}.zip`;
+
+      // Settled with .then(ok, err) rather than try/catch around an await: that
+      // owns the rejection in the turn it is created, so FiveM cannot also
+      // report it as unhandled and print the stack twice alongside the handled
+      // log line.
+      const backup = await pb.backups.create(backupName).then(
+        () => ({ ok: true }),
+        (error) => ({ ok: false, error })
+      );
+
+      if (!backup.ok) {
+        // Without a backup this is not worth doing automatically. The field
+        // detail matters: PocketBase's own message names nothing.
+        clientLogger.error(
+          `Refusing to adopt tables: the pre-adoption backup failed - ` +
+            `${describeRouteError(backup.error)}`
+        );
+        return null;
+      }
+
+      clientLogger.info(
+        `Backed up to ${backupName} before adopting ${planned.length} table(s); ` +
+          `restore from Admin -> Backups if needed`
+      );
+
+      const summary = await pbAdopt.adopt(adoptDeps(), planned);
+
+      clientLogger.info(`Admin UI collections: ${pbAdopt.describe(summary)}`);
+      for (const failure of summary.failed) {
+        clientLogger.warn(`Adoption: ${failure}`);
+      }
+      for (const note of summary.unsupported) {
+        clientLogger.warn(`Adoption could not reproduce: ${note}`);
+      }
+      return summary;
+    } catch (error) {
+      clientLogger.warn(`Could not hand tables to PocketBase: ${error.message}`);
+      return null;
+    }
+  };
+
+  // Raise a very short superuser token lifetime to a sane floor before settling
+  // into the refresh loop. A no-op on a stock instance, and never applied to a
+  // remote one, which its owner configured.
   const applyManagedTokenLifetime = async () => {
     if (isRemoteMode) return;
 
     const changed = await ensureSuperuserTokenDuration(pb, clientLogger, () =>
-      authManager.ensureAuthenticated(true),
+      authManager.ensureAuthenticated(true)
     );
 
-    // The token already in hand was minted under the old duration, so trade
-    // it in - otherwise the refresh timer is scheduled against the short one.
+    // The token in hand was minted under the old duration, so trade it in, or
+    // the refresh timer is scheduled against the short one.
     if (changed) await authManager.ensureAuthenticated(true);
   };
 
-  // Event-driven startup: Listen for server ready event
   on("pocketbase:server:ready", async (data) => {
-    // Initialize PocketBase client with the correct URL (local or remote)
     isRemoteMode = Boolean(data.isRemote);
 
     if (data.isRemote) {
-      // Remote mode - connect to remote URL
       pbUrl = data.url;
       clientLogger.debug(`Connecting to remote PocketBase at ${pbUrl}`);
     } else {
-      // Local mode - connect to localhost
       pbUrl = `http://127.0.0.1:${config.Port}`;
     }
 
-    // Create PocketBase instance with the determined URL
     pb = new PocketBase(pbUrl);
 
-    // The SDK defaults to auto-cancellation: it keys each request by method
-    // and path, and a second request with the same key ABORTS the first. That
-    // is a browser feature - a search box superseding its own in-flight
-    // request - and it is actively wrong here. On a game server, two players
-    // hitting one code path in the same tick is the normal case, and the
-    // loser gets "The request was autocancelled" instead of their data.
-    // Measured before this line existed: 5 of 6 concurrent identical calls
-    // were cancelled (.dev/autocancel.test.js).
-    //
-    // Only one of the adapters' ~31 SDK call sites passed requestKey: null,
-    // so this is set once on the client rather than trusting every site to
-    // remember.
+    // The SDK keys each request by method and path and ABORTS the earlier one
+    // on a collision. That is a browser affordance and it is wrong here: two
+    // players hitting one code path in a tick is normal, and the loser gets
+    // "The request was autocancelled" instead of their data. Measured at 5 of 6
+    // concurrent identical calls cancelled (.dev/autocancel.test.js). Set on the
+    // client because only one of the ~31 adapter call sites passed
+    // requestKey: null.
     pb.autoCancellation(false);
 
-    // Send over node:http instead of the global fetch. In FiveM's Node
-    // (v26.3.0) every fetch carrying a request body leaks an unhandled
-    // "Invalid state: Reader released" rejection - and every query this
-    // resource serves is a POST with a body. See utils/http-transport.js for
-    // the measurements.
+    // node:http instead of the global fetch; see utils/http-transport.js.
     httpTransport.install(pb);
 
-    // Initialize export router with the exports function
-    const router = new ExportRouter(exports);
-
-    // Register adapters after PocketBase is initialized
     const pbAdapter = new PocketBaseAdapter(pb, wrapAsync, clientLogger);
     oxmysqlAdapter = new OxMySQLAdapter(pb, wrapAsync, clientLogger);
 
-    // Register adapters with priority (lower = higher priority)
-    // PocketBase has priority 10 (checked first)
-    // OxMySQL has priority 20 (checked second, fallback)
+    // Lower number wins, so PocketBase is tried first and oxmysql is the
+    // fallback. The export names were registered at resource start; calls that
+    // arrived before now are parked on whenReady() and dispatch from here.
     router.registerAdapter(pbAdapter, 10);
     router.registerAdapter(oxmysqlAdapter, 20);
 
-    // Automatically register all exports from adapters (excluding state exports)
-    const allExportNames = new Set();
-    const stateExports = [
-      "isReady",
-      "onReady",
-      "awaitConnection",
-      "isClientAuthenticated",
-      "getUrl",
-    ];
-
-    pbAdapter.supportedExports.forEach((name) => {
-      if (!stateExports.includes(name)) {
-        allExportNames.add(name);
-      }
-    });
-    oxmysqlAdapter.supportedExports.forEach((name) => allExportNames.add(name));
-
-    // Register all collected exports
-    router.registerExports(Array.from(allExportNames));
-
     await tryAuthenticate();
 
-    // Emit client status back to server
     emit("pocketbase:client:ready", {
       authenticated: isAuthenticated,
     });
   });
 
-  /**
-   * Re-authenticate after the server side repairs the superuser account.
-   *
-   * Only the session is rebuilt - the client, adapters and exports stay as they
-   * are, and the previous manager is stopped so its refresh timer is not leaked.
-   */
+  // Re-auth after the server repairs the superuser account. Only the session is
+  // rebuilt; the old manager is stopped so its refresh timer is not leaked.
   on("pocketbase:server:reauth", async (data) => {
     if (!pb) return;
 
@@ -464,8 +482,7 @@
       authManager = null;
     }
 
-    // Prefer the credentials the server just provisioned; the local config
-    // cache can predate that rewrite.
+    // The local config cache can predate the rewrite the server just made.
     const credentials =
       data && data.email && data.password
         ? { Email: data.email, Password: data.password }
@@ -478,72 +495,47 @@
     });
   });
 
-  // ============================================================================
-  // Internal Admin API Methods (not exported, used by server.js)
-  // ============================================================================
-
-  /**
-   * Internal: Get all settings
-   */
+  // Admin API for server.js. Globals rather than exports: the server half runs
+  // in the same resource and must not go through the export router.
   global.pbInternalGetSettings = wrapAsync(async () => {
     return await pb.settings.getAll();
   });
 
-  /**
-   * Internal: Update settings
-   */
   global.pbInternalUpdateSettings = wrapAsync(async (settings) => {
     return await pb.settings.update(settings);
   });
 
-  /**
-   * Internal: List all backups
-   */
   global.pbInternalListBackups = wrapAsync(async () => {
     return await pb.backups.getFullList();
   });
 
-  /**
-   * Internal: Create backup
-   */
   global.pbInternalCreateBackup = wrapAsync(async (basename = "") => {
     return await pb.backups.create(basename);
   });
 
-  /**
-   * Internal: Delete backup
-   */
   global.pbInternalDeleteBackup = wrapAsync(async (key) => {
     return await pb.backups.delete(key);
   });
 
-  /**
-   * Internal: Restore from backup
-   */
   global.pbInternalRestoreBackup = wrapAsync(async (key) => {
     return await pb.backups.restore(key);
   });
 
-  // ============================================================================
-  // Console commands
-  // ============================================================================
-
-  /**
-   * `tdb sql status`            what has been imported, and what is pending
-   * `tdb sql import <file>`     apply one file now
-   * `tdb sql import <file> --force`  apply it again even if it already ran
-   *
-   * Server console only - these read and write the database.
-   */
+  // tdb sql status             what has been imported, and what is pending
+  // tdb sql import <file>      apply one file now
+  // tdb sql import <file> --force   apply it again even if it already ran
   RegisterCommand(
     "tdb",
     async (source, args) => {
       const say = (line) => console.log(`^2[tDB]^7 ${line}`);
+      const USAGE =
+        "usage: tdb sql status | import <file> [--force] | tables [match] | " +
+        "query <sql> | plan | adopt";
 
       if (source !== 0) return; // console only, never a player
 
       if (args[0] !== "sql" || !args[1]) {
-        say("usage: tdb sql status | tdb sql import <file> [--force]");
+        say(USAGE);
         return;
       }
 
@@ -561,7 +553,10 @@
           await sqlImport.ensureLedger(oxmysqlAdapter);
           const ledger = await sqlImport.readLedger(oxmysqlAdapter);
           const onDisk = fs.existsSync(dir)
-            ? fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".sql")).sort()
+            ? fs
+                .readdirSync(dir)
+                .filter((f) => f.toLowerCase().endsWith(".sql"))
+                .sort()
             : [];
 
           say(`sql folder: ${dir}`);
@@ -576,21 +571,23 @@
               say(`  PENDING   ${filename}`);
               continue;
             }
-            const current = sqlImport.checksum(
-              fs.readFileSync(path.join(dir, filename), "utf8"),
-            );
+            const current = sqlImport.checksum(fs.readFileSync(path.join(dir, filename), "utf8"));
             const drift = current === row.checksum ? "" : "  ^3(file changed since)^7";
             const detail =
               row.status === "applied"
                 ? `${row.statements} statement(s), ${row.duration_ms}ms`
-                : row.error;
+                : row.status === "partial"
+                  ? `${row.statements} statement(s), ${row.duration_ms}ms - ${row.error}`
+                  : row.error;
             say(`  ${row.status.toUpperCase().padEnd(9)} ${filename}  ${detail}${drift}`);
           }
 
-          // Rows whose file is gone still matter - that is the history.
+          // Rows whose file is gone are still history worth showing.
           for (const [filename, row] of ledger) {
             if (onDisk.includes(filename)) continue;
-            say(`  ${row.status.toUpperCase().padEnd(9)} ${filename}  ^8(file no longer present)^7`);
+            say(
+              `  ${row.status.toUpperCase().padEnd(9)} ${filename}  ^8(file no longer present)^7`
+            );
           }
           return;
         }
@@ -614,33 +611,133 @@
             force,
           });
 
+          // A fix applied by hand has to clear the startup box's failure state,
+          // or it keeps reporting a problem the operator has already solved.
+          const stillFailing = await sqlImport.readLedger(oxmysqlAdapter);
+          const unresolved = [];
+          for (const [name, row] of stillFailing) {
+            if (row.status === "failed") unresolved.push(name);
+          }
+          await reportSqlFailures(unresolved);
+
+          // New tables need handing over, or the operator imports a dump and
+          // still sees nothing in the admin UI.
+          await adoptTables();
+
           if (summary.applied.length) say(`applied ${filename}`);
+          else if (summary.partial.length)
+            say(`applied ${filename} with trigger(s) skipped - see 'tdb sql status'`);
           else if (summary.failed.length) say(`FAILED ${filename} - rolled back, nothing applied`);
-          else if (summary.changed.length) say(`${filename} changed since it ran; use --force to re-apply`);
+          else if (summary.changed.length)
+            say(`${filename} changed since it ran; use --force to re-apply`);
           else say(`${filename} was already applied; use --force to re-apply`);
           return;
         }
 
-        say("usage: tdb sql status | tdb sql import <file> [--force]");
+        // An imported dump lands as raw SQLite tables, which the Collections
+        // screen cannot show: it lists _collections, and a raw table is not one.
+        // `adopt` hands them over; `tables` and `query` read them either way.
+        if (args[1] === "adopt") {
+          const summary = await adoptTables(say);
+          if (!summary) {
+            say("adoption did not run; see the message above");
+            return;
+          }
+          say(`admin UI collections: ${pbAdopt.describe(summary)}`);
+          for (const name of summary.adopted) say(`  adopted  ${name}`);
+          for (const note of summary.unsupported) say(`  ^3note     ${note}^7`);
+          for (const failure of summary.failed) say(`  ^1failed   ${failure}^7`);
+          return;
+        }
+
+        if (args[1] === "plan") {
+          const planned = await pbAdopt.plan(adoptDeps());
+          if (!planned.length) {
+            say("every table is already a collection");
+            return;
+          }
+          say(`${planned.length} table(s) would be adopted:`);
+          for (const entry of planned) {
+            say(
+              `  ${entry.table.padEnd(38)} id:${entry.idStrategy.padEnd(8)} ` +
+                `${entry.columns.length} column(s), ${entry.foreignKeys.length} foreign key(s)`
+            );
+          }
+          return;
+        }
+
+        if (args[1] === "tables") {
+          const like = args[2];
+          const rows = await oxmysqlAdapter.handle("query", [
+            like
+              ? "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_%' ESCAPE '\\' AND name LIKE ? ORDER BY name"
+              : "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_%' ESCAPE '\\' ORDER BY name",
+            like ? [`%${like}%`] : [],
+          ]);
+
+          if (!rows.length) {
+            say(like ? `no tables matching '${like}'` : "no tables yet");
+            return;
+          }
+
+          say(`${rows.length} table(s)${like ? ` matching '${like}'` : ""}:`);
+          for (const row of rows) {
+            const n = await oxmysqlAdapter.handle("scalar", [`SELECT COUNT(*) FROM "${row.name}"`]);
+            say(`  ${String(row.name).padEnd(40)} ${n} row(s)`);
+          }
+          return;
+        }
+
+        if (args[1] === "query") {
+          // Everything after the subcommand, so quoting is the operator's
+          // business rather than something we have to second-guess.
+          const sql = args.slice(2).join(" ").trim();
+
+          if (!sql) {
+            say(
+              "usage: tdb sql query <sql>   e.g. tdb sql query SELECT * FROM phone_phones LIMIT 5"
+            );
+            return;
+          }
+
+          const rows = await oxmysqlAdapter.handle("query", [sql]);
+
+          if (!Array.isArray(rows)) {
+            say(`ok: ${JSON.stringify(rows)}`);
+            return;
+          }
+          if (!rows.length) {
+            say("0 rows");
+            return;
+          }
+
+          const columns = Object.keys(rows[0]);
+          say(columns.join(" | "));
+
+          const MAX_ROWS = 50;
+          for (const row of rows.slice(0, MAX_ROWS)) {
+            say(columns.map((c) => (row[c] === null ? "NULL" : String(row[c]))).join(" | "));
+          }
+          if (rows.length > MAX_ROWS) {
+            say(`... ${rows.length - MAX_ROWS} more row(s); add a LIMIT`);
+          }
+          return;
+        }
+
+        say(USAGE);
       } catch (error) {
         say(`^1command failed: ${error.message}^7`);
       }
     },
-    // Restricted, so it is gated on the `command.tdb` ACE. The live server
-    // console holds every ACE and runs it fine. Another resource calling
-    // ExecuteCommand does not, and FiveM denies it silently - no output, no
-    // "access denied" line, the handler simply never runs. If you want to
-    // drive this from a script or an admin tool, grant it:
-    //   add_ace resource.<that_resource> command.tdb allow
-    true,
+    // Restricted, so it is gated on the `command.tdb` ACE. The server console
+    // holds every ACE; another resource calling ExecuteCommand does not, and
+    // FiveM denies it silently - no output, the handler just never runs. To
+    // drive it from a script: add_ace resource.<name> command.tdb allow
+    true
   );
 
-  // ============================================================================
-  // Cleanup
-  // ============================================================================
-  // Note: Subscriptions are automatically cleaned up when the WebSocket connection
-  // closes on resource stop. The auth refresh timer is ours though, and has to
-  // be cancelled explicitly or it will keep firing against a dead client.
+  // Subscriptions die with the WebSocket, but the auth refresh timer is ours and
+  // keeps firing against a dead client unless cancelled.
   on("onResourceStop", (stoppedResource) => {
     if (stoppedResource !== resourceName) return;
 

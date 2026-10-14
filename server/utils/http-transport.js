@@ -1,50 +1,17 @@
-/**
- * A fetch-compatible transport built on node:http, and the hook that makes the
- * PocketBase SDK use it.
- *
- * Why this exists
- * ---------------
- * In FiveM's Node runtime (v26.3.0), *every* `fetch()` that carries a request
- * body leaks one unhandled promise rejection:
- *
- *     Unhandled promise rejection in resource tDB
- *     Uncaught TypeError: Invalid state: Reader released
- *       node:internal/webstreams/readablestream(159,19):  lazyReadableReleasedError
- *       node:internal/webstreams/readablestream(2311,30): readableStreamReaderGenericRelease
- *       ...
- *       node:internal/webstreams/readablestream(1902,5):  pullWithDefaultReader
- *       node:internal/webstreams/readablestream(3236,24): readableByteStreamControllerCallPullIfNeeded
- *
- * The request body is wrapped in a byte ReadableStream; when the request
- * finishes, closing that stream releases a reader whose pending read is still
- * pending, and nothing catches the resulting rejection. It is not reachable
- * from user code - there is no promise to attach a handler to.
- *
- * Measured on the live server (.dev/snippets/probe-bodytypes.js, detector
- * .dev/mcp-probe.js):
- *
- *     body: string | Uint8Array | Buffer | ArrayBuffer | Blob | URLSearchParams
- *                                       -> 1 rejection each, every time
- *     no body at all (GET, or POST without one)   -> clean
- *     node:http with the same body                -> clean
- *
- * Status code and path are irrelevant; two POSTs produce two rejections. On
- * Node 24 the same request is clean, so this is specific to the runtime FiveM
- * ships, not to PocketBase and not to tDB.
- *
- * Why it is not just noise: tDB is a drop-in oxmysql replacement, and every
- * query it serves is a POST with a JSON body. Left alone, a busy server prints
- * an eleven-line unhandled-rejection warning *per query*.
- *
- * The SDK resolves its transport as `(options.fetch || fetch)`, so supplying
- * `options.fetch` from a `beforeSend` hook routes everything through here
- * without touching the ~31 call sites in the adapters.
- *
- * Scope: this handles the bodies the SDK actually sends - JSON strings and
- * binary buffers. Anything else (FormData for file uploads, a streaming body)
- * falls back to the global fetch, because correctness there matters more than
- * a console line on a path that runs rarely.
- */
+// A fetch-shaped transport over node:http, plus the hook that points the
+// PocketBase SDK at it.
+//
+// On FiveM's Node runtime (v26.3.0) every `fetch()` carrying a request body
+// leaks exactly one unhandled rejection ("Invalid state: Reader released"),
+// thrown from inside the webstreams body wrapper where no user code can catch
+// it. Measured with tests/dev/snippets/probe-bodytypes.js: any body type does it,
+// no body is clean, node:http with the same body is clean, and Node 24 is
+// clean. Every tDB query is a POST with a JSON body, so untreated this is an
+// eleven-line warning per query.
+//
+// The SDK resolves its transport as `(options.fetch || fetch)`, so setting
+// `options.fetch` in `beforeSend` covers all ~31 adapter call sites at once.
+// Bodies this cannot encode (FormData, streams) fall back to global fetch.
 module.exports = (function () {
   const http = require("http");
   const https = require("https");
@@ -57,10 +24,7 @@ module.exports = (function () {
 
   const MAX_REDIRECTS = 5;
 
-  /**
-   * Can this body be sent as a plain buffer? If not, the caller falls back to
-   * the global fetch rather than guessing at the encoding.
-   */
+  // Buffer, null for "no body", or undefined for "not mine" - see nodeFetch.
   function toBuffer(body) {
     if (body === undefined || body === null) return null;
     if (typeof body === "string") return Buffer.from(body, "utf8");
@@ -70,13 +34,11 @@ module.exports = (function () {
     if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) {
       return Buffer.from(body.toString(), "utf8");
     }
-    return undefined; // "I cannot handle this" - distinct from "there is none"
+    return undefined; // cannot encode this, distinct from having none
   }
 
-  /**
-   * Accepts a Headers instance, a plain object, or an array of pairs - all
-   * three are legal `fetch` input and the SDK passes a plain object.
-   */
+  // Headers instance, plain object or array of pairs; all three are legal fetch
+  // input. The SDK passes a plain object.
   function normalizeHeaders(headers) {
     const out = {};
     if (!headers) return out;
@@ -102,11 +64,8 @@ module.exports = (function () {
     return err;
   }
 
-  /**
-   * Only the surface the SDK touches: `status`, `url`, and `json()`. `text()`,
-   * `ok` and `headers.get()` are here because they cost nothing and make this
-   * usable from anywhere else in the resource.
-   */
+  // The SDK only touches status, url and json(). The rest is free and makes this
+  // usable elsewhere in the resource.
   function makeResponse(url, res, bodyBuffer) {
     const text = bodyBuffer.toString("utf8");
     return {
@@ -128,17 +87,11 @@ module.exports = (function () {
     };
   }
 
-  /**
-   * A fetch-shaped request over node:http/node:https.
-   *
-   * @param {string} url
-   * @param {object} [options] method, headers, body, signal, redirect
-   * @returns {Promise<object>} a Response-like object
-   */
+  // options: method, headers, body, signal, redirect.
   function nodeFetch(url, options = {}) {
     const body = toBuffer(options.body);
 
-    // A body shape this transport does not encode - let the platform do it.
+    // A body shape this transport does not encode, let the platform do it.
     if (body === undefined) return fetch(url, options);
 
     return request(url, options, body, 0);
@@ -175,8 +128,8 @@ module.exports = (function () {
           agent: agents[target.protocol] || undefined,
         },
         (res) => {
-          // Follow redirects ourselves; node:http does not. Remote mode can sit
-          // behind a proxy that upgrades http to https.
+          // node:http does not follow redirects. Remote mode can sit behind a
+          // proxy that upgrades http to https.
           const location = res.headers.location;
           if (
             location &&
@@ -188,7 +141,7 @@ module.exports = (function () {
             res.resume(); // discard, or the socket is never freed
             cleanup();
             const next = new URL(location, target).toString();
-            // 303, and 301/302 on POST, become a bodyless GET - as fetch does.
+            // 303, and 301/302 on POST, become a bodyless GET, as fetch does.
             const drops =
               res.statusCode === 303 ||
               ((res.statusCode === 301 || res.statusCode === 302) &&
@@ -234,15 +187,9 @@ module.exports = (function () {
     });
   }
 
-  /**
-   * Point a PocketBase client at this transport.
-   *
-   * Chains onto any existing `beforeSend` rather than replacing it, because the
-   * SDK installs its own wrapper during superuser auth and expects to find the
-   * previous hook still in place.
-   *
-   * @param {object} pb a PocketBase client
-   */
+  // Chains onto any existing `beforeSend` rather than replacing it: the SDK
+  // installs its own wrapper during superuser auth and expects the previous hook
+  // to still be there.
   function install(pb) {
     const previous = pb.beforeSend;
 
@@ -257,7 +204,7 @@ module.exports = (function () {
         };
       }
 
-      // Only set it if the caller has not asked for a specific transport.
+      // Leave a transport the caller asked for alone.
       if (!result.options.fetch) result.options.fetch = nodeFetch;
 
       return result;

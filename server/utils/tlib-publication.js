@@ -1,50 +1,27 @@
-/**
- * Publishing the admin UI through tLib's router, and keeping that claim honest.
- *
- * Two things changed and both matter here.
- *
- * 1. Health is checked against tLib's ACTUAL listener, not its public origin.
- *    tDB used to derive the router's port from GetHubUrl() and fall back to
- *    `https: ? 443 : 80` when the URL carried no explicit port. Behind a
- *    reverse proxy - which is the normal deployment - the public origin is
- *    https://host with no port while the listener is on loopback somewhere
- *    else entirely, so the probe dialled 127.0.0.1:443, got nothing, and
- *    reported the admin route broken while it was working perfectly. The
- *    status snapshot now carries localUrl, so there is nothing left to guess.
- *
- * 2. Publication is no longer a one-shot question answered at startup.
- *    tLib's HTTP listener can still be coming up when PocketBase is ready, and
- *    it can go away later. So:
- *
- *      - RegisterWebApp while tLib is not ready returns
- *        {ok:false, retryable:true} and reserves nothing. That is PENDING, not
- *        refused, and must not be reported to the operator as a refusal -
- *        "tLib refused the /db mount" for something that is merely still
- *        starting sends people to debug a non-problem.
- *      - Registration is retried when tLib signals ready, and when the tLib
- *        resource restarts.
- *      - A confirmed publication is CLEARED when tLib goes not-ready, because
- *        the mount no longer exists. Continuing to print an Admin URL for a
- *        route that is gone is the same class of lie as (1).
- *
- * The ordering rule from the contract is subscribe-then-query: take the event
- * subscription before asking for the current status, so a transition landing
- * between the two is caught by the subscription rather than lost.
- *
- * This module holds no FiveM globals - everything is injected - so the state
- * machine can be tested without a running server.
- */
+// Publishing the admin UI through tLib's router, and keeping that claim honest.
+//
+// Health is probed against the status snapshot's localUrl, never the public
+// origin: behind a reverse proxy (the normal deployment) the public origin is
+// https://host with no port while the listener sits on loopback elsewhere, so
+// deriving a port from it dialled 127.0.0.1:443 and called a working route dead.
+//
+// Publication is a state machine, not a startup question. tLib's listener can
+// still be coming up when PocketBase is ready, and can go away later.
+// RegisterWebApp against a not-ready tLib returns {ok:false, retryable:true} and
+// reserves nothing; that is pending, and reporting it as a refusal sends the
+// operator to debug a non-problem. Registration retries on ready and on a tLib
+// restart, and a confirmed publication is cleared when tLib goes not-ready,
+// since the mount is gone.
+//
+// Callers must subscribe to the status events before querying current status, or
+// a transition landing between the two is lost.
+//
+// No FiveM globals here; everything is injected so this is testable offline.
 module.exports = (function () {
   const HEALTH_PATH = "/api/health";
 
-  /**
-   * Normalise a status snapshot. Anything unusable becomes not-ready rather
-   * than throwing: a malformed snapshot must not take the database down.
-   *
-   * @param {object|null} raw
-   * @returns {{ready: boolean, listenerState: string|null, publicUrlState: string|null,
-   *            publicUrl: string|null, localUrl: string|null, error: string|null}}
-   */
+  // Anything unusable becomes not-ready rather than throwing: a malformed
+  // snapshot must not take the database down.
   function normalizeStatus(raw) {
     if (!raw || typeof raw !== "object") {
       return {
@@ -57,9 +34,8 @@ module.exports = (function () {
       };
     }
     return {
-      // ready is the contract's single gate. A truthy localUrl is not a
-      // substitute: the listener can be up while the public URL is still
-      // resolving, and tLib decides when that combination counts as ready.
+      // The contract's single gate. A truthy localUrl is no substitute; the
+      // listener can be up while the public URL is still resolving.
       ready: raw.ready === true,
       listenerState: raw.listenerState || null,
       publicUrlState: raw.publicUrlState || null,
@@ -69,21 +45,15 @@ module.exports = (function () {
     };
   }
 
-  /**
-   * Where to probe the mount. Uses the local listener deliberately - see the
-   * header. Returns null when there is nothing to dial, rather than inventing
-   * a localhost default, which is the mistake this replaces.
-   */
+  // Null when there is nothing to dial. Inventing a localhost default is the
+  // mistake this replaces.
   function healthUrl(status, mount) {
     const local = status && status.localUrl;
     if (!local) return null;
     return `${String(local).replace(/\/+$/, "")}${mount}${HEALTH_PATH}`;
   }
 
-  /**
-   * A short phrase for why publication has not happened, for the log. Reads
-   * off the state fields so the operator is told which half is not up.
-   */
+  // A log phrase naming which half is not up.
   function describeNotReady(status) {
     if (!status) return "tLib reported no HTTP status";
     if (status.error) return status.error;
@@ -96,20 +66,9 @@ module.exports = (function () {
     return "tLib's HTTP is not ready";
   }
 
-  /**
-   * The publication state machine.
-   *
-   * @param {object} deps
-   * @param {string} deps.mount the mount path, e.g. "/db"
-   * @param {function} deps.register performs RegisterWebApp, returns its result
-   * @param {object} deps.logger
-   * @param {function} [deps.onPublished] called with the public URL when a
-   *   mount is confirmed
-   * @param {function} [deps.onUnpublished] called with a reason when a
-   *   previously confirmed mount is withdrawn
-   * @param {function} [deps.onWarning] called with operator-facing text; only
-   *   for real refusals, never for "still starting"
-   */
+  // deps: { mount, register, logger, onPublished(url), onUnpublished(reason),
+  // onWarning(text) }. onWarning is operator-facing and fires only for real
+  // refusals, never for "still starting".
   function createPublisher(deps) {
     const { mount, register, logger } = deps;
     const onPublished = deps.onPublished || (() => {});
@@ -121,8 +80,8 @@ module.exports = (function () {
     let publishedUrl = null;
     let pending = false;
     let status = normalizeStatus(null);
-    // Only warn once per cause; status events can arrive repeatedly and an
-    // operator does not need the same line every time tLib twitches.
+    // Once per cause; status events repeat and the operator does not need the
+    // same line every time tLib twitches.
     let warnedPendingFor = null;
 
     function attempt() {
@@ -148,11 +107,9 @@ module.exports = (function () {
       }
 
       if (result && result.ok === true) {
-        // An accepted mount with no URL is not something to celebrate. The
-        // caller's whole use for this is to print a link, and with nothing to
-        // print it would fall back to showing the loopback address under
-        // "Admin" - a link that works from a shell on the server and nowhere
-        // else. Treat it as a refusal and say what happened.
+        // An accepted mount with no URL is useless: the caller would fall back
+        // to printing the loopback address, a link that works only from a shell
+        // on the server. Treat it as a refusal.
         const url = typeof result.url === "string" ? result.url.trim() : "";
         if (!url) {
           pending = false;
@@ -172,8 +129,7 @@ module.exports = (function () {
         return true;
       }
 
-      // Pending, not refused. No mount was reserved and tLib will tell us when
-      // it is ready; saying "refused" here would be wrong and alarming.
+      // Pending, not refused: no mount was reserved and tLib will signal ready.
       if (result && result.retryable === true) {
         pending = true;
         const reason = (result && result.error) || describeNotReady(status);
@@ -215,7 +171,7 @@ module.exports = (function () {
         return status;
       },
 
-      /** Whether a mount is wanted at all. Headless and remote pass false. */
+      // Headless and remote pass false.
       want(value) {
         wanted = value === true;
         if (!wanted) pending = false;
@@ -225,27 +181,21 @@ module.exports = (function () {
         return healthUrl(status, mount);
       },
 
-      /**
-       * Apply a status snapshot. Ready re-attempts a wanted-but-unpublished
-       * mount; not-ready withdraws a confirmed one.
-       */
+      // Ready re-attempts a wanted-but-unpublished mount, not-ready withdraws a
+      // confirmed one.
       handleStatus(raw) {
         status = normalizeStatus(raw);
         if (!status.ready) {
           clearPublication(describeNotReady(status));
-          // Set regardless of whether anything was published. A mount that has
-          // never been claimed because tLib is still starting is pending too,
-          // and callers read this to tell "waiting" from "failed".
+          // Set even if nothing was published: a never-claimed mount is pending
+          // too, and callers read this to tell "waiting" from "failed".
           pending = wanted;
           return false;
         }
         return attempt();
       },
 
-      /**
-       * tLib restarted. Its registry went with it, so whatever we held is void
-       * and has to be claimed again.
-       */
+      // tLib's registry went with it, so the mount has to be claimed again.
       handleTLibRestart() {
         if (published) {
           published = false;

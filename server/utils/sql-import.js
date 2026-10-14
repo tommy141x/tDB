@@ -1,38 +1,24 @@
-/**
- * Importing .sql files that ship with other resources.
- *
- * A FiveM script normally arrives with a `.sql` dump you are expected to load
- * into MySQL by hand before it will start. There is no MySQL here, so tDB does
- * that job itself: drop the file in `sql/` at the resource root, restart, and the schema is there.
- *
- * The rules, in order of how much trouble they save:
- *
- *   1. A file is applied once, ever. Applying a dump twice duplicates every
- *      row its INSERTs carry, so a ledger table records what has run, keyed by
- *      filename, with the file's SHA-256 alongside.
- *   2. A file lands whole or not at all. Every statement goes out in one
- *      transaction, so a dump that fails halfway cannot leave a half-built
- *      schema behind. (Above MAX_STATEMENTS_PER_BATCH the file is chunked and
- *      atomicity becomes per-chunk - the importer says so when that happens.)
- *   3. A file that changed after it was applied is reported, not re-run.
- *      Re-running is a decision with data loss on the other side of it, so it
- *      is never automatic.
- *   4. A failure is reported with the file, the line, and the statement, and
- *      the resource still starts. A dump that cannot be translated is a thing
- *      to go and fix, not a reason to take the server down.
- *
- * Splitting a dump is the part that quietly destroys databases if done
- * casually: `text.split(";")` breaks apart any INSERT whose data contains a
- * semicolon, which for a FiveM dump means the first item description with a
- * sentence in it. The scanner below tracks string literals (both backslash and
- * doubled-quote escaping), backtick identifiers, `--`/`#`/block comments,
- * MySQL's `/*!40101 ... *\/` version-conditional comments, and `DELIMITER`
- * blocks for the occasional trigger.
- */
+// Importing the .sql dumps other FiveM resources expect you to load into MySQL
+// by hand. Drop the file in `sql/`, restart, and the schema is there.
+//
+// A file is applied once ever, tracked in a ledger table keyed by filename with
+// the SHA-256 alongside, because replaying a dump duplicates every row its
+// INSERTs carry. It lands whole or not at all, in one transaction (above
+// MAX_STATEMENTS_PER_BATCH it is chunked and atomicity is per chunk, which the
+// importer says out loud). A file that changed after it was applied is reported
+// rather than re-run, and a failure names the file, line and statement while the
+// resource still starts.
+//
+// Splitting is where this gets dangerous: `text.split(";")` shreds any INSERT
+// whose data contains a semicolon, which for a FiveM dump means the first item
+// description with a sentence in it. The scanner tracks string literals
+// (backslash and doubled-quote escaping), backtick identifiers, `--`/`#`/block
+// comments, MySQL /*!40101 ... */ conditionals, and DELIMITER blocks.
 module.exports = (function () {
   const crypto = require("crypto");
   const fs = require("fs");
   const path = require("path");
+  const tableRebuild = require("./table-rebuild.js");
 
   const LEDGER_TABLE = "tdb_sql_imports";
 
@@ -43,17 +29,8 @@ module.exports = (function () {
   const MAX_ERROR_LENGTH = 400;
   const MAX_SNIPPET_LENGTH = 160;
 
-  // ==========================================================================
-  // Splitting
-  // ==========================================================================
-
-  /**
-   * Consume a quoted run starting at `start`, returning the index just past the
-   * closing quote.
-   *
-   * MySQL escapes a quote either by doubling it or, for ' and ", with a
-   * backslash. Backtick identifiers only support doubling.
-   */
+  // Returns the index just past the closing quote. MySQL escapes a quote by
+  // doubling it or, for ' and ", with a backslash; backticks only double.
   function consumeQuoted(text, start, quote) {
     let i = start + 1;
     while (i < text.length) {
@@ -80,13 +57,8 @@ module.exports = (function () {
     return count;
   }
 
-  /**
-   * Split a dump into statements.
-   *
-   * @param {string} text
-   * @returns {Array<{sql: string, line: number}>} statements with the 1-based
-   *   line each one started on, for error messages worth reading.
-   */
+  // Returns {sql, line}, the 1-based line each statement started on, so a
+  // failure can point at somewhere in the file.
   function splitStatements(text) {
     const statements = [];
     let buffer = "";
@@ -106,9 +78,8 @@ module.exports = (function () {
       const ch = text[i];
       const pair = text.substr(i, 2);
 
-      // Block comment, including MySQL's /*!40101 ... */ conditional form.
-      // The conditional ones only ever carry session settings, so dropping
-      // them is both correct here and what we want.
+      // Includes MySQL's /*!40101 ... */ conditionals, which only ever carry
+      // session settings, so dropping them is correct here.
       if (pair === "/*") {
         const end = text.indexOf("*/", i + 2);
         const stop = end === -1 ? text.length : end + 2;
@@ -118,10 +89,9 @@ module.exports = (function () {
         continue;
       }
 
-      // Line comment. MySQL requires whitespace after `--`, which is what
-      // keeps it from eating the operator in `a--b`.
-      const isDashComment =
-        pair === "--" && (i + 2 >= text.length || /\s/.test(text[i + 2]));
+      // MySQL requires whitespace after `--`, which is what keeps this from
+      // eating the operator in `a--b`.
+      const isDashComment = pair === "--" && (i + 2 >= text.length || /\s/.test(text[i + 2]));
       if (isDashComment || ch === "#") {
         const end = text.indexOf("\n", i);
         buffer += " ";
@@ -133,7 +103,10 @@ module.exports = (function () {
       if ((i === 0 || text[i - 1] === "\n") && /^delimiter[ \t]+/i.test(text.substr(i, 10))) {
         const end = text.indexOf("\n", i);
         const stop = end === -1 ? text.length : end;
-        const value = text.slice(i, stop).replace(/^delimiter[ \t]+/i, "").trim();
+        const value = text
+          .slice(i, stop)
+          .replace(/^delimiter[ \t]+/i, "")
+          .trim();
         if (value) {
           flush();
           delimiter = value;
@@ -172,19 +145,10 @@ module.exports = (function () {
     return statements;
   }
 
-  // ==========================================================================
-  // Session noise
-  // ==========================================================================
-
-  /**
-   * Statements mysqldump emits to set up a MySQL session. None of them mean
-   * anything here, and feeding them to the translator would fail a file that
-   * is otherwise perfectly importable.
-   *
-   * Transaction control is on this list deliberately: the importer runs the
-   * whole file in one transaction of its own, and a nested BEGIN/COMMIT from
-   * the dump would fight it.
-   */
+  // Session setup mysqldump emits. Meaningless here, and passing it to the
+  // translator would fail an otherwise importable file. Transaction control is
+  // on the list on purpose: the importer runs the file in a transaction of its
+  // own and a nested BEGIN/COMMIT would fight it.
   const SESSION_NOISE = [
     /^SET\s/i,
     /^LOCK\s+TABLES\b/i,
@@ -207,9 +171,85 @@ module.exports = (function () {
     return SESSION_NOISE.some((pattern) => pattern.test(trimmed));
   }
 
-  // ==========================================================================
-  // Ledger
-  // ==========================================================================
+  /**
+   * Turn an ALTER that needs a table rebuild into the statements that do it.
+   *
+   * SQLite's ALTER TABLE cannot retype a column, change a default, add or
+   * remove NOT NULL, or add a constraint, so MODIFY/CHANGE were refused by
+   * name. The documented answer is to rebuild the table, which needs the LIVE
+   * schema - so the translator hands over a descriptor and this reads the
+   * schema and asks table-rebuild.js to plan it.
+   *
+   * `tableSql` is read as well as the pragma because the pragma cannot describe
+   * a table well enough to rebuild it: measured, it reports none of
+   * AUTOINCREMENT, UNIQUE, CHECK, a foreign key or COLLATE. Rebuilding from the
+   * pragma alone would drop all of them silently.
+   *
+   * Every trigger in the schema is passed, not just this table's: the final
+   * RENAME reparses the whole schema, so a trigger on an unrelated table that
+   * mentions this one breaks it.
+   */
+  async function planTableRebuild(adapter, rebuild) {
+    const rows = (sql, params) => adapter.handle("query", [sql, params || []]);
+    const table = rebuild.table;
+
+    const columns = await rows(
+      // Backticked, never double-quoted: `notnull` is a reserved word and the
+      // MySQL front end reads "notnull" as the string literal.
+      "SELECT name, type, `notnull`, dflt_value, pk FROM pragma_table_info(?)",
+      [table]
+    );
+
+    if (!columns.length) {
+      const error = new Error(
+        `Cannot rebuild ${table}: it does not exist yet. An ALTER that retypes ` +
+          "a column has to run after the CREATE TABLE that makes it."
+      );
+      error.construct = "ALTER TABLE before CREATE TABLE";
+      throw error;
+    }
+
+    const created = await rows("SELECT sql FROM sqlite_master WHERE type = ? AND name = ?", [
+      "table",
+      table,
+    ]);
+    const indexes = await rows(
+      "SELECT name, sql FROM sqlite_master WHERE type = ? AND tbl_name = ? AND sql IS NOT NULL",
+      ["index", table]
+    );
+    const triggers = await rows(
+      "SELECT name, sql FROM sqlite_master WHERE type = ? AND sql IS NOT NULL",
+      ["trigger"]
+    );
+
+    return tableRebuild.planRebuild({
+      table,
+      actions: rebuild.actions,
+      columns,
+      indexes,
+      triggers,
+      tableSql: created.length ? created[0].sql : null,
+    });
+  }
+
+  function isCreateTrigger(sql) {
+    return /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:DEFINER\s*=\s*\S+\s+)?TRIGGER\b/i.test(sql);
+  }
+
+  function triggerName(sql) {
+    const m =
+      /^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:DEFINER\s*=\s*\S+\s+)?TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?([A-Za-z0-9_$.]+)[`"]?/i.exec(
+        sql
+      );
+    return m ? m[1] : "(unnamed)";
+  }
+
+  // "partial" means every statement but some trigger(s) applied. It gates
+  // re-running exactly like "applied": the INSERTs already landed.
+  const APPLIED_STATUSES = new Set(["applied", "partial"]);
+
+  // Relative to this file: a required module resolves from its own directory.
+  const triggerRewrite = require("./trigger-rewrite.js");
 
   const LEDGER_DDL = `CREATE TABLE IF NOT EXISTS ${LEDGER_TABLE} (
     filename VARCHAR(255) NOT NULL,
@@ -229,18 +269,16 @@ module.exports = (function () {
   async function readLedger(adapter) {
     const rows = await adapter.select(
       `SELECT filename, checksum, statements, status, error, applied_at, duration_ms
-       FROM ${LEDGER_TABLE}`,
+       FROM ${LEDGER_TABLE}`
     );
     const byFilename = new Map();
     for (const row of rows || []) byFilename.set(row.filename, row);
     return byFilename;
   }
 
-  /**
-   * The ledger row for a file, as two statements so it does not depend on
-   * ON DUPLICATE KEY translation. Returned rather than executed so the caller
-   * can put it in the same transaction as the file itself.
-   */
+  // Two statements rather than an upsert, so this does not depend on ON
+  // DUPLICATE KEY translation. Returned, not executed, so the caller can put it
+  // in the same transaction as the file.
   function ledgerStatements(record) {
     return [
       {
@@ -273,10 +311,6 @@ module.exports = (function () {
     await adapter.send("/api/tdb/batch", { statements, transaction: true });
   }
 
-  // ==========================================================================
-  // Importing
-  // ==========================================================================
-
   function checksum(text) {
     return crypto.createHash("sha256").update(text, "utf8").digest("hex");
   }
@@ -290,26 +324,18 @@ module.exports = (function () {
 
   function trimError(message) {
     const text = String(message || "unknown error");
-    return text.length > MAX_ERROR_LENGTH
-      ? `${text.slice(0, MAX_ERROR_LENGTH)}...`
-      : text;
+    return text.length > MAX_ERROR_LENGTH ? `${text.slice(0, MAX_ERROR_LENGTH)}...` : text;
   }
 
-  /**
-   * The batch route reports which statement failed as a 1-based index. Map it
-   * back to the line in the file the author can actually go and look at.
-   */
+  // The batch route reports the failing statement as a 1-based index; map it
+  // back to a line in the file.
   function locate(message, origins) {
     const match = /statement\s+(\d+)\b/i.exec(String(message || ""));
     if (!match) return null;
     return origins[Number(match[1]) - 1] || null;
   }
 
-  /**
-   * Apply one file.
-   *
-   * @returns {Promise<object>} a ledger-shaped record, status "applied" or "failed"
-   */
+  // Resolves to a ledger-shaped record, status "applied" or "failed".
   async function importFile(adapter, filePath, logger) {
     const filename = path.basename(filePath);
     const text = fs.readFileSync(filePath, "utf8");
@@ -337,26 +363,91 @@ module.exports = (function () {
     }
 
     // Translate first, so a construct with no faithful SQLite form is caught
-    // before anything has been sent.
+    // before anything is sent.
+    const skipped = [];
+    const rewrites = [];
     const statements = [];
     const origins = []; // parallel to `statements`, for locating a failure
     for (const entry of executable) {
       let translated;
+
+      // Awaited separately, then translated synchronously: a trigger we are
+      // about to skip must not produce a rejected promise, because FiveM
+      // reports one even when it is caught, and six expected skips printed six
+      // stack traces for an outcome this loop handles.
+      await adapter.prepareSchema(entry.sql);
+
       try {
-        translated = await adapter.translate(entry.sql, entry.params);
+        translated = adapter.translateSync(entry.sql, entry.params);
       } catch (error) {
+        // A trigger is the one statement whose loss is recoverable: the tables
+        // and every row still arrive, and only derived values it maintained go
+        // stale. Failing the file instead would import nothing at all, which is
+        // strictly worse, so skip it and say so loudly. Anything else still
+        // fails the whole file.
+        if (isCreateTrigger(entry.sql)) {
+          const name = triggerName(entry.sql);
+
+          // Three MySQL trigger shapes are expressible in SQLite, just not in
+          // the same words. Tried only after the ordinary path has failed, so
+          // the triggers that already translate are untouched.
+          const rewritten = triggerRewrite.rewrite(
+            entry.sql,
+            (piece) => adapter.translateSync(piece, {}).sql
+          );
+
+          if (rewritten.handled) {
+            for (const statement of rewritten.statements) {
+              statements.push({ sql: statement });
+              origins.push(entry);
+            }
+            rewrites.push(`${name} (${rewritten.shapes.join(" + ")})`);
+            logger.info(
+              `${filename}: trigger ${name} rewritten for SQLite ` +
+                `(${rewritten.shapes.join(" + ")})` +
+                (rewritten.statements.length > 1
+                  ? `, as ${rewritten.statements.length} triggers`
+                  : "")
+            );
+            continue;
+          }
+
+          skipped.push(`${name} (${error.construct || "untranslatable"})`);
+          // Any line number in the message is relative to the trigger body,
+          // not the file, so say which trigger before quoting it.
+          logger.warn(
+            `${filename}: trigger ${name} (file line ${entry.line}) was ` +
+              `SKIPPED - ${error.message} Line numbers below are within the ` +
+              `trigger body. Values it maintained will not update by themselves.`
+          );
+          continue;
+        }
+
         record.status = "failed";
-        record.error = trimError(
-          `line ${entry.line}: ${error.message} - ${snippet(entry.sql)}`,
-        );
+        record.error = trimError(`line ${entry.line}: ${error.message} - ${snippet(entry.sql)}`);
         record.duration_ms = Date.now() - startedAt;
         logger.error(`${filename}: ${record.error}`);
         await writeLedger(adapter, record);
         return record;
       }
 
-      // The statement, then anything it spun off - an inline KEY becomes a
-      // CREATE INDEX, which needs the table to exist first.
+      // An ALTER that needs the table rebuilt. `translated.sql` is the
+      // UNTRANSLATED original here and must never be executed.
+      //
+      // Only a MARKER is recorded, because a rebuild has to be planned from the
+      // LIVE schema and this loop runs before anything has been sent - the
+      // table it rebuilds usually does not exist yet, being created by a
+      // CREATE TABLE earlier in the same file. The execution phase plans it
+      // when it reaches this point in the order.
+      if (translated.rebuild) {
+        statements.push({ rebuild: translated.rebuild });
+        origins.push(entry);
+        rewrites.push(`${translated.rebuild.table} (table rebuild)`);
+        continue;
+      }
+
+      // Then anything it spun off: an inline KEY becomes a CREATE INDEX, which
+      // needs the table to exist first.
       statements.push({ sql: translated.sql, params: translated.params });
       origins.push(entry);
       for (const extra of translated.extraStatements) {
@@ -366,45 +457,108 @@ module.exports = (function () {
     }
 
     const chunked = statements.length > MAX_STATEMENTS_PER_BATCH;
+    // Set before the batch runs: on a single-batch file the ledger row travels
+    // inside the same transaction, so it has to already say "partial".
+    if (skipped.length) {
+      record.statements = executable.length - skipped.length;
+      record.status = "partial";
+      record.error = trimError(`${skipped.length} trigger(s) skipped: ${skipped.join("; ")}`);
+    }
+
     if (chunked) {
       logger.warn(
         `${filename}: ${statements.length} statements - applying in chunks of ` +
-          `${MAX_STATEMENTS_PER_BATCH}, so a failure can leave earlier chunks applied`,
+          `${MAX_STATEMENTS_PER_BATCH}, so a failure can leave earlier chunks applied`
+      );
+    }
+
+    // A rebuild marker splits the file, because the statements before it have to
+    // be in the database before its schema can be read. Atomicity is then per
+    // segment rather than per file - the same trade the chunked path already
+    // makes, and the reason both say so out loud.
+    const segments = [[]];
+    const rebuildsAt = [];
+    for (const statement of statements) {
+      if (statement.rebuild) {
+        rebuildsAt.push(statement.rebuild);
+        segments.push([]);
+        continue;
+      }
+      segments[segments.length - 1].push(statement);
+    }
+
+    if (rebuildsAt.length) {
+      logger.warn(
+        `${filename}: ${rebuildsAt.length} ALTER(s) need a table rebuild, so the ` +
+          "file is applied in segments and a failure can leave earlier ones applied"
       );
     }
 
     try {
-      for (let offset = 0; offset < statements.length; offset += MAX_STATEMENTS_PER_BATCH) {
-        const chunk = statements.slice(offset, offset + MAX_STATEMENTS_PER_BATCH);
-        const isLast = offset + MAX_STATEMENTS_PER_BATCH >= statements.length;
+      for (let seg = 0; seg < segments.length; seg++) {
+        const segment = segments[seg];
+        const isFinalSegment = seg === segments.length - 1;
 
-        record.duration_ms = Date.now() - startedAt;
+        for (let offset = 0; offset < segment.length; offset += MAX_STATEMENTS_PER_BATCH) {
+          const chunk = segment.slice(offset, offset + MAX_STATEMENTS_PER_BATCH);
+          const isLast = isFinalSegment && offset + MAX_STATEMENTS_PER_BATCH >= segment.length;
 
-        // On a single-batch file the ledger row rides along in the same
-        // transaction, so the record and the schema can never disagree.
-        const payload = isLast
-          ? chunk.concat(
-              await Promise.all(
-                ledgerStatements(record).map(async (entry) => {
-                  const t = await adapter.translate(entry.sql, entry.params);
-                  return { sql: t.sql, params: t.params };
-                }),
-              ),
-            )
-          : chunk;
+          record.duration_ms = Date.now() - startedAt;
 
-        await adapter.send("/api/tdb/batch", {
-          statements: payload,
-          transaction: true,
-        });
+          // On a single-batch file the ledger row rides in the same transaction,
+          // so the record and the schema cannot disagree.
+          const payload = isLast
+            ? chunk.concat(
+                await Promise.all(
+                  ledgerStatements(record).map(async (entry) => {
+                    const t = await adapter.translate(entry.sql, entry.params);
+                    return { sql: t.sql, params: t.params };
+                  })
+                )
+              )
+            : chunk;
+
+          if (payload.length) {
+            await adapter.send("/api/tdb/batch", {
+              statements: payload,
+              transaction: true,
+            });
+          }
+        }
+
+        // The rebuild that ended this segment, now that its table is in place.
+        const rebuild = rebuildsAt[seg];
+        if (!rebuild) continue;
+
+        const planned = await planTableRebuild(adapter, rebuild);
+        if (planned.length) {
+          await adapter.send("/api/tdb/batch", {
+            statements: planned.map((sql) => ({ sql })),
+            // NOT transactional: the plan opens with `PRAGMA foreign_keys=off`
+            // and closes by turning it back on, and PRAGMA foreign_keys is
+            // silently ignored inside a transaction - so wrapping it would
+            // leave foreign keys enforced, fail the DROP, and roll the whole
+            // rebuild back. Measured; see table-rebuild.js's header.
+            transaction: false,
+          });
+        }
+
+        logger.info(
+          `${filename}: ${rebuild.table} rebuilt for ${rebuild.actions.length} ` +
+            `ALTER action(s), ${planned.length} statement(s)`
+        );
+      }
+
+      // An empty final segment means the file ended on a rebuild, so the ledger
+      // row has not been written inside a batch yet.
+      if (!segments[segments.length - 1].length) {
+        await writeLedger(adapter, record);
       }
     } catch (error) {
       const origin = locate(error.message, origins);
       record.status = "failed";
       record.error = trimError(
-        origin
-          ? `line ${origin.line}: ${error.message} - ${snippet(origin.sql)}`
-          : error.message,
+        origin ? `line ${origin.line}: ${error.message} - ${snippet(origin.sql)}` : error.message
       );
       record.duration_ms = Date.now() - startedAt;
       logger.error(`${filename}: ${record.error}`);
@@ -416,31 +570,22 @@ module.exports = (function () {
     record.duration_ms = Date.now() - startedAt;
 
     const noise = skippedNoise ? `, ${skippedNoise} session statement(s) skipped` : "";
+    const triggers =
+      (rewrites.length ? `, ${rewrites.length} trigger(s) rewritten` : "") +
+      (skipped.length ? `, ${skipped.length} trigger(s) skipped` : "");
     logger.info(
-      `${filename}: applied ${executable.length} statement(s) in ${record.duration_ms}ms${noise}`,
+      `${filename}: applied ${executable.length - skipped.length} statement(s) ` +
+        `in ${record.duration_ms}ms${noise}${triggers}`
     );
     return record;
   }
 
-  // ==========================================================================
-  // Startup pass
-  // ==========================================================================
-
-  /**
-   * Apply every pending file in `dir`, in filename order.
-   *
-   * Never throws. A file that fails is reported and recorded, and the next one
-   * is still attempted - one bad dump should not hide the rest.
-   *
-   * @param {object} adapter the OxMySQL adapter (its translate/select/execute/send)
-   * @param {string} dir absolute path to the drop folder
-   * @param {object} logger
-   * @param {object} [options] `onChanged`: "warn" | "apply" | "error"
-   * @param {string[]} [options.only] apply just these filenames
-   * @param {boolean} [options.force] re-apply even if the ledger says applied
-   */
+  // Applies every pending file in `dir` in filename order. Never throws: a
+  // failing file is recorded and the next is still attempted, so one bad dump
+  // does not hide the rest. options: onChanged "warn" | "apply" | "error",
+  // only (filenames), force (re-apply even if the ledger says applied).
   async function run(adapter, dir, logger, options = {}) {
-    const summary = { applied: [], failed: [], skipped: [], changed: [] };
+    const summary = { applied: [], partial: [], failed: [], skipped: [], changed: [] };
 
     if (!fs.existsSync(dir)) return summary;
 
@@ -464,7 +609,7 @@ module.exports = (function () {
       const previous = ledger.get(filename);
       const filePath = path.join(dir, filename);
 
-      if (previous && previous.status === "applied" && !options.force) {
+      if (previous && APPLIED_STATUSES.has(previous.status) && !options.force) {
         const current = checksum(fs.readFileSync(filePath, "utf8"));
 
         if (current === previous.checksum) {
@@ -472,8 +617,8 @@ module.exports = (function () {
           continue;
         }
 
-        // The file changed after it was applied. Re-running it would replay
-        // every INSERT it contains, so that is never the default.
+        // Re-running would replay every INSERT the file contains, so that is
+        // never the default.
         if (options.onChanged === "apply") {
           logger.warn(`${filename}: changed since it was applied - re-applying as configured`);
         } else {
@@ -489,7 +634,8 @@ module.exports = (function () {
       }
 
       const record = await importFile(adapter, filePath, logger);
-      if (record.status === "applied") summary.applied.push(filename);
+      if (record.status === "partial") summary.partial.push(filename);
+      else if (record.status === "applied") summary.applied.push(filename);
       else summary.failed.push(filename);
     }
 
@@ -497,14 +643,11 @@ module.exports = (function () {
   }
 
   return {
-    LEDGER_TABLE,
-    MAX_STATEMENTS_PER_BATCH,
     splitStatements,
     isSessionNoise,
     checksum,
     ensureLedger,
     readLedger,
-    importFile,
     run,
   };
 })();
