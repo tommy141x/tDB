@@ -1,0 +1,195 @@
+---
+title: "Importing .sql files"
+description: "Load a script's MySQL dump without a MySQL server: drop it in tDB/sql/ and restart."
+order: 4
+group: "tDB"
+published: true
+---
+
+Scripts ship a `.sql` dump and expect you to load it into MySQL by hand. There
+is no MySQL here, so put the file in `tDB/sql/` and restart instead.
+
+```txt
+sql/
+  01-qb-core.sql
+  02-qb-inventory.sql
+  03-my-shop.sql
+```
+
+Files run in filename order, on startup, before tDB reports ready. Anything
+waiting on `awaitConnection` finds its tables already there. Number them only
+when one depends on another.
+
+## What to expect
+
+- **A file runs once, ever.** Applying a dump twice duplicates every row its
+  `INSERT`s carry, so what has run is recorded in the `tdb_sql_imports` table.
+- **A file lands whole or not at all.** The whole file goes out in one
+  transaction. Past 500 statements it's chunked and atomicity becomes
+  per-chunk; the importer says so when that happens.
+- **A failure does not stop the server.** The file, the line and the statement
+  are reported, nothing is applied, and it's retried on the next restart.
+- **A file edited after it ran is reported, not re-run.** See
+  [Changing a file after it has run](#changing-a-file-after-it-has-run).
+- **A trigger tDB cannot translate is skipped, not fatal.** The file still
+  applies and the status becomes `PARTIAL`. See
+  [Skipped triggers](#skipped-triggers).
+- **mysqldump session noise is ignored:** `SET NAMES`, `LOCK TABLES`,
+  `/*!40000 ALTER TABLE ... DISABLE KEYS */`, `START TRANSACTION` and friends.
+
+Statements are split by a scanner rather than by `split(";")`, so semicolons in
+string literals, escapes, backtick identifiers, `--` / `#` / block comments and
+`DELIMITER` blocks all survive intact.
+
+## Changing a file after it has run
+
+tDB notices and tells you, but won't re-run it on its own, because replaying a
+dump replays its `INSERT`s. `Config.Sql.OnChanged` decides how loudly it tells
+you: `"warn"` and `"error"` differ only in log level, and neither re-runs.
+`"apply"` re-runs it, which only suits pure DDL dumps.
+
+To replay one file on demand:
+
+```txt
+tdb sql import 01-qb-core.sql --force
+```
+
+## Commands
+
+These run in the **server console only**. A player with the `command.tdb` ACE
+still gets nothing back.
+
+| Command | What it does |
+| --- | --- |
+| `tdb sql status` | Lists the sql folder, then every `.sql` file with its state: `PENDING`, or its recorded status (`APPLIED`, `PARTIAL`, `FAILED`) with statement count and duration. Flags files changed since they ran, and ledger rows whose file is gone |
+| `tdb sql import <file>` | Applies one file now. Refuses if it already ran or has changed |
+| `tdb sql import <file> --force` | Applies it again regardless |
+| `tdb sql tables [match]` | Every table with its row count, optionally filtered by substring |
+| `tdb sql query <sql>` | Runs a read query and prints the rows, 50 at a time |
+| `tdb sql plan` | Which tables would be handed to PocketBase, and how each id is handled |
+| `tdb sql adopt` | Hands them over now, after taking a backup |
+
+<Callout type="info" title="Calling it from a script">
+  The command is registered restricted. A resource using `ExecuteCommand` needs
+  `add_ace resource.<name> command.tdb allow` in `server.cfg`, or FiveM denies
+  it silently. Even then, output only appears for the server console.
+</Callout>
+
+## Where the imported data lives
+
+An imported dump lands as plain SQLite tables. The admin UI's Collections
+screen lists PocketBase's own `_collections` registry, so a raw table does not
+appear there, and a successful import can look like a failed one.
+
+tDB hands each table over to PocketBase instead, so it becomes a real **base
+collection** under its own name: browsable *and* editable in the native UI. There
+is still only one table, and both SQL and the admin UI read and write it.
+
+This happens automatically after startup, and again after a manual
+`tdb sql import`. It is idempotent, so a table PocketBase already owns is left
+alone and a steady-state boot does nothing.
+
+```txt
+tdb sql plan     # what would be handed over, and how each id is handled
+tdb sql adopt    # do it now
+tdb sql tables   # every table with its row count
+tdb sql query SELECT * FROM phone_phones LIMIT 5
+```
+
+<Callout type="warning" title="It rewrites tables, so it backs up first">
+  PocketBase will not adopt a table it did not create, so each one is recreated
+  and its rows copied across. tDB takes a PocketBase backup before the first
+  table is touched and refuses to continue if that backup fails. Restore it from
+  **Admin → Backups**.
+</Callout>
+
+### What changes when a table is adopted
+
+- **`id` becomes TEXT.** PocketBase's `id` is a system field and is always
+  text. Existing values are preserved, and a table whose `id` was an integer
+  primary key keeps getting integers, so ordering and paging by `id` still
+  behave. Every parameter is bound as text for the same reason: SQLite applies
+  a column's affinity to a bound value, so `WHERE id = ?` matches whether the
+  caller passes `5` or `"5"`.
+- **Nullable columns stay nullable.** PocketBase has no `NULL`: every column
+  it creates is `NOT NULL` with a zero-value default, and marking a field
+  optional makes no difference. tDB rebuilds the table PocketBase created, while
+  it is still empty, carrying your schema's own nullability across — so
+  `WHERE col IS NULL` keeps matching and a column you declared nullable is still
+  nullable afterwards.
+- **An edit in the admin UI cannot blank a `NULL`.** PocketBase's record API
+  sends every field on a save, including ones you did not touch, so editing one
+  field would otherwise write `''` or `0` over an unrelated `NULL`. Each adopted
+  table gets a guard trigger that restores the `NULL` when a zero value lands on
+  a column that was `NULL`. Setting a real value over a `NULL` still works, and
+  a populated value is never touched. The one case it decides for you is
+  deliberately changing a `NULL` text field to an empty string through the UI —
+  the UI renders both as an empty box, so it stays `NULL`. If you need a literal
+  empty string in a nullable text column, set it from SQL:
+  `UPDATE t SET col = '' WHERE ...`.
+- **Foreign keys become triggers.** A collection cannot declare a
+  `FOREIGN KEY`, so each `ON DELETE CASCADE` and `ON DELETE SET NULL` is
+  re-created as a trigger, which fires for deletes made in the admin UI too.
+  `RESTRICT` and `NO ACTION` cannot be reproduced and are reported instead.
+- **`INSERT INTO t VALUES (NULL, ...)` stops working** on an adopted table.
+  MySQL reads a `NULL` there as "assign the next id"; PocketBase declares `id`
+  as `NOT NULL`. Name your columns, or pass an id.
+
+## Rewritten triggers
+
+Three MySQL trigger shapes have no direct SQLite spelling but are still
+expressible, and tDB converts them:
+
+| MySQL | Becomes |
+| --- | --- |
+| `IF c THEN a; ELSE b; END IF;` | two triggers, each with a `WHEN` guard |
+| `DECLARE v; SELECT e INTO v; ... v ...` | a correlated subquery in place of the variable |
+| `UPDATE t JOIN u ON c SET a` | `UPDATE t SET a FROM u WHERE c` |
+
+The conversion is attempted only after the ordinary path has failed, so triggers
+that already translate are untouched. It is **all or nothing per trigger**: a
+shape that does not match exactly is not approximated, it is skipped and
+reported. Two `DECLARE`s, a variable that is reassigned, a nested `IF` and a
+two-table `UPDATE` are all skipped rather than rewritten.
+
+```txt
+phone.sql: trigger phone_instagram_increment_like_count rewritten for SQLite (IF/ELSE), as 2 triggers
+phone.sql: applied 111 statement(s) in 95ms, 5 trigger(s) rewritten, 1 trigger(s) skipped
+```
+
+## Skipped triggers
+
+A `CREATE TRIGGER` whose body has no faithful SQLite form is the one statement
+tDB will drop rather than fail the file over. Every table and every row still
+arrives; what stops happening is whatever the trigger maintained, which in
+practice is a cached counter such as a like or follower count.
+
+It is never silent. Each one is warned at import time, naming the trigger and
+the construct, the file records `PARTIAL`, and `tdb sql status` lists them:
+
+```txt
+PARTIAL   phone.sql  106 statement(s), 249ms - 6 trigger(s) skipped: ...
+```
+
+A `PARTIAL` file counts as applied and is not re-run, because its `INSERT`s did
+land. To add the triggers, rewrite them as SQLite in a second `.sql` file and
+drop that in too. Whatever the skipped trigger was maintaining is a number you
+can recompute with an `UPDATE` once the schema is in.
+
+<Callout type="note" title="Anything other than a trigger still fails the file">
+  A `CREATE TABLE` or an `INSERT` that cannot be translated rolls the whole file
+  back. Only a trigger is ever skipped.
+</Callout>
+
+## This is not `Config.Migrations`
+
+`Config.Migrations` is PocketBase's own collection migration system: it records
+changes you make to collections in the admin UI so they travel with the
+resource. The `sql/` folder is for other people's MySQL dumps. The two never
+interact.
+
+## Next steps
+
+- The `Config.Sql` options: [Configuration](/docs/tDB/configuration#sql-imports)
+- A dump failed to translate: [MySQL compatibility](/docs/tDB/mysql-compatibility)
+- Every `tdb sql` subcommand in one table: [API reference](/docs/tDB/api-reference#commands)

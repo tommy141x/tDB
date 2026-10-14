@@ -1,0 +1,284 @@
+---
+title: "API reference"
+description: "Every tDB export, the oxmysql compatibility surface, the MySQL.lua library, console commands and events."
+order: 6
+group: "tDB"
+published: true
+---
+
+Every name below is reachable as `exports.tDB:<name>`, `exports.oxmysql:<name>`,
+`exports['mysql-async']:<name>` and `exports.ghmattimysql:<name>`. The split into
+sections is documentation convention, not a code boundary.
+
+<Callout type="info" title="Every export exists from tDB's first frame">
+  They are registered at resource start, before PocketBase is up, exactly as
+  oxmysql's are. A call that lands before the database is ready parks until it
+  is, rather than raising "no such export". You only see FiveM's "no such
+  export" if the calling resource is `ensure`d **above** tDB in `server.cfg`,
+  so that tDB has not loaded yet. See [Readiness](#readiness).
+</Callout>
+
+Exports marked **async** return a promise: use the `_async` name, or
+`Citizen.Await`. In the narrow window after the adapters are wired up but
+before the superuser session is established, one throws
+`PocketBase client not ready yet`.
+
+## Readiness
+
+| Export | Parameters | Returns | Async |
+| --- | --- | --- | --- |
+| `isReady` | none | boolean | no |
+| `onReady` | `callback` | nil. Fires immediately if already ready, else queues | no |
+| `isClientAuthenticated` | none | boolean, live rather than the boot result | no |
+| `getUrl` | none | string base URL, or nil before ready | no |
+| `awaitConnection` | none | true | yes |
+
+## oxmysql exports
+
+Each base name is registered three times: `name`, `name_async` and `nameSync`.
+**All three behave identically**, the suffix is stripped and never changes
+behaviour. There is no separate synchronous path.
+
+Accepted call shapes: `(sql)`, `(sql, params)`, `(sql, callback)`,
+`(sql, params, callback)`. With a callback the export returns nothing and
+invokes the callback; without one it returns a promise.
+
+| Export | Returns |
+| --- | --- |
+| `query` | array of rows |
+| `execute` | array of rows. **Alias of `query`** |
+| `fetch` | array of rows. **Alias of `query`** |
+| `single` | first row, or nil |
+| `scalar` | first column of the first row, or nil |
+| `insert` | the new row's id |
+| `update` | affected row count |
+| `prepare` | one result per parameter set; a single set returns bare, and a callback unwraps a one-column row to the value |
+| `rawExecute` | as `prepare`, without the unwrapping |
+| `transaction` | true, or **false** if it rolled back. Never throws |
+| `store` | the query string unchanged. Synchronous, and works before readiness |
+
+### mysql-async aliases
+
+| Alias | Behaves as | Returns |
+| --- | --- | --- |
+| `mysql_execute` | `update` | **affected row count** |
+| `mysql_insert` | `insert` | insert id |
+| `mysql_fetch_all` | `query` | rows |
+| `mysql_fetch_scalar` | `scalar` | scalar |
+| `mysql_transaction` | `transaction` | true/false |
+| `mysql_store` | `store` | the query |
+
+<Callout type="info" title="execute returns rows; mysql_execute returns a count">
+  `exports.oxmysql:execute` returns rows, matching oxmysql. `mysql_execute` and
+  `MySQL.Sync.execute` return an affected row count, matching mysql-async. Check
+  which name your script calls before you read its result.
+</Callout>
+
+A rows-returning export run against a write statement returns an empty result
+rather than erroring, and a write-returning export against a `SELECT` runs the
+select and returns nil. This mirrors oxmysql.
+
+### Query cache
+
+Off by default. When on, row queries are cached and any write through tDB clears
+the cache, so a cached read cannot outlive the data it described.
+
+| Export | Parameters | Returns |
+| --- | --- | --- |
+| `enableCache` | `ttl = 60000`, `maxSize = 100` | true |
+| `disableCache` | none | true, and clears |
+| `invalidateCache` | `pattern?`: substring match on the key; omit to clear all | true |
+| `setSlowQueryThreshold` | `ms`: 0 disables the warning; default 150 | true |
+
+## `lib/MySQL.lua`
+
+Add `server_script '@tDB/lib/MySQL.lua'` to your `fxmanifest.lua`. Every entry
+has an `.await` form and a callable callback form.
+
+Every entry waits for the database before it dispatches, so a script that
+queries during its own startup gets its rows rather than "no such export". Once
+the database is up the wait is a single `isReady` check.
+
+| Entry | Returns |
+| --- | --- |
+| `MySQL.query` | rows |
+| `MySQL.single` | row or nil |
+| `MySQL.scalar` | value |
+| `MySQL.insert` | insert id |
+| `MySQL.update` | affected rows |
+| `MySQL.execute` | **rows** (alias of query) |
+| `MySQL.fetch` | rows |
+| `MySQL.prepare` | per-set results |
+| `MySQL.rawExecute` | raw result |
+| `MySQL.transaction` | true/false |
+
+```lua
+local rows = MySQL.query.await('SELECT * FROM players')
+local id   = MySQL.insert.await('INSERT INTO logs (msg) VALUES (?)', { 'joined' })
+
+MySQL.ready(function() print('database up') end)
+```
+
+Legacy namespaces: `MySQL.Sync.execute` (affected rows), `MySQL.Sync.insert`,
+`MySQL.Sync.fetchAll`, `MySQL.Sync.fetchSingle`, `MySQL.Sync.fetchScalar`,
+`MySQL.Sync.transaction`, and the matching `MySQL.Async.*` callback forms. Also
+`MySQL.ready`, `MySQL.isReady`, `MySQL.awaitConnection` and `MySQL.store`.
+
+`MySQL.Sync.prepare` and `MySQL.Async.prepare` are provided too.
+
+<Callout type="warning" title="One gap versus the full oxmysql library">
+  There is no `MySQL.Sync.rawExecute`; use `MySQL.rawExecute.await` instead.
+  The library also hardcodes the resource name `tDB`, so renaming the folder
+  breaks it.
+</Callout>
+
+## Records
+
+| Export | Parameters | Returns | Async |
+| --- | --- | --- | --- |
+| `create` | `collection`, `data`, `options?` | created record | yes |
+| `update` | `collection`, `id`, `data`, `options?` | updated record | yes |
+| `delete` | `collection`, `id?`, `options?` | true | yes |
+| `getOne` | `collection`, `id`, `options?` | record. **Throws on 404** | yes |
+| `getList` | `collection`, `page = 1`, `perPage = 30`, `options?` | `{ page, perPage, totalItems, totalPages, items }` | yes |
+| `getFullList` | `collection`, `options?` | array of records | yes |
+| `getFirstListItem` | `collection`, `filter`, `options?` | record. **Throws on 404** | yes |
+| `findRecordsByIds` | `collection`, `ids` | array of records | yes |
+| `countRecords` | `collection`, `filter?`, `params?` | number | yes |
+| `filter` | `rawFilter`, `params?` | escaped filter string | no |
+
+`create`, `update`, `delete`, `getOne`, `getList`, `getFullList` and
+`getFirstListItem` check whether their first argument looks like SQL. That's how
+the shared name `update` reaches the oxmysql path when you pass a query.
+
+## Collections
+
+| Export | Parameters | Returns | Async |
+| --- | --- | --- | --- |
+| `getCollections` | `options?` | array | yes |
+| `getCollection` | `idOrName`, `options?` | collection | yes |
+| `createCollection` | `data`, `options?` | collection | yes |
+| `updateCollection` | `idOrName`, `data`, `options?` | collection | yes |
+| `deleteCollection` | `idOrName`, `options?` | true | yes |
+| `truncateCollection` | `idOrName`, `options?` | true | yes |
+| `importCollections` | `collections` (table or JSON string), `deleteMissing = false`, `options?` | true | yes |
+| `getCollectionScaffolds` | `options?` | scaffold map | yes |
+| `createMigrationHelper` | none | table of `createCollection`, `updateCollection`, `deleteCollection` closures | no |
+
+## Realtime
+
+| Export | Parameters | Returns | Async |
+| --- | --- | --- | --- |
+| `subscribe` | `collection`, `topic`, `callback?` | true | yes |
+| `unsubscribe` | `collection`, `topic?`: omit to drop all for the collection | true | yes |
+| `subscribeToTopic` | `topic`, `callback?` | true | yes |
+| `unsubscribeFromTopic` | `topic` | true | yes |
+| `unsubscribeByPrefix` | `topicPrefix` | true | yes |
+| `isRealtimeConnected` | none | boolean | no |
+| `sendRealtimeMessage` | `topic`, `data` | number of clients sent to | yes |
+| `getRealtimeClients` | none | array of `{ id, authenticated, authId }` | yes |
+
+## Transactions and batches
+
+| Export | Parameters | Returns | Async |
+| --- | --- | --- | --- |
+| `runTransaction` | `operations`: `{ type = "create"\|"update"\|"delete", collection, id?, data? }` | array: `{ id }` per create/update, `{ deleted = true }` per delete | yes |
+| `batch` | none | batch handle | no |
+| `batchCreate` | `batch`, `collection`, `data`, `options?` | the handle, chainable | no |
+| `batchUpdate` | `batch`, `collection`, `id`, `data`, `options?` | the handle | no |
+| `batchDelete` | `batch`, `collection`, `id`, `options?` | the handle | no |
+| `batchUpsert` | `batch`, `collection`, `data`, `options?` | the handle | no |
+| `batchSend` | `batch` | batch result array | yes |
+
+## Raw SQL
+
+`{:name}` placeholders, no MySQL translation.
+
+| Export | Parameters | Returns | Async |
+| --- | --- | --- | --- |
+| `sqlQuery` | `sql`, `params?` | array of rows | yes |
+| `sqlSingle` | `sql`, `params?` | first row, or nil | yes |
+| `sqlScalar` | `sql`, `params?`, `columnName?` | the value, or nil | yes |
+| `sqlExecute` | `sql`, `params?` | insert id only | yes |
+| `sqlTransaction` | `queries`: `{ sql, params?, expect? }` | true; throws and rolls back the whole batch on failure | yes |
+
+## Auth
+
+All async. Every one takes the auth collection name first.
+
+| Export | Parameters | Returns |
+| --- | --- | --- |
+| `listAuthMethods` | `collection`, `options?` | auth methods |
+| `authWithPassword` | `collection`, `usernameOrEmail`, `password`, `options?` | `{ token, record }` |
+| `authCollectionWithPassword` | same | `{ token, record }` |
+| `authWithOTP` | `collection`, `otpId`, `password`, `options?` | `{ token, record }` |
+| `authWithOAuth2Code` | `collection`, `provider`, `code`, `codeVerifier`, `redirectURL`, `createData?`, `options?` | `{ token, record }` |
+| `authRefresh` / `authRefreshCollection` | `collection`, `options?` | `{ token, record }` |
+| `requestOTP` | `collection`, `email`, `options?` | `{ otpId }` |
+| `requestPasswordReset` | `collection`, `email`, `options?` | true |
+| `confirmPasswordReset` | `collection`, `token`, `password`, `passwordConfirm`, `options?` | true |
+| `requestVerification` | `collection`, `email`, `options?` | true |
+| `confirmVerification` | `collection`, `token`, `options?` | true |
+| `requestEmailChange` | `collection`, `newEmail`, `options?` | true |
+| `confirmEmailChange` | `collection`, `token`, `password`, `options?` | true |
+| `listExternalAuths` | `collection`, `recordId`, `options?` | array |
+| `unlinkExternalAuth` | `collection`, `recordId`, `provider`, `options?` | true |
+
+## Files and mail
+
+| Export | Parameters | Returns | Async |
+| --- | --- | --- | --- |
+| `getFileUrl` | `record`, `filename`, `options?` | URL string | no |
+| `getFileToken` | `options?` | token string | yes |
+| `sendEmail` | `to` (string or array), `subject`, `html`, `text?` | true | yes |
+
+## Commands
+
+All are server console only, and all are gated on the `command.tdb` ACE.
+
+| Command | Notes |
+| --- | --- |
+| `tdb sql status` | Every `.sql` file with its recorded state, plus ledger rows whose file is gone |
+| `tdb sql import <file>` | Applies one file now |
+| `tdb sql import <file> --force` | `--force` is recognised anywhere in the arguments |
+| `tdb sql tables [match]` | Every table with its row count, optionally filtered by substring |
+| `tdb sql query <sql>` | Runs a read query and prints the rows, 50 at a time |
+| `tdb sql plan` | Which tables would be handed to PocketBase, and how each id is handled |
+| `tdb sql adopt` | Hands them over now, after taking a backup |
+
+Anything else prints
+`usage: tdb sql status | import <file> [--force] | tables [match] | query <sql> | plan | adopt`.
+Before the database is ready, every subcommand prints
+`not ready yet - wait for the startup banner`.
+
+See [Importing `.sql` files](/docs/tDB/sql-imports#commands) for what each one
+does in full.
+
+## Events
+
+All server-local. Use `AddEventHandler`.
+
+| Event | Payload |
+| --- | --- |
+| `pocketbase:<collection>:<topic>` | `{ action = "create"\|"update"\|"delete", record }` |
+| `pocketbase:topic:<topic>` | whatever was published to the topic |
+| `tdb:startupStatus` | a single string: the rendered startup box |
+
+## Version facts
+
+| Fact | Value |
+| --- | --- |
+| Resource version | `1.0.0` |
+| PocketBase | `0.40.4`, fetched and checksum-verified into `.runtime/` |
+| tLib minimum | `1.0` (`tlib_min_version`) |
+| Node | `node_version '22'` |
+| Provides | `oxmysql`, `mysql-async`, `ghmattimysql` |
+| Platforms | `windows_amd64`, `linux_amd64` |
+
+---
+
+## Next steps
+
+- The shapes you'll actually write: [Beyond SQL](/docs/tDB/pocketbase)
+- What translates from MySQL and what does not: [MySQL compatibility](/docs/tDB/mysql-compatibility)
+- An export is erroring or never answers: [Troubleshooting](/docs/tDB/troubleshooting)

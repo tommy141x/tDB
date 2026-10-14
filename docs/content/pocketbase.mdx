@@ -1,0 +1,223 @@
+---
+title: "Beyond SQL"
+description: "Records, collections, realtime subscriptions, raw SQLite and the admin UI, through exports.tDB."
+order: 5
+group: "tDB"
+published: true
+---
+
+tDB exposes PocketBase itself under `exports.tDB`. Use it or ignore it: the
+oxmysql surface doesn't depend on any of it.
+
+Full signatures are on the [API reference](/docs/tDB/api-reference). This page
+shows the shapes you'll actually write.
+
+## Wait for startup first
+
+PocketBase takes a second or two. Every export exists from tDB's first frame, so
+calling `exports.tDB:getFullList(...)` early parks until the database answers
+rather than failing — but the call does not return until then, and until the
+superuser session is up it can throw `PocketBase client not ready yet`. Waiting
+explicitly keeps your own startup readable:
+
+```lua
+exports.tDB:onReady(function()
+    local players = exports.tDB:getFullList('players')
+end)
+
+-- or
+if exports.tDB:isReady() then ... end
+exports.tDB:awaitConnection()
+```
+
+## Records
+
+```lua
+local player = exports.tDB:create('players', { username = 'John', score = 100 })
+local one    = exports.tDB:getOne('players', recordId)
+local page   = exports.tDB:getList('players', 1, 50)   -- .totalItems, .page, .totalPages
+local all    = exports.tDB:getFullList('players', { sort = '-score' })
+exports.tDB:update('players', recordId, { score = 150 })
+exports.tDB:delete('players', recordId)
+```
+
+<Callout type="warning" title="getOne and getFirstListItem throw on a miss">
+  They raise a 404 rather than returning `nil`. Wrap them in `pcall` when the
+  record may not exist, or use `getFirstListItem`'s list equivalents and check
+  for an empty result.
+</Callout>
+
+Build filters with `filter()` so values are bound rather than interpolated:
+
+```lua
+local f     = exports.tDB:filter('score > {:min} && banned = {:banned}', { min = 100, banned = false })
+local top   = exports.tDB:getFullList('players', { filter = f })
+local first = exports.tDB:getFirstListItem('players', f)
+
+local some  = exports.tDB:findRecordsByIds('players', { 'id1', 'id2' })
+local n     = exports.tDB:countRecords('players', 'active = true')
+```
+
+## Collections
+
+```lua
+exports.tDB:createCollection({
+    name = 'players',
+    type = 'base',
+    fields = {
+        { name = 'username', type = 'text', required = true },
+        { name = 'score',    type = 'number' },
+        { name = 'banned',   type = 'bool' },
+    },
+})
+
+exports.tDB:getCollections()
+exports.tDB:updateCollection('players', { ... })
+exports.tDB:deleteCollection('players')
+exports.tDB:truncateCollection('logs')
+```
+
+## Realtime
+
+Subscribe, then handle the event tDB emits. These are **server-local events**,
+so `AddEventHandler` is the correct listener.
+
+```lua
+exports.tDB:subscribe('bans', '*')
+
+AddEventHandler('pocketbase:bans:*', function(data)
+    -- data.action is "create" | "update" | "delete"
+    if data.action == 'create' then
+        print(data.record.id)
+    end
+end)
+
+exports.tDB:unsubscribe('bans', '*')
+```
+
+The event name is `pocketbase:<collection>:<topic>`. Custom topics, and
+broadcasting to them:
+
+```lua
+exports.tDB:subscribeToTopic('server_events')
+AddEventHandler('pocketbase:topic:server_events', function(data) end)
+
+exports.tDB:sendRealtimeMessage('server_events', { type = 'announcement', message = '...' })
+local clients = exports.tDB:getRealtimeClients()
+
+exports.tDB:unsubscribeFromTopic('server_events')
+exports.tDB:unsubscribeByPrefix('server_')
+```
+
+<Callout type="info" title="RegisterNetEvent also works, but says the wrong thing">
+  tDB never sends these over the network. `RegisterNetEvent` registers a local
+  handler too, so an older example using it still runs — but it also advertises
+  the event to clients for no reason. Use `AddEventHandler`.
+</Callout>
+
+## Record transactions and batches
+
+```lua
+local results = exports.tDB:runTransaction({
+    { type = 'create', collection = 'players', data = { name = 'John' } },
+    { type = 'update', collection = 'stats', id = statId, data = { total = 100 } },
+    { type = 'delete', collection = 'temp',  id = tempId },
+})
+```
+
+`runTransaction` runs inside a real database transaction and returns one result
+per operation. Batches are the PocketBase batch API instead, and must be enabled
+in **Admin → Settings → Batch API**:
+
+```lua
+local batch = exports.tDB:batch()
+batch = exports.tDB:batchCreate(batch, 'players', { username = 'Alice' })
+batch = exports.tDB:batchUpdate(batch, 'players', playerId, { score = 100 })
+local out = exports.tDB:batchSend(batch)
+```
+
+## Raw SQL
+
+The same database the oxmysql exports use, with `{:name}` placeholders and no
+MySQL translation. Write SQLite here.
+
+```lua
+local rows  = exports.tDB:sqlQuery('SELECT p.name, COUNT(o.id) AS n FROM players p LEFT JOIN orders o ON o.player = p.id GROUP BY p.id')
+local row   = exports.tDB:sqlSingle('SELECT * FROM players WHERE id = {:id}', { id = 1 })
+local total = exports.tDB:sqlScalar('SELECT COUNT(*) FROM players')
+local newId = exports.tDB:sqlExecute('INSERT INTO logs (msg) VALUES ({:m})', { m = 'hello' })
+
+exports.tDB:sqlTransaction({
+    { sql = 'UPDATE accounts SET balance = balance - {:n} WHERE id = {:a}', params = { n = 100, a = 'a' } },
+    { sql = 'UPDATE accounts SET balance = balance + {:n} WHERE id = {:b}', params = { n = 100, b = 'b' } },
+})
+```
+
+Result shapes are discovered from the database, so `SELECT *` returns the
+table's real columns, integers arrive as numbers, and `NULL` arrives as `nil`
+rather than an empty string. `sqlExecute` returns the insert id only.
+
+## Users, files and mail
+
+```lua
+local result = exports.tDB:authWithPassword('users', email, password)
+exports.tDB:requestPasswordReset('users', email)
+exports.tDB:confirmPasswordReset('users', token, new, newConfirm)
+exports.tDB:requestVerification('users', email)
+exports.tDB:authWithOAuth2Code('users', 'google', code, verifier, redirect)
+
+local url   = exports.tDB:getFileUrl(record, 'avatar.png')
+local token = exports.tDB:getFileToken()
+
+exports.tDB:sendEmail('user@example.com', 'Welcome', '<h1>Hi</h1>', 'Hi')
+```
+
+`sendEmail` needs mail configured in the admin UI, under **Settings → Mail**.
+See [Mail](/docs/tDB/configuration#mail).
+
+---
+
+## The admin UI
+
+On by default, and it needs no configuration. tDB claims the `/db` route on
+tLib, which holds the server's single external port, so the admin UI appears at
+`http://<your server>:7777/db/` and the panel itself at `/db/_/`. Sign in with
+`Config.Superuser`.
+
+There are no tDB host, port or mount settings. PocketBase binds
+`127.0.0.1:8090`, or any free port if 8090 is taken, and tells tLib's router
+which one it got. That port is internal: it doesn't belong in your firewall, and
+forwarding it would expose the database directly. The only port you ever set is
+tLib's, with `setr tlib_http_port`.
+
+To keep the database completely headless:
+
+```lua title="config.lua"
+Config.ExposeAdmin = false
+```
+
+### The mount follows tLib
+
+The mount is re-claimed whenever tLib's listener comes up, not once at startup:
+
+- If tLib isn't ready, the box says **Waiting for tLib's HTTP listener**, not
+  "mount failed". The mount is claimed and the admin URL logged as soon as tLib
+  reports ready.
+- If tLib stops or restarts, tDB stops advertising the admin URL and re-claims
+  the mount when it returns.
+- Route health is checked against tLib's own listener, not the public URL, so a
+  reverse proxy or an unreachable public address does not show as a failure.
+- On a tLib too old to report HTTP readiness, the admin UI isn't published at
+  all and the box tells you to update tLib. `Config.ExposeAdmin` is left exactly
+  as you set it.
+
+The database itself is unaffected in every one of these cases. Every oxmysql
+export and the whole query path go over loopback and never touch tLib's router.
+
+---
+
+## Next steps
+
+- Every signature, parameter and return: [API reference](/docs/tDB/api-reference)
+- Writing SQLite directly against the same database: [Raw SQL](#raw-sql)
+- A collection call is failing: [Troubleshooting](/docs/tDB/troubleshooting)

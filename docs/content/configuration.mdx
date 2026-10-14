@@ -1,0 +1,231 @@
+---
+title: "Configuration"
+description: "Every option in tDB's config.lua, with its type and default, plus the superuser, backup, S3 and remote-instance blocks."
+order: 2
+group: "tDB"
+published: true
+---
+
+Everything lives in `config.lua`, in the resource folder. The defaults are meant
+to work as shipped; most servers change nothing.
+
+<Callout type="info" title="config.lua is created for you">
+  The resource ships `config.example.lua`, the fully-commented template. On first
+  start tDB copies it to `config.lua` and edits that copy from then on. Edit
+  `config.lua` — updates overwrite the example. `config.lua` is gitignored on
+  purpose: tDB writes the generated superuser password into it.
+
+  Every default below is the value in `config.example.lua`, and the same value
+  tDB falls back to when a key is missing.
+</Callout>
+
+## Top level
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `Config.ExposeAdmin` | boolean | `true` | Publish the admin UI through tLib's port. `false` keeps the database headless and unreachable from outside the machine |
+| `Config.ShowInHub` | boolean | `true` | List the admin UI in tLib's hub. Cosmetic only, [not a security control](#hiding-it-from-the-hub) |
+| `Config.Debug` | boolean | `false` | Print tDB's debug lines — the pid-file sweep, route probes, each backup, the settings asserted from `config.lua`. Off, a normal boot prints the startup box and nothing else |
+| `Config.AutoUpdate` | boolean | `false` | Run `pocketbase update` on start. It replaces the shipped, checksum-verified build with an unverified newer one, under a live database |
+
+## Superuser
+
+```lua title="config.lua"
+Config.Superuser = {
+    Email = "",
+    Password = "",
+}
+```
+
+Left empty, tDB generates both on first start and writes them back into this
+file. Fill them in yourself to pin a known login.
+
+The generated password is printed in the server console **once**, on the run that
+creates it. Every later start redacts it, so after that run it lives only in
+`config.lua`.
+
+<Callout type="warning" title="These are stored in plain text">
+  `config.lua` holds the superuser password unencrypted. Keep the file out of
+  version control and off shared hosting panels. Rotating it means changing it
+  here and in the admin UI, or blanking both fields and restarting to have tDB
+  reprovision.
+</Callout>
+
+## Backups
+
+```lua title="config.lua"
+Config.Backup = {
+    Enabled = false,
+    OnStartup = true,
+    ScheduleSeconds = 0,
+    KeepLast = 7,
+    BackupPrefix = "auto_",
+}
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `Enabled` | boolean | `false` | Master switch for automatic backups |
+| `OnStartup` | boolean | `true` | Back up before each start |
+| `ScheduleSeconds` | number | `0` | Seconds between backups. `0` disables the timer. Renamed from `Schedule` in 1.0; the old name still works and prints a deprecation warning until 2.0 |
+| `KeepLast` | number | `7` | How many automatic backups to retain. `0` keeps all of them |
+| `BackupPrefix` | string | `"auto_"` | Prefix used to recognise tDB's own backups, so manual ones are never pruned |
+
+Backups land in the PocketBase data directory under `backups`.
+
+## SQL imports
+
+```lua title="config.lua"
+Config.Sql = {
+    Enabled = true,
+    Dir = "sql",
+    OnChanged = "warn",
+}
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `Enabled` | boolean | `true` | Apply `.sql` files from `Dir` on startup |
+| `Dir` | string | `"sql"` | Relative to the resource, or an absolute path |
+| `OnChanged` | string | `"warn"` | What to do when a file changes after it was applied: `"warn"`, `"error"` or `"apply"` |
+
+`warn` and `error` differ only in log level; neither re-runs the file. `apply`
+re-runs it, replaying every `INSERT` it contains, so it only suits pure DDL
+dumps. Full behaviour is on [Importing `.sql` files](/docs/tDB/sql-imports).
+
+## Migrations
+
+```lua title="config.lua"
+Config.Migrations = {
+    AutoApply = true,
+    Dir = ".runtime/pb_migrations",
+}
+```
+
+These are PocketBase's own collection migrations, not the `.sql` drop folder.
+PocketBase writes a migration file whenever you change a collection in the admin
+UI, so schema changes travel with the resource. Collection edits made in the UI
+are never reverted.
+
+## Advanced
+
+```lua title="config.lua"
+Config.Advanced = {
+    RemoteHost = "",
+    RemotePort = "",
+    Dev = false,
+    AutoMigrate = true,
+    PublicDir = "pb_public",
+    DataDir = ".runtime/pb_data",
+}
+```
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `RemoteHost` | string | `""` | Hostname of a PocketBase you already run. See [Local or remote](#local-or-remote) |
+| `RemotePort` | string | `""` | Port of that instance. Both must be set together |
+| `Dev` | boolean | `false` | Run PocketBase with verbose logging |
+| `AutoMigrate` | boolean | `true` | Let PocketBase write a migration when a collection changes |
+| `PublicDir` | string | `"pb_public"` | Directory served as static files, relative to the resource folder |
+| `DataDir` | string | `".runtime/pb_data"` | Where the database and backups live, relative to the resource folder |
+
+<Callout type="warning" title="Moving DataDir does not move the data">
+  Changing it points PocketBase at a new, empty directory. Stop the server, move
+  the existing folder yourself, then change the key.
+</Callout>
+
+### Local or remote
+
+By default tDB starts and manages its own PocketBase process on `127.0.0.1`. To
+point it at an instance you already run:
+
+```lua title="config.lua"
+Config.Advanced = {
+    RemoteHost = "db.example.com",
+    RemotePort = "8090",
+}
+```
+
+Both must be set. In remote mode no local process is started, and tDB treats the
+instance as somebody else's: `Migrations`, `Backup` and `S3` are all ignored,
+because configuring them is not tDB's job there.
+
+tDB probes the remote instance's `/api/health` before it reports ready. If that
+probe fails, startup stops there rather than registering exports against a
+database that is not answering.
+
+---
+
+## Mail
+
+Mail is configured in the PocketBase admin UI, under **Settings → Mail**. There is
+no SMTP block in `config.lua`, so nothing about mail belongs in that file — put
+your SMTP host, credentials and sender address in the admin UI and tDB leaves them
+alone.
+
+---
+
+## S3
+
+```lua title="config.lua"
+Config.Advanced = {
+    S3 = {
+        Manage = false, Enabled = false,
+        Bucket = "", Region = "", Endpoint = "",
+        AccessKey = "", SecretKey = "", ForcePathStyle = false,
+    },
+}
+```
+
+`Manage` decides who owns the setting, and it's `false` by default.
+
+| State | Behaviour |
+| --- | --- |
+| `Manage = false` (default) | tDB never touches it. Set it in the admin UI and it stays exactly as you left it. Everything else in the block is ignored |
+| `Manage = true`, `Enabled = true` | config.lua is the truth. Every field is applied on every start, secrets included. An admin-UI edit is reported, then overwritten |
+| `Manage = true`, `Enabled = false` | config.lua is still the truth, and the truth is "off". Genuinely disables it on the instance |
+
+So if you configure S3 in the admin UI, leave `Manage = false`. Set it to `true`
+when you want `config.lua` to be the authority, which makes the folder plus that
+file a complete description of the instance. Collections, records, logs and
+on-demand backups are untouched either way.
+
+### Settings never sync back
+
+Settings only ever travel `config.lua` → PocketBase. PocketBase's
+`GET /api/settings` omits `s3.secret` entirely — it comes back undefined, not
+masked — so reading the instance's settings into `config.lua` would replace a real
+credential with an empty string. An S3 secret you set in the admin UI is therefore
+never written into `config.lua` for you; copy it across yourself if you want
+`Manage = true`.
+
+Other fields in the block are still compared, so a rotated `SecretKey` is pushed
+even when the bucket, region and endpoint are unchanged.
+
+---
+
+## Hiding it from the hub
+
+tLib's hub lists the apps it serves. A server running several may not want the
+database admin panel among the things players see:
+
+```lua title="config.lua"
+Config.ShowInHub = false   -- default: true
+```
+
+<Callout type="danger" title="This is not a security setting">
+  It removes the hub entry and nothing else. The mount is still registered and
+  `/db` still answers to anyone who requests it. Delisting hides the admin UI
+  from you, not from them. For genuine unreachability use
+  `Config.ExposeAdmin = false`.
+</Callout>
+
+Leaving the key out keeps the default.
+
+---
+
+## Next steps
+
+- Loading a script's MySQL dump: [Importing `.sql` files](/docs/tDB/sql-imports)
+- Records, collections, realtime and the admin UI: [Beyond SQL](/docs/tDB/pocketbase)
+- A setting is not doing what this page says: [Troubleshooting](/docs/tDB/troubleshooting)

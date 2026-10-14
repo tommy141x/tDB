@@ -1,0 +1,78 @@
+---
+slug: "tdb"
+name: "tDB"
+tagline: "A database without a database server"
+category: "fivem"
+tags: ["standalone"]
+badge: "Open source"
+updatedAt: "2026-09-22"
+popularity: 30
+resourceName: "tDB"
+docsUrl: "/docs/tDB"
+provider: "tebex"
+media: []
+pricing:
+  - id: "tdb"
+    kind: "one-time"
+    label: "Free and open source — MIT licensed, full source included, no escrow."
+    amount: 0
+    currency: "usd"
+---
+
+tDB is a drop-in replacement for oxmysql. It answers every oxmysql export with the same return values, translates MySQL SQL to SQLite as it goes, and runs an embedded [PocketBase](https://pocketbase.io/) underneath. There is no MySQL server to install, no connection string to configure, and nothing to keep running alongside your server.
+
+Existing scripts do not change. `exports.oxmysql:single_async(...)` keeps working, because tDB declares `provide 'oxmysql'` and resolves those calls itself.
+
+<Stats
+  items={[
+    { value: "0", label: "database servers to install" },
+    { value: "3", label: "resource names provided: oxmysql, mysql-async, ghmattimysql" },
+    { value: "MIT", label: "licence, source included" },
+  ]}
+/>
+
+<Chapter>
+
+## Highlights
+
+</Chapter>
+
+<Bento>
+
+- **Drop-in for oxmysql** — the same exports and the same return values, so existing resources need no edits
+- **No MySQL to run** — an embedded PocketBase replaces the database server entirely, and provisions itself on first start
+- **MySQL SQL translated to SQLite** — handled by the Polyglot SQL transpiler; what cannot be translated is refused by name rather than quietly changed
+- **Import existing `.sql` dumps** — load a script's MySQL dump without ever standing up a MySQL server
+- **More than SQL when you want it** — PocketBase collections, realtime subscriptions, file storage and an admin UI are all there underneath
+- **Open source** — MIT licensed with the full source in the repository
+
+</Bento>
+
+<Chapter>
+
+## What it is not
+
+</Chapter>
+
+<Bento>
+
+- **Not a MySQL server.** SQL is translated to SQLite. Most of what FiveM scripts write translates cleanly; the rest is refused rather than silently altered.
+- **Not a drop-in for a database you already have data in.** tDB starts empty — moving an existing MySQL database across is a migration, not a swap.
+- **Not something to run next to oxmysql.** Two resources answering the same export name is ambiguous, and they point at two different databases.
+
+</Bento>
+
+<Chapter>
+
+## Requirements
+
+</Chapter>
+
+<Bento>
+
+- [tLib](/docs/tLib) **v1.0 or later** — tDB declares `tlib_min_version '1.0'` and will not start without it
+- **Windows or Linux, x86-64** — the bundled PocketBase builds are `windows_amd64` and `linux_amd64`; there is no ARM build
+- A FiveM artifact new enough to provide **Node 22**, which the manifest declares as `node_version '22'`
+- No framework required, and OneSync is not required
+
+</Bento>

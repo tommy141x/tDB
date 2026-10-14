@@ -1,0 +1,120 @@
+---
+title: "Installation"
+description: "Install tDB, replace oxmysql, and confirm the database is up."
+order: 1
+group: "tDB"
+published: true
+---
+
+By the end of this page tDB is running, your existing oxmysql calls resolve to
+it, and the admin UI answers. Budget about five minutes.
+
+## Prerequisites
+
+- A FiveM server on Windows or Linux x86-64
+- [tLib](https://github.com/tommy141x/tLib/releases) **v1.0 or later**, installed
+  and `ensure`d before tDB
+- No other database resource running. See [Replace oxmysql](#replace-oxmysql)
+
+---
+
+<Steps>
+
+### Install tLib
+
+Download the release zip from
+[tLib releases](https://github.com/tommy141x/tLib/releases) and extract it into
+`resources/`. tDB fails to start without it.
+
+### Extract tDB
+
+Put the folder in `resources/` and keep the name `tDB`. A compose-style rename
+breaks the `@tDB/...` paths other resources use to find the library file.
+
+<Callout type="warning" title="Transfer the zip, then unzip on the server">
+  FTP clients in ASCII mode corrupt the PocketBase binary and the WebAssembly
+  transpiler without changing their size. Move the release `.zip` across and
+  unzip it on the server, or use SFTP in binary mode.
+</Callout>
+
+### Add it to server.cfg
+
+tDB must start before anything that queries the database.
+
+```txt title="server.cfg"
+ensure tLib
+ensure tDB
+```
+
+### Start the server
+
+On first start tDB creates `config.lua` from `config.example.lua`, then
+provisions PocketBase itself: it creates the superuser, writes the credentials
+into `config.lua`, and authenticates. The PocketBase web installer never appears.
+
+**Copy the superuser password out of that first startup box.** It is shown once,
+on the run that generates it, and redacted on every start after. It is also in
+`config.lua`, which is gitignored and must stay that way.
+
+You're done when the startup box reports the database ready and prints an admin
+URL. If it says **Waiting for tLib's HTTP listener** instead, that's not an
+error, see [the admin UI](/docs/tDB/pocketbase#the-admin-ui).
+
+</Steps>
+
+---
+
+## Replace oxmysql
+
+Remove `oxmysql` from `server.cfg`. tDB publishes every one of its exports a
+second time under the `oxmysql`, `mysql-async` and `ghmattimysql` names, so
+`exports.oxmysql:...` calls resolve to tDB with no edits to any script. The
+manifest's `provide` lines are what satisfy a `dependency 'oxmysql'` check;
+they do **not** route exports on their own.
+
+Neither covers a file reference. If a resource has:
+
+```lua title="fxmanifest.lua"
+server_script '@oxmysql/lib/MySQL.lua'
+```
+
+change it to:
+
+```lua title="fxmanifest.lua"
+server_script '@tDB/lib/MySQL.lua'
+```
+
+Scripts that only call `exports.oxmysql` need no change.
+
+<Callout type="danger" title="Don't run tDB and oxmysql together">
+  Two resources answering the same export name is ambiguous, and they point at
+  two different databases. Remove one.
+</Callout>
+
+If a script ships a `.sql` dump, drop it in `tDB/sql/` instead of loading it into
+MySQL by hand. See [Importing `.sql` files](/docs/tDB/sql-imports).
+
+---
+
+## Working from a git clone
+
+A release download already contains the PocketBase binary. A source checkout
+does not, so fetch it once:
+
+```bash
+bun scripts/fetch-runtime.ts          # this platform
+bun scripts/fetch-runtime.ts --all    # both, for building a release
+```
+
+The script downloads the pinned version into `.runtime/` and verifies it against
+PocketBase's published checksums, failing rather than warning on a mismatch. To
+move to a different PocketBase release, change `PB_VERSION` at the top of that
+script.
+
+---
+
+## Next steps
+
+- The options worth knowing about: [Configuration](/docs/tDB/configuration)
+- Before you port a large schema: [MySQL compatibility](/docs/tDB/mysql-compatibility)
+- The startup box isn't green: [Troubleshooting](/docs/tDB/troubleshooting)
