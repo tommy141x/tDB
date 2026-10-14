@@ -1,15 +1,9 @@
 /**
- * Proves the resource can provision and repair a PocketBase instance headlessly.
- *
- * The resource must never leave a server owner on PocketBase's web installer:
- * the admin UI is optional, so setup has to happen without it. That guarantee
- * rests on two claims made in utils/server.js, both checked here against a real
- * instance:
- *
- *   1. Provisioning a superuser before `serve` suppresses the installer banner
- *      entirely (PocketBase only prints it when no superuser exists).
- *   2. `superuser upsert` against an ALREADY RUNNING instance takes effect
- *      immediately - no restart - which is what makes live repair possible.
+ * The resource can provision and repair a PocketBase instance headlessly, so a
+ * server owner is never left on PocketBase's web installer. Checks the two
+ * claims utils/server.js rests on: provisioning a superuser before `serve`
+ * suppresses the installer banner, and `superuser upsert` against an already
+ * running instance takes effect immediately, with no restart.
  *
  * Dev harness. Run from the resource root: node .dev/setup-repair.test.js
  */
@@ -70,10 +64,8 @@ async function authenticate(url) {
   }
 }
 
-/**
- * Start `serve` and capture stdout, so the installer banner can be detected the
- * same way utils/server.js detects it.
- */
+// Capture stdout, so the installer banner can be detected the same way
+// utils/server.js detects it.
 function serve(dir, port) {
   const proc = spawn(
     PB_BIN,
@@ -106,7 +98,6 @@ async function main() {
   let running = null;
 
   try {
-    // ----------------------------------------------------------------
     console.log("\n=== A fresh instance provisioned before serve never shows the installer");
 
     const created = pb(["superuser", "upsert", EMAIL, PASSWORD], dir);
@@ -127,12 +118,11 @@ async function main() {
     );
     ok((await authenticate(url)) === 200, "superuser can authenticate");
 
-    // ----------------------------------------------------------------
     console.log("\n=== A broken instance is repairable live, without a restart");
 
     // PocketBase refuses to delete the only superuser, so stand up a decoy
-    // first. The end state - the configured account no longer exists - is what
-    // a wiped pb_data or a hand-edited config.lua produces in practice.
+    // first. The end state - the configured account gone - is what a wiped
+    // pb_data or a hand-edited config.lua produces.
     pb(["superuser", "upsert", "decoy@example.com", "decoy-password-123"], dir);
     const deleted = pb(["superuser", "delete", EMAIL], dir);
     ok(

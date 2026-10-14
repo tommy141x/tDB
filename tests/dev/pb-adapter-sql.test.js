@@ -1,11 +1,10 @@
 /**
  * The PocketBase adapter's sql* exports, against a real instance.
  *
- * These used to call /api/sql/* and ask the caller to declare the result
- * shape, falling back to a guess parsed out of the SELECT list and finally to
- * a hardcoded { id, name, value }. They now go through /api/tdb/*, which
- * discovers the shape itself. The checks below are the behaviours that guess
- * got wrong.
+ * These used to call /api/sql/* and ask the caller to declare the result shape,
+ * falling back to a guess and finally to a hardcoded { id, name, value }. They
+ * now go through /api/tdb/*, which discovers the shape itself. The checks below
+ * are what that guess got wrong.
  *
  * Dev harness. Run from the resource root: node .dev/pb-adapter-sql.test.js
  */
@@ -117,7 +116,6 @@ async function main() {
        )`,
     );
 
-    // ----------------------------------------------------------------
     console.log("\n=== sqlExecute");
 
     const first = await call(
@@ -134,7 +132,6 @@ async function main() {
     );
     ok(second === 2, "insertId advances", show(second));
 
-    // ----------------------------------------------------------------
     console.log("\n=== sqlQuery");
 
     const all = await call("sqlQuery", "SELECT * FROM players ORDER BY id");
@@ -164,7 +161,6 @@ async function main() {
       show(joined),
     );
 
-    // ----------------------------------------------------------------
     console.log("\n=== sqlSingle");
 
     const one = await call(
@@ -181,7 +177,6 @@ async function main() {
     );
     ok(none === null, "sqlSingle returns null when nothing matches", show(none));
 
-    // ----------------------------------------------------------------
     console.log("\n=== sqlScalar");
 
     // The old default column name was "value", which only worked for a caller
@@ -216,7 +211,6 @@ async function main() {
       show(note),
     );
 
-    // ----------------------------------------------------------------
     console.log("\n=== sqlTransaction");
 
     const before = await call("sqlScalar", "SELECT COUNT(*) FROM players");
@@ -247,13 +241,11 @@ async function main() {
       "the failed transaction rolled back completely",
     );
 
-    // ----------------------------------------------------------------
     console.log("\n=== The two adapters do not fight over shared export names");
 
     // client.js registers the PocketBase adapter at priority 10 and oxmysql at
-    // 20, so for any name both claim, PocketBase is asked first. `update` is
-    // the dangerous one: record update and SQL UPDATE share it, and a misroute
-    // would break every MySQL.update call while looking like a working server.
+    // 20, so PocketBase is asked first for any shared name. `update` is the
+    // dangerous one: record update and SQL UPDATE both claim it.
     const OxMySQLAdapter = require(path.join(ROOT, "server/adapters/oxmysql.js"));
     const ox = new OxMySQLAdapter(pb, (fn) => fn, {
       debug: () => {},
@@ -298,7 +290,6 @@ async function main() {
       "a SQL UPDATE with a callback is not mistaken for a record update",
     );
 
-    // ----------------------------------------------------------------
     console.log("\n=== Errors and concurrency");
 
     let err = null;
@@ -332,7 +323,9 @@ async function main() {
   console.log(`\n==== ${pass} passed, ${fail} failed ====`);
   if (fail) {
     console.log("\nFailures:");
-    failures.forEach((f) => console.log(`  - ${f}`));
+    failures.forEach((f) => {
+      console.log(`  - ${f}`);
+    });
   }
   process.exitCode = fail === 0 ? 0 : 1;
 }

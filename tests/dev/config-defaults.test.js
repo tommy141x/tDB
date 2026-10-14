@@ -131,8 +131,8 @@ ok(
   "Migrations.Dir defaults beside pb_data",
 );
 ok(
-  defaults.Advanced.SMTP.Host === "",
-  'SMTP.Host has no default - "smtp.gmail.com" made the empty-host check dead',
+  defaults.Advanced.SMTP === undefined,
+  "there is no SMTP block: mail is the admin UI's, and a config copy of it was read and then not applied",
 );
 
 section("Quote styles");
@@ -246,14 +246,15 @@ ok(
 
 section("Superuser is read from its own block");
 
-// Advanced.SMTP has Email-adjacent keys and a Password of its own. The old
-// whole-file regex took the first Password in the file, which was the
-// superuser's only by luck of ordering.
+// The old whole-file regex took the first Password in the file, which was the
+// superuser's only by luck of ordering. Any other block carrying a
+// credential-shaped key ahead of Config.Superuser reproduces it.
 const scoped = parse(`
 Config = {}
 Config.Advanced = {
-    SMTP = {
-        Password = "the-smtp-one",
+    S3 = {
+        SecretKey = "the-s3-one",
+        Password = "not-a-real-key-but-first-in-the-file",
     },
 }
 Config.Superuser = {
@@ -263,12 +264,12 @@ Config.Superuser = {
 `);
 ok(
   scoped.config.Superuser.Password === "the-superuser-one",
-  "the superuser password comes from Config.Superuser even when SMTP's is first in the file",
+  "the superuser password comes from Config.Superuser even when another is first in the file",
   JSON.stringify(scoped.config.Superuser.Password),
 );
 ok(
-  scoped.config.Advanced.SMTP.Password === "the-smtp-one",
-  "and SMTP keeps its own",
+  scoped.config.Advanced.S3.SecretKey === "the-s3-one",
+  "and S3 keeps its own secret",
 );
 
 section("Commented-out keys stay commented out");
@@ -276,13 +277,13 @@ section("Commented-out keys stay commented out");
 const commented = parse(`
 Config = {}
 -- Config.ExposeAdmin = false
--- Example: Host = "smtp.gmail.com"
+-- Example: Endpoint = "s3.example.com"
 Config.Advanced = {
     -- RemoteHost = "db.example.com",
     RemoteHost = "",
     RemotePort = "",
-    SMTP = {
-        Host = "",
+    S3 = {
+        Endpoint = "",
     },
 }
 `);
@@ -292,8 +293,8 @@ ok(
   "a commented RemoteHost does not switch the resource into remote mode",
 );
 ok(
-  commented.config.Advanced.SMTP.Host === "",
-  "an example host inside a comment is not adopted as the host",
+  commented.config.Advanced.S3.Endpoint === "",
+  "an example endpoint inside a comment is not adopted as the endpoint",
 );
 ok(commented.warnings.length === 0, "and none of it warns", commented.warnings.join("; "));
 

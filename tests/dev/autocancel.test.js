@@ -1,17 +1,11 @@
 /**
  * Concurrent calls to the same export must not cancel each other.
  *
- * The PocketBase JS SDK defaults to `autoCancellation(true)`: every request
- * gets a key derived from its method and path, and issuing a second request
- * with the same key ABORTS the first. That is a browser feature - a search box
- * superseding its own in-flight request - and it is actively wrong on a game
- * server, where two players hitting the same code path at the same moment is
- * the normal case, not a race to be resolved.
- *
- * Only one of the ~31 SDK call sites in adapters/pocketbase.js passed
- * `requestKey: null`, so the rest were cancelling each other. The failure
- * looks like an intermittent "The request was autocancelled" thrown at
- * whichever player got there first.
+ * The PocketBase JS SDK defaults to `autoCancellation(true)`: a second request
+ * carrying the same method+path key ABORTS the first. That is a browser
+ * behaviour, and it is wrong on a game server, where two players on one code
+ * path at the same moment is the normal case. Only 1 of the ~31 SDK call sites
+ * in adapters/pocketbase.js passed `requestKey: null`.
  *
  * Dev harness. Run from the resource root: node .dev/autocancel.test.js
  */
@@ -92,7 +86,6 @@ async function main() {
       await sleep(200);
     }
 
-    // --------------------------------------------------------------------
     console.log("\n=== The SDK's default, for the record");
 
     const bare = new PocketBase(URL);
@@ -117,7 +110,6 @@ async function main() {
       show(bareResults.map((r) => r.status)),
     );
 
-    // --------------------------------------------------------------------
     console.log("\n=== The client tDB actually hands to the adapters");
 
     // This harness builds its own client, so it would happily pass while the
@@ -166,7 +158,6 @@ async function main() {
       ]);
     }
 
-    // --------------------------------------------------------------------
     console.log("\n=== Concurrent identical queries all resolve");
 
     // The shape of a full server: many players, one code path, same instant.
@@ -243,7 +234,9 @@ async function main() {
   console.log(`\n==== ${pass} passed, ${fail} failed ====`);
   if (fail) {
     console.log("\nFailures:");
-    failures.forEach((f) => console.log(`  - ${f}`));
+    failures.forEach((f) => {
+      console.log(`  - ${f}`);
+    });
   }
   process.exitCode = fail === 0 ? 0 : 1;
 }

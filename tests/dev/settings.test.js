@@ -1,16 +1,8 @@
-/**
- * Settings reconciliation: config.lua -> PocketBase, and never the other way.
- *
- * Run against a real PocketBase, because the whole reason this code changed is
- * a property of the real one: it will not hand back `smtp.password` or
- * `s3.secret`. A mock that returned them would test a server that does not
- * exist and would have passed against the broken implementation too.
- *
- * The secrets are therefore checked by reading PocketBase's own `_params` blob
- * off disk - the only place they can be observed.
- *
- * Dev harness. Run from the resource root: node .dev/settings.test.js
- */
+// Settings reconciliation: config.lua -> PocketBase, and never the other way.
+//
+// Runs against a real PocketBase, because it will not hand `s3.secret` back
+// and a mock that returned it would pass against a broken implementation.
+// Secrets are read out of PocketBase's own `_params` blob.
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -71,7 +63,7 @@ function collectingLogger() {
   };
 }
 
-/** Read the settings PocketBase actually persisted, secrets included. */
+// The settings PocketBase actually persisted, secrets included.
 function storedSettings() {
   const db = new DatabaseSync(path.join(DATA_DIR, "data.db"), { readOnly: true });
   const row = db.prepare("SELECT value FROM _params WHERE id='settings'").get();
@@ -80,20 +72,6 @@ function storedSettings() {
     ? row.value
     : Buffer.from(String(row.value).split(",").map(Number));
   return JSON.parse(buf.toString("utf8"));
-}
-
-function smtpBlock(overrides = {}) {
-  return {
-    Manage: false,
-    Enabled: false,
-    Host: "smtp.example.com",
-    Port: 587,
-    Username: "mailer",
-    Password: "smtp-secret",
-    LocalName: "",
-    TLS: true,
-    ...overrides,
-  };
 }
 
 function s3Block(overrides = {}) {
@@ -122,24 +100,12 @@ async function waitForHealth(timeoutMs = 20000) {
 }
 
 async function main() {
-  // ------------------------------------------------------------------
-  // Pure logic first - no server needed.
+  // Pure logic first, no server needed.
   section("What gets built from config.lua");
 
-  const enabledSmtp = settings.desiredSmtp(smtpBlock({ Enabled: true }));
   ok(
-    enabledSmtp.password === "smtp-secret",
-    "an enabled SMTP block carries the password",
-    JSON.stringify(enabledSmtp),
-  );
-  ok(
-    enabledSmtp.localName === "localhost",
-    "an empty LocalName becomes localhost, not an empty string",
-    JSON.stringify(enabledSmtp),
-  );
-  ok(
-    settings.desiredSmtp(smtpBlock({ Enabled: false })).enabled === false,
-    "a disabled SMTP block asserts enabled:false rather than nothing",
+    settings.desiredSmtp === undefined,
+    "there is no SMTP builder: mail belongs to the admin UI, not to config.lua",
   );
   ok(
     settings.desiredS3(s3Block({ Enabled: true })).secret === "s3-secret",
@@ -153,28 +119,32 @@ async function main() {
   section("Drift description");
 
   const drift = settings.describeDrift(
-    "smtp",
-    { enabled: true, host: "changed-in-ui.example.com", port: 25, username: "mailer" },
-    settings.desiredSmtp(smtpBlock({ Enabled: true })),
+    "s3",
+    {
+      enabled: true,
+      bucket: "changed-in-ui",
+      region: "eu-west-1",
+      endpoint: "https://s3.example.com",
+    },
+    settings.desiredS3(s3Block({ Enabled: true })),
   );
   ok(drift.length === 2, "two changed fields are reported", JSON.stringify(drift));
   ok(
-    drift.some((d) => d.includes("changed-in-ui.example.com")),
+    drift.some((d) => d.includes("changed-in-ui")),
     "the report names the value being overwritten",
     JSON.stringify(drift),
   );
   ok(
-    !drift.some((d) => d.startsWith("password")),
-    "the password is never reported as drift - it cannot be read, so it is never 'different'",
+    !drift.some((d) => d.startsWith("secret")),
+    "the secret is never reported as drift; it cannot be read",
     JSON.stringify(drift),
   );
   ok(
-    settings.describeDrift("smtp", undefined, settings.desiredSmtp(smtpBlock({ Enabled: true })))
+    settings.describeDrift("s3", undefined, settings.desiredS3(s3Block({ Enabled: true })))
       .length === 0,
     "an instance with no settings yet reports no drift",
   );
 
-  // ------------------------------------------------------------------
   spawnSync(PB_BIN, ["superuser", "upsert", EMAIL, PASSWORD, "--dir", DATA_DIR], {
     encoding: "utf8",
   });
@@ -217,105 +187,121 @@ async function main() {
       },
     };
 
-    // ----------------------------------------------------------------
     section("The platform fact this design rests on");
 
     await api.updateSettings({
-      smtp: {
+      s3: {
         enabled: true,
-        host: "seed.example.com",
-        port: 2525,
-        username: "seeded",
-        password: "SEEDED-PW",
-        authMethod: "PLAIN",
-        tls: true,
-        localName: "localhost",
+        bucket: "seeded-bucket",
+        region: "ap-south-1",
+        endpoint: "https://seed.example.com",
+        accessKey: "AKIA-SEEDED",
+        secret: "SEEDED-SECRET",
+        forcePathStyle: false,
       },
     });
     const readBack = await api.getSettings();
     ok(
-      readBack.smtp.password === undefined,
-      "PocketBase does not return smtp.password - so it can never be synced back to config.lua",
-      JSON.stringify(readBack.smtp),
+      readBack.s3.secret === undefined,
+      "PocketBase does not return s3.secret",
+      JSON.stringify(readBack.s3),
     );
     ok(
-      storedSettings().smtp.password === "SEEDED-PW",
+      storedSettings().s3.secret === "SEEDED-SECRET",
       "...even though it is genuinely stored",
     );
 
-    // ----------------------------------------------------------------
     section("Manage = false leaves the instance alone");
 
     const untouched = await settings.reconcile(
       api,
-      { SMTP: smtpBlock({ Manage: false, Enabled: true }), S3: s3Block({ Manage: false }) },
+      { S3: s3Block({ Manage: false }) },
       quietLogger,
     );
     const afterUnmanaged = storedSettings();
     ok(
-      afterUnmanaged.smtp.host === "seed.example.com",
-      "the admin UI's host survives a restart",
-      afterUnmanaged.smtp.host,
+      afterUnmanaged.s3.bucket === "seeded-bucket",
+      "the admin UI's bucket survives a restart",
+      afterUnmanaged.s3.bucket,
     );
     ok(
-      afterUnmanaged.smtp.password === "SEEDED-PW",
-      "the admin UI's password survives a restart - the bug that motivated this",
+      afterUnmanaged.s3.secret === "SEEDED-SECRET",
+      "the admin UI's secret survives a restart",
     );
     ok(untouched.managed.length === 0, "nothing was managed");
 
+    // Asserted on the RETURNED warnings, not on log lines: the message is a
+    // banner row now, and reconcileSettings() drains result.warnings into it.
     const noisy = collectingLogger();
-    await settings.reconcile(
+    const unmanaged = await settings.reconcile(
       api,
-      { SMTP: smtpBlock({ Manage: false, Enabled: true }), S3: s3Block({ Manage: false }) },
+      { S3: s3Block({ Manage: false, Enabled: true }) },
       noisy,
     );
     ok(
-      noisy.lines.some((l) => l.includes("not applied") && l.includes("SMTP")),
-      "a filled-in but unmanaged block is called out, not silently ignored",
+      unmanaged.warnings.some((l) => l.includes("not applied") && l.includes("S3")),
+      "an enabled but unmanaged block is called out, not silently ignored",
+      JSON.stringify(unmanaged.warnings),
+    );
+    ok(
+      !noisy.lines.some((l) => l.includes("not applied")),
+      "and is NOT also printed as a loose line above the banner",
       JSON.stringify(noisy.lines),
     );
 
-    // ----------------------------------------------------------------
+    // The negative half. Without this the rule above passes just as well when
+    // it fires on every install that never touched the block, which is the
+    // state it was actually in: a stock config.lua carrying a template value
+    // warned on every boot and put a permanent yellow Status on a healthy
+    // server.
+    const quiet = collectingLogger();
+    const disabled = await settings.reconcile(
+      api,
+      { S3: s3Block({ Manage: false, Enabled: false }) },
+      quiet,
+    );
+    ok(
+      disabled.warnings.length === 0 && disabled.ignored.length === 0,
+      "a DISABLED block with fields still in it says nothing - there is nothing to apply",
+      JSON.stringify(disabled.warnings),
+    );
+
     section("Manage = true makes config.lua the truth");
 
     const logged = collectingLogger();
     const applied = await settings.reconcile(
       api,
-      {
-        SMTP: smtpBlock({ Manage: true, Enabled: true, Host: "from-config.example.com" }),
-        S3: s3Block({ Manage: true, Enabled: true }),
-      },
+      { S3: s3Block({ Manage: true, Enabled: true, Bucket: "from-config" }) },
       logged,
     );
 
     const afterManaged = storedSettings();
     ok(
-      afterManaged.smtp.host === "from-config.example.com",
-      "config.lua's host replaced the admin UI's",
-      afterManaged.smtp.host,
+      afterManaged.s3.bucket === "from-config",
+      "config.lua's bucket replaced the admin UI's",
+      afterManaged.s3.bucket,
     );
     ok(
-      afterManaged.smtp.password === "smtp-secret",
-      "config.lua's password was asserted, secrets and all",
-      afterManaged.smtp.password,
+      afterManaged.s3.secret === "s3-secret",
+      "config.lua's secret was asserted, secrets and all",
+      afterManaged.s3.secret,
     );
-    ok(afterManaged.s3.secret === "s3-secret", "config.lua's S3 secret was asserted");
     ok(
-      applied.drift.length > 0 && logged.lines.some((l) => l.startsWith("warn:")),
+      applied.drift.length > 0 && applied.warnings.some((l) => l.includes("overwritten")),
       "the overwrite was reported rather than done silently",
+      JSON.stringify(applied.warnings),
+    );
+    ok(
+      !logged.lines.some((l) => l.startsWith("warn:")),
+      "and reported as a banner row, not also as a loose line",
       JSON.stringify(logged.lines),
     );
 
-    // The old code compared only bucket/region/endpoint, so a rotated key was
-    // never pushed - it kept using a credential already replaced in config.lua.
     section("A rotated secret is pushed even when nothing visible changed");
 
     await settings.reconcile(
       api,
-      {
-        SMTP: smtpBlock({ Manage: false }),
-        S3: s3Block({ Manage: true, Enabled: true, SecretKey: "ROTATED-KEY" }),
-      },
+      { S3: s3Block({ Manage: true, Enabled: true, SecretKey: "ROTATED-KEY" }) },
       quietLogger,
     );
     ok(
@@ -324,26 +310,15 @@ async function main() {
       storedSettings().s3.secret,
     );
 
-    // ----------------------------------------------------------------
     section("Manage = true, Enabled = false actually disables");
 
     await settings.reconcile(
       api,
-      {
-        SMTP: smtpBlock({ Manage: true, Enabled: false }),
-        S3: s3Block({ Manage: true, Enabled: false }),
-      },
+      { S3: s3Block({ Manage: true, Enabled: false }) },
       quietLogger,
     );
-    const afterDisable = storedSettings();
-    ok(
-      afterDisable.smtp.enabled === false,
-      "SMTP is off on the instance, which the old code could never express",
-      JSON.stringify(afterDisable.smtp),
-    );
-    ok(afterDisable.s3.enabled === false, "S3 is off on the instance");
+    ok(storedSettings().s3.enabled === false, "S3 is off on the instance");
 
-    // ----------------------------------------------------------------
     section("Failures are reported, never thrown");
 
     const brokenLogger = collectingLogger();
@@ -352,12 +327,12 @@ async function main() {
         getSettings: () => Promise.reject(new Error("instance unreachable")),
         updateSettings: () => Promise.reject(new Error("instance unreachable")),
       },
-      { SMTP: smtpBlock({ Manage: true, Enabled: true }), S3: s3Block() },
+      { S3: s3Block({ Manage: true, Enabled: true }) },
       brokenLogger,
     );
     ok(
       broken.warnings.length === 1 && broken.warnings[0].includes("instance unreachable"),
-      "an unreachable instance is a warning, not an exception that fails startup",
+      "an unreachable instance is a warning, not a failed startup",
       JSON.stringify(broken.warnings),
     );
   } finally {
@@ -368,7 +343,6 @@ async function main() {
     } catch (_) {}
   }
 
-  // ------------------------------------------------------------------
   section("Nothing writes settings back into config.lua");
 
   const serverSrc = fs.readFileSync(path.join(ROOT, "server/utils/server.js"), "utf8");
@@ -387,7 +361,6 @@ async function main() {
     !/writeFileSync/.test(settingsSrc),
     "utils/settings.js writes no files at all",
   );
-  // Normalised: this file is CRLF on disk, so a \n literal matches nothing.
   const serverLf = serverSrc.replace(/\r\n/g, "\n");
   const reconcileAt = serverLf.indexOf("await reconcileSettings();");
   const boxAfter = serverLf.indexOf("displayStartupStatus();", reconcileAt);
@@ -399,20 +372,22 @@ async function main() {
     reconcileAt !== -1 &&
       !/setTimeout\([^)]*reconcileSettings/.test(serverLf) &&
       !/reconcileSettings\(\)[\s\S]{0,40}\}, \d+\);/.test(serverLf),
-    "it is awaited inline, not left in a floating timer whose warnings land after the box",
+    "it is awaited inline, not left in a timer whose warnings land after the box",
   );
   ok(
     /Re-read rather than editing the copy taken at load\(\)/.test(loaderSrc) &&
       /readFileSync\(this\.configPath, "utf8"\)/.test(
         loaderSrc.slice(loaderSrc.indexOf("updateSuperuserCredentials")),
       ),
-    "the remaining config.lua writer re-reads from disk instead of replaying a boot snapshot",
+    "the remaining config.lua writer re-reads from disk",
   );
 
   console.log(`\n==== ${pass} passed, ${fail} failed ====`);
   if (fail) {
     console.log("\nFailures:");
-    failures.forEach((f) => console.log(`  - ${f}`));
+    failures.forEach((f) => {
+      console.log(`  - ${f}`);
+    });
   }
   process.exitCode = fail === 0 ? 0 : 1;
 }

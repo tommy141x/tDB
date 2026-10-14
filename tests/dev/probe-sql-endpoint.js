@@ -1,13 +1,8 @@
 /**
  * Probe how PocketBase 0.40.3 exposes raw SQL, to decide what the oxmysql
- * compatibility layer should execute against.
- *
- * Answers, against a live instance:
- *   - does the built-in POST /api/sql accept bind parameters?
- *   - does it return dynamically shaped rows?
- *   - does it allow writes, or is it read-only?
- *   - is it superuser-gated?
- *   - what do our own pb_hooks routes do by comparison?
+ * compatibility layer should execute against: does the built-in POST /api/sql
+ * take bind parameters, return dynamically shaped rows, allow writes, and is it
+ * superuser-gated? Our own pb_hooks routes are run side by side for comparison.
  *
  * Dev harness. Run from the resource root: node .dev/probe-sql-endpoint.js
  */
@@ -96,7 +91,6 @@ async function main() {
   try {
     if (!(await waitForHealth())) throw new Error("server never became healthy");
 
-    // Authenticate as superuser.
     const auth = await post("/api/collections/_superusers/auth-with-password", {
       identity: EMAIL,
       password: PASSWORD,

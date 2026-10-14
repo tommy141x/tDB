@@ -1,27 +1,14 @@
 /**
  * Every relative require() in the resource resolves to a file that exists,
- * using the base citizen-scripting-node would actually use.
+ * using the base citizen-scripting-node would actually use. Getting that base
+ * wrong is a hard load failure at server start with no earlier warning.
  *
- * This exists because that base is not uniform, and getting it wrong is a hard
- * load failure at server start with no warning anywhere before it:
+ * A script listed in fxmanifest's server_scripts is evaluated against a
+ * synthetic `<resource>//dummy.js`, so its requires resolve from the RESOURCE
+ * ROOT. Anything it pulls in is an ordinary CommonJS module and resolves from
+ * its OWN DIRECTORY.
  *
- *     Error loading script utils/client.js in resource tDB:
- *     Cannot find module './utils/process-utils.js'
- *     Require stack:
- *       - .../tDB/utils/auth-manager.js
- *       - .../tDB//dummy.js
- *
- * The rule, visible in that stack:
- *
- *   - A script listed in fxmanifest's server_scripts is evaluated against a
- *     synthetic `<resource>//dummy.js`, so its requires resolve from the
- *     RESOURCE ROOT. utils/client.js says "./utils/auth-manager.js".
- *   - Anything it pulls in is an ordinary CommonJS module and resolves from
- *     its OWN DIRECTORY. utils/auth-manager.js says "./process-utils.js",
- *     and adapters/oxmysql.js says "../utils/sql-translator.js".
- *
- * Static: nothing is executed, so this covers files no other harness loads and
- * runs in milliseconds.
+ * Static: nothing is executed, so this covers files no other harness loads.
  *
  * Dev harness. Run from the resource root: node .dev/require-paths.test.js
  */
@@ -63,10 +50,8 @@ function manifestServerScripts() {
   return scripts;
 }
 
-// The resource's own sources. bin/ is vendored - third-party bundles resolve
-// among themselves and are not ours to police.
-// server/vendor is deliberately not scanned: it is third-party code shipped as
-// it was published, and its internal requires are not ours to police.
+// The resource's own sources. bin/ and server/vendor are third-party bundles
+// shipped as published; their internal requires are not ours to police.
 const SOURCE_DIRS = ["server/utils", "server/adapters"];
 
 function ownSources() {
@@ -74,11 +59,9 @@ function ownSources() {
   for (const dir of SOURCE_DIRS) {
     const full = path.join(ROOT, dir);
     if (!fs.existsSync(full)) {
-      // Hard error rather than `continue`. Skipping a missing directory is how
-      // this check reported "0 relative require(s) inspected" as a pass after
-      // the sources moved under server/ -- a silent all-clear over a tree it
-      // could no longer find, which is the one outcome a path test must never
-      // produce.
+      // Hard error rather than `continue`: skipping a missing directory is how
+      // this reported "0 relative require(s) inspected" as a pass after the
+      // sources moved under server/.
       throw new Error(
         `source directory ${dir} does not exist; update SOURCE_DIRS after a move`,
       );
@@ -141,9 +124,9 @@ for (const file of sources) {
 }
 ok(checked > 0, `${checked} relative require(s) inspected`);
 
-// The specific shape of the bug that shipped: a non-manifest module reaching
-// for a path that only makes sense from the resource root. It resolves nowhere
-// on the server, but it looks right, and it used to pass every harness here.
+// The shape of the bug that shipped: a non-manifest module reaching for a path
+// that only makes sense from the resource root. It looks right and resolves
+// nowhere.
 console.log("\n=== No module uses a manifest script's base");
 for (const file of sources) {
   if (SERVER_SCRIPTS.has(file)) continue;
@@ -163,6 +146,8 @@ for (const file of sources) {
 console.log(`\n==== ${pass} passed, ${fail} failed ====`);
 if (fail) {
   console.log("\nFailures:");
-  failures.forEach((f) => console.log(`  - ${f}`));
+  failures.forEach((f) => {
+    console.log(`  - ${f}`);
+  });
 }
 process.exitCode = fail === 0 ? 0 : 1;

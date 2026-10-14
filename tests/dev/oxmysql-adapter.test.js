@@ -1,11 +1,7 @@
 /**
- * End-to-end checks for the oxmysql compatibility adapter.
- *
- * Runs the adapter against a real PocketBase instance with the resource's own
- * pb_hooks, using SQL taken from the shape of what qb-core, ESX and lb-phone
- * actually issue. The assertions are about oxmysql's exact return values, since
- * a drop-in that returns the right data in the wrong shape still breaks every
- * caller.
+ * End-to-end checks for the oxmysql compatibility adapter, run against a real
+ * PocketBase instance with the resource's own pb_hooks. Return values are
+ * asserted exactly: the right data in the wrong shape still breaks callers.
  *
  * Dev harness. Run from the resource root: node .dev/oxmysql-adapter.test.js
  */
@@ -23,7 +19,7 @@ const PocketBase = require(path.join(ROOT, "server/vendor/pocketbase.cjs.js"));
 
 const PB_BIN = path.join(
   ROOT,
-  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux",
+  process.platform === "win32" ? ".runtime/pocketbase-win.exe" : ".runtime/pocketbase-linux"
 );
 const PORT = 8161;
 const URL = `http://127.0.0.1:${PORT}`;
@@ -87,7 +83,7 @@ async function main() {
       "--migrationsDir",
       path.join(dataDir, "migrations"),
     ],
-    { stdio: "ignore" },
+    { stdio: "ignore" }
   );
 
   try {
@@ -111,37 +107,51 @@ async function main() {
     const adapter = new OxMySQLAdapter(pb, (fn) => fn, logger);
     const call = (name, ...args) => adapter.handle(name, args);
 
-    // ----------------------------------------------------------------
     console.log("\n=== Export surface");
 
-    for (const name of ["query", "execute", "fetch", "single", "scalar", "insert", "update", "prepare", "rawExecute", "transaction", "store"]) {
+    for (const name of [
+      "query",
+      "execute",
+      "fetch",
+      "single",
+      "scalar",
+      "insert",
+      "update",
+      "prepare",
+      "rawExecute",
+      "transaction",
+      "store",
+    ]) {
       const missing = [name, `${name}_async`, `${name}Sync`].filter(
-        (n) => !adapter.supportedExports.includes(n),
+        (n) => !adapter.supportedExports.includes(n)
       );
       ok(missing.length === 0, `${name} exported with _async and Sync variants`, show(missing));
     }
 
-    for (const legacy of ["mysql_execute", "mysql_insert", "mysql_fetch_all", "mysql_fetch_scalar", "mysql_transaction", "mysql_store"]) {
+    for (const legacy of [
+      "mysql_execute",
+      "mysql_insert",
+      "mysql_fetch_all",
+      "mysql_fetch_scalar",
+      "mysql_transaction",
+      "mysql_store",
+    ]) {
       ok(
         adapter.supportedExports.includes(legacy),
-        `${legacy} provided for mysql-async compatibility`,
+        `${legacy} provided for mysql-async compatibility`
       );
     }
 
-    ok(
-      adapter.canHandle("query", ["SELECT 1"]) === true,
-      "canHandle accepts a SELECT",
-    );
+    ok(adapter.canHandle("query", ["SELECT 1"]) === true, "canHandle accepts a SELECT");
     ok(
       adapter.canHandle("query", [{ not: "sql" }]) === false,
-      "canHandle rejects a non-string query",
+      "canHandle rejects a non-string query"
     );
     ok(
       adapter.canHandle("query", ["WITH x AS (SELECT 1) SELECT * FROM x"]) === true,
-      "canHandle accepts a CTE",
+      "canHandle accepts a CTE"
     );
 
-    // ----------------------------------------------------------------
     console.log("\n=== Schema creation with MySQL DDL");
 
     await call(
@@ -157,96 +167,82 @@ async function main() {
          PRIMARY KEY (id),
          UNIQUE KEY citizenid (citizenid),
          KEY license (license)
-       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
     );
     ok(true, "qb-core style CREATE TABLE with inline keys executes");
 
     const indexes = await call(
       "query",
-      "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'players'",
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'players'"
     );
     ok(
-      indexes.some((i) => /citizenid/.test(i.name)) &&
-        indexes.some((i) => /license/.test(i.name)),
+      indexes.some((i) => /citizenid/.test(i.name)) && indexes.some((i) => /license/.test(i.name)),
       "inline UNIQUE KEY and KEY became real indexes",
-      show(indexes.map((i) => i.name)),
+      show(indexes.map((i) => i.name))
     );
 
-    const triggers = await call(
-      "query",
-      "SELECT name FROM sqlite_master WHERE type = 'trigger'",
-    );
+    const triggers = await call("query", "SELECT name FROM sqlite_master WHERE type = 'trigger'");
     ok(triggers.length > 0, "ON UPDATE CURRENT_TIMESTAMP became a trigger", show(triggers));
 
-    // ----------------------------------------------------------------
     console.log("\n=== Text compares case-insensitively, as it does in MySQL");
 
-    await call(
-      "insert",
-      "INSERT INTO players (citizenid, license, name) VALUES (?, ?, ?)",
-      ["CaseTest01", "license:AbCdEf", "MixedCase"],
-    );
+    await call("insert", "INSERT INTO players (citizenid, license, name) VALUES (?, ?, ?)", [
+      "CaseTest01",
+      "license:AbCdEf",
+      "MixedCase",
+    ]);
 
-    const wrongCase = await call(
-      "single",
-      "SELECT * FROM players WHERE license = ?",
-      ["LICENSE:ABCDEF"],
-    );
+    const wrongCase = await call("single", "SELECT * FROM players WHERE license = ?", [
+      "LICENSE:ABCDEF",
+    ]);
     ok(
       wrongCase && wrongCase.citizenid === "CaseTest01",
       "a lookup in the wrong case still finds the row (silently finds nothing in stock SQLite)",
-      show(wrongCase),
+      show(wrongCase)
     );
 
-    const likeCase = await call(
-      "query",
-      "SELECT citizenid FROM players WHERE name LIKE ?",
-      ["mixedcase"],
-    );
+    const likeCase = await call("query", "SELECT citizenid FROM players WHERE name LIKE ?", [
+      "mixedcase",
+    ]);
     ok(likeCase.length === 1, "LIKE matches regardless of case", show(likeCase));
 
     // MySQL treats these as the same value in a UNIQUE key; so must we.
     let duplicate = null;
     try {
-      await call("insert", "INSERT INTO players (citizenid) VALUES (?)", [
-        "casetest01",
-      ]);
+      await call("insert", "INSERT INTO players (citizenid) VALUES (?)", ["casetest01"]);
     } catch (e) {
       duplicate = e.message;
     }
     ok(
       duplicate !== null,
       "a UNIQUE key rejects the same value in another case, as MySQL does",
-      duplicate,
+      duplicate
     );
 
     await call("update", "DELETE FROM players WHERE citizenid = ?", ["CaseTest01"]);
 
-    // ----------------------------------------------------------------
     console.log("\n=== Return values match oxmysql exactly");
 
     const insertId = await call(
       "insert",
       "INSERT INTO players (citizenid, license, name, money) VALUES (?, ?, ?, ?)",
-      ["ABC123", "license:aaa", "Tommy", 500],
+      ["ABC123", "license:aaa", "Tommy", 500]
     );
     ok(
       typeof insertId === "number" && insertId > 0,
       "insert returns insertId, not an object",
-      show(insertId),
+      show(insertId)
     );
     ok(
-      (await call("scalar", "SELECT id FROM players WHERE citizenid = ?", [
-        "ABC123",
-      ])) === insertId,
+      (await call("scalar", "SELECT id FROM players WHERE citizenid = ?", ["ABC123"])) === insertId,
       "the insertId is the id of the row that was actually inserted",
-      show(insertId),
+      show(insertId)
     );
 
     const affected = await call(
       "update",
       "UPDATE players SET money = money + ? WHERE citizenid = ?",
-      [250, "ABC123"],
+      [250, "ABC123"]
     );
     ok(affected === 1, "update returns affectedRows", show(affected));
 
@@ -258,14 +254,18 @@ async function main() {
     ok(
       Array.isArray(viaExecute) && viaExecute.length === 1,
       "execute is an alias of query and returns rows (NOT affectedRows)",
-      show(viaExecute),
+      show(viaExecute)
     );
 
     const viaFetch = await call("fetch", "SELECT * FROM players");
     ok(Array.isArray(viaFetch), "fetch is an alias of query");
 
     const row = await call("single", "SELECT * FROM players WHERE citizenid = ?", ["ABC123"]);
-    ok(row && !Array.isArray(row) && row.citizenid === "ABC123", "single returns one row object", show(row));
+    ok(
+      row && !Array.isArray(row) && row.citizenid === "ABC123",
+      "single returns one row object",
+      show(row)
+    );
 
     const missingRow = await call("single", "SELECT * FROM players WHERE citizenid = ?", ["nope"]);
     ok(missingRow === null, "single returns null when nothing matches", show(missingRow));
@@ -273,13 +273,14 @@ async function main() {
     const money = await call("scalar", "SELECT money FROM players WHERE citizenid = ?", ["ABC123"]);
     ok(money === 750, "scalar returns the bare value", show(money));
 
-    const missingScalar = await call("scalar", "SELECT money FROM players WHERE citizenid = ?", ["nope"]);
+    const missingScalar = await call("scalar", "SELECT money FROM players WHERE citizenid = ?", [
+      "nope",
+    ]);
     ok(missingScalar === null, "scalar returns null when nothing matches");
 
     const count = await call("scalar", "SELECT COUNT(*) FROM players");
     ok(count === 1, "scalar works on an aggregate with no alias", show(count));
 
-    // ----------------------------------------------------------------
     console.log("\n=== Legacy mysql-async names");
 
     const legacyRows = await call("mysql_fetch_all", "SELECT * FROM players");
@@ -288,48 +289,47 @@ async function main() {
     const legacyAffected = await call(
       "mysql_execute",
       "UPDATE players SET name = ? WHERE citizenid = ?",
-      ["Renamed", "ABC123"],
+      ["Renamed", "ABC123"]
     );
     ok(
       legacyAffected === 1,
       "mysql_execute maps to update and returns affectedRows",
-      show(legacyAffected),
+      show(legacyAffected)
     );
     await call("update", "UPDATE players SET name = 'Tommy' WHERE citizenid = 'ABC123'");
 
-    // ----------------------------------------------------------------
     console.log("\n=== prepare unpacking");
 
     // Every await/async path in oxmysql supplies a callback internally, so the
     // callback form is the one scripts actually observe.
     const preparedScalar = await new Promise((resolve) => {
-      call(
-        "prepare",
-        "SELECT money FROM players WHERE citizenid = ?",
-        ["ABC123"],
-        resolve,
-      );
+      call("prepare", "SELECT money FROM players WHERE citizenid = ?", ["ABC123"], resolve);
     });
     ok(
       preparedScalar === 750,
       "prepare with a callback unwraps a single-column row to its value",
-      show(preparedScalar),
+      show(preparedScalar)
     );
 
     const preparedRow = await new Promise((resolve) => {
-      call("prepare", "SELECT citizenid, money FROM players WHERE citizenid = ?", ["ABC123"], resolve);
+      call(
+        "prepare",
+        "SELECT citizenid, money FROM players WHERE citizenid = ?",
+        ["ABC123"],
+        resolve
+      );
     });
     ok(
       preparedRow && preparedRow.citizenid === "ABC123" && preparedRow.money === 750,
       "prepare with a callback returns the row when it has several columns",
-      show(preparedRow),
+      show(preparedRow)
     );
 
     const preparedRows = await call("prepare", "SELECT citizenid FROM players", []);
     ok(
       Array.isArray(preparedRows),
       "prepare without a callback returns the rows array",
-      show(preparedRows),
+      show(preparedRows)
     );
 
     const preparedInsert = await new Promise((resolve) => {
@@ -341,37 +341,44 @@ async function main() {
           ["P2", "Two"],
           ["P3", "Three"],
         ],
-        resolve,
+        resolve
       );
     });
     ok(
       Array.isArray(preparedInsert) && preparedInsert.length === 3,
       "prepare with several parameter sets runs each one",
-      show(preparedInsert),
+      show(preparedInsert)
     );
 
     const inserted = await call("scalar", "SELECT COUNT(*) FROM players");
     ok(inserted === 4, "all three prepared inserts landed", show(inserted));
 
-    // ----------------------------------------------------------------
     console.log("\n=== ON DUPLICATE KEY UPDATE");
 
     const before = await call("scalar", "SELECT COUNT(*) FROM players");
     await call(
       "insert",
       "INSERT INTO players (citizenid, name, money) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE money = VALUES(money), name = VALUES(name)",
-      ["ABC123", "Upserted", 9000],
+      ["ABC123", "Upserted", 9000]
     );
     const after = await call("scalar", "SELECT COUNT(*) FROM players");
-    ok(after === before, "upsert on an existing row did not insert a duplicate", `${before} -> ${after}`);
+    ok(
+      after === before,
+      "upsert on an existing row did not insert a duplicate",
+      `${before} -> ${after}`
+    );
 
     const upserted = await call("single", "SELECT * FROM players WHERE citizenid = ?", ["ABC123"]);
-    ok(upserted.money === 9000 && upserted.name === "Upserted", "upsert updated the row", show(upserted));
+    ok(
+      upserted.money === 9000 && upserted.name === "Upserted",
+      "upsert updated the row",
+      show(upserted)
+    );
 
     await call(
       "insert",
       "INSERT INTO players (citizenid, name, money) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE money = VALUES(money)",
-      ["NEW999", "Fresh", 10],
+      ["NEW999", "Fresh", 10]
     );
     const afterNew = await call("scalar", "SELECT COUNT(*) FROM players");
     ok(afterNew === before + 1, "upsert on a new key inserted", `${after} -> ${afterNew}`);
@@ -383,18 +390,52 @@ async function main() {
       await call(
         "insert",
         "INSERT INTO players (name) VALUES (?) ON DUPLICATE KEY UPDATE name = VALUES(name)",
-        ["NoKey"],
+        ["NoKey"]
       );
     } catch (e) {
       refused = e.message;
     }
+    // It is no longer refused at translation: supplying NONE of any unique key
+    // means MySQL cannot detect a duplicate either, so its UPDATE clause is
+    // unreachable and a plain INSERT is exactly what MySQL does. Here the
+    // omitted column is a NOT NULL primary key with no default, so the INSERT
+    // then fails the constraint - which is also what MySQL does. The thing that
+    // must not happen either way is a silent duplicate.
     ok(
-      refused !== null && /duplicate/i.test(refused),
-      "an upsert that supplies no unique key is refused, not silently duplicated",
-      refused,
+      refused !== null && /constraint|duplicate/i.test(refused),
+      "an upsert supplying no unique key errors rather than silently duplicating",
+      refused
     );
 
-    // ----------------------------------------------------------------
+    // The same shape against an autoincrement key, which is lb-phone's crypto
+    // app: the key is supplied by the database, so the plain INSERT succeeds.
+    // This threw on every boot until the two cases were separated.
+    await call(
+      "update",
+      "CREATE TABLE IF NOT EXISTS coins (id INT UNSIGNED NOT NULL AUTO_INCREMENT, coin VARCHAR(10) NOT NULL, coin_value VARCHAR(20) NOT NULL, PRIMARY KEY (id))"
+    );
+
+    let coinError = null;
+    try {
+      await call(
+        "insert",
+        "INSERT INTO coins (coin, coin_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE coin_value = VALUES(coin_value)",
+        ["BTC", "1.5"]
+      );
+      await call(
+        "insert",
+        "INSERT INTO coins (coin, coin_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE coin_value = VALUES(coin_value)",
+        ["ETH", "2.0"]
+      );
+    } catch (e) {
+      coinError = e.message;
+    }
+    ok(coinError === null, "an upsert against an autoincrement-only key inserts", coinError);
+    ok(
+      (await call("scalar", "SELECT COUNT(*) FROM coins")) === 2,
+      "and both rows landed, as MySQL would have inserted both"
+    );
+
     console.log("\n=== Transactions are atomic");
 
     const beforeTx = await call("scalar", "SELECT COUNT(*) FROM players");
@@ -418,7 +459,7 @@ async function main() {
     ok(
       afterBadTx === afterTx,
       "the failed transaction rolled back completely - no partial write",
-      `${afterTx} -> ${afterBadTx}`,
+      `${afterTx} -> ${afterBadTx}`
     );
 
     const objectTx = await call("transaction", [
@@ -427,10 +468,7 @@ async function main() {
     ok(objectTx === true, "transaction accepts { query, values } entries");
 
     // A CREATE TABLE with an inline KEY becomes two statements, and the index
-    // cannot be created before the table it indexes. runTransaction used to
-    // queue the spun-off statements ahead of the one that produced them, so
-    // any DDL with an index inside a transaction failed - while the same
-    // statement through execute() worked, because that path had it right.
+    // cannot be created before the table it indexes.
     const ddlTx = await call("transaction", [
       "CREATE TABLE IF NOT EXISTS `tx_ddl` (" +
         "`id` int(11) NOT NULL AUTO_INCREMENT," +
@@ -441,87 +479,91 @@ async function main() {
     ok(ddlTx === true, "DDL with an inline KEY succeeds inside a transaction", show(ddlTx));
     ok(
       (await call("scalar", "SELECT COUNT(*) FROM tx_ddl")) === 1,
-      "and both the table and the row it needed are there",
+      "and both the table and the row it needed are there"
     );
 
-    // ----------------------------------------------------------------
     console.log("\n=== MySQL dialect that SQLite does not share");
 
     const now = await call("query", "SELECT NOW() AS t, UNIX_TIMESTAMP() AS ts");
     ok(
       now[0] && now[0].t && typeof now[0].ts === "number",
       "NOW() and UNIX_TIMESTAMP() translate",
-      show(now[0]),
+      show(now[0])
     );
 
     const concat = await call(
       "scalar",
       "SELECT CONCAT(citizenid, ' - ', name) FROM players WHERE citizenid = ?",
-      ["ABC123"],
+      ["ABC123"]
     );
     ok(concat === "ABC123 - Upserted", "CONCAT translates", show(concat));
 
     const conditional = await call(
       "scalar",
       "SELECT IF(money > 100, 'rich', 'poor') FROM players WHERE citizenid = ?",
-      ["ABC123"],
+      ["ABC123"]
     );
     ok(conditional === "rich", "MySQL IF() translates to IIF()", show(conditional));
 
     const ifnull = await call(
       "scalar",
       "SELECT IFNULL(license, 'none') FROM players WHERE citizenid = ?",
-      ["TX1"],
+      ["TX1"]
     );
     ok(ifnull === "none", "IFNULL translates", show(ifnull));
 
     const backticks = await call(
       "query",
       "SELECT `citizenid`, `money` FROM `players` WHERE `citizenid` = ?",
-      ["ABC123"],
+      ["ABC123"]
     );
     ok(backticks.length === 1, "backtick identifiers translate", show(backticks));
 
     const limited = await call("query", "SELECT citizenid FROM players ORDER BY id LIMIT 1, 2");
     ok(limited.length === 2, "MySQL LIMIT offset,count translates", show(limited));
 
-    const deleted = await call("update", "DELETE FROM players WHERE citizenid = ? LIMIT 1", ["TX2"]);
+    const deleted = await call("update", "DELETE FROM players WHERE citizenid = ? LIMIT 1", [
+      "TX2",
+    ]);
     ok(deleted === 1, "DELETE ... LIMIT translates and deletes exactly one row", show(deleted));
 
-    // ----------------------------------------------------------------
     console.log("\n=== Named parameters");
 
     const named = await call(
       "single",
       "SELECT * FROM players WHERE citizenid = @cid AND money >= @min",
-      { cid: "ABC123", min: 100 },
+      { cid: "ABC123", min: 100 }
     );
     ok(named && named.citizenid === "ABC123", "@name parameters bind", show(named));
 
-    const colonNamed = await call(
-      "scalar",
-      "SELECT name FROM players WHERE citizenid = :cid",
-      { cid: "ABC123" },
-    );
+    const colonNamed = await call("scalar", "SELECT name FROM players WHERE citizenid = :cid", {
+      cid: "ABC123",
+    });
     ok(colonNamed === "Upserted", ":name parameters bind", show(colonNamed));
 
-    // ----------------------------------------------------------------
     console.log("\n=== Callbacks");
 
     const cbResult = await new Promise((resolve) => {
       call("query", "SELECT citizenid FROM players WHERE citizenid = ?", ["ABC123"], resolve);
     });
-    ok(Array.isArray(cbResult) && cbResult.length === 1, "callback form delivers the result", show(cbResult));
+    ok(
+      Array.isArray(cbResult) && cbResult.length === 1,
+      "callback form delivers the result",
+      show(cbResult)
+    );
 
     const cbNoParams = await new Promise((resolve) => {
       call("scalar", "SELECT COUNT(*) FROM players", resolve);
     });
-    ok(typeof cbNoParams === "number", "(sql, callback) form works without parameters", show(cbNoParams));
+    ok(
+      typeof cbNoParams === "number",
+      "(sql, callback) form works without parameters",
+      show(cbNoParams)
+    );
 
     const stored = await call("store", "SELECT 1");
     ok(stored === "SELECT 1", "store hands the query back", show(stored));
 
-    // ----------------------------------------------------------------
     console.log("\n=== Untranslatable SQL fails loudly");
 
     let translationError = null;
@@ -533,7 +575,7 @@ async function main() {
     ok(
       translationError !== null && /SQL_CALC_FOUND_ROWS/i.test(translationError),
       "an untranslatable construct is refused by name",
-      translationError,
+      translationError
     );
 
     let sqlError = null;
@@ -545,35 +587,37 @@ async function main() {
     ok(
       sqlError !== null && /table_that_does_not_exist/.test(sqlError),
       "a database error reaches the caller with its message intact",
-      sqlError,
+      sqlError
     );
 
-    // ----------------------------------------------------------------
     console.log("\n=== Cache correctness");
 
     adapter.enableCache(60000, 100);
-    const cached1 = await call("scalar", "SELECT money FROM players WHERE citizenid = ?", ["ABC123"]);
+    const cached1 = await call("scalar", "SELECT money FROM players WHERE citizenid = ?", [
+      "ABC123",
+    ]);
     await call("update", "UPDATE players SET money = 4242 WHERE citizenid = ?", ["ABC123"]);
-    const cached2 = await call("scalar", "SELECT money FROM players WHERE citizenid = ?", ["ABC123"]);
+    const cached2 = await call("scalar", "SELECT money FROM players WHERE citizenid = ?", [
+      "ABC123",
+    ]);
     ok(
       cached1 === 9000 && cached2 === 4242,
       "a write invalidates cached reads instead of serving stale data",
-      `${cached1} -> ${cached2}`,
+      `${cached1} -> ${cached2}`
     );
     adapter.disableCache();
 
-    // ----------------------------------------------------------------
     console.log("\n=== Concurrency");
 
     const concurrent = await Promise.all(
       Array.from({ length: 12 }, (_, i) =>
-        call("scalar", "SELECT COUNT(*) FROM players WHERE money >= ?", [i]),
-      ),
+        call("scalar", "SELECT COUNT(*) FROM players WHERE money >= ?", [i])
+      )
     );
     ok(
       concurrent.every((v) => typeof v === "number"),
       "twelve concurrent queries all resolve (no request auto-cancellation)",
-      show(concurrent),
+      show(concurrent)
     );
   } finally {
     server.kill();
@@ -588,7 +632,9 @@ async function main() {
   console.log(`\n==== ${pass} passed, ${fail} failed ====`);
   if (fail) {
     console.log("\nFailures:");
-    failures.forEach((f) => console.log(`  - ${f}`));
+    failures.forEach((f) => {
+      console.log(`  - ${f}`);
+    });
   }
   process.exitCode = fail === 0 ? 0 : 1;
 }

@@ -1,0 +1,2928 @@
+{
+ "generated": "2026-10-14",
+ "note": "Wave 2 of the real-world oxmysql SQL corpus. Harvested from GitHub with the same rules as oxmysql-corpus.json (wave 1) and from a disjoint set of repositories; any statement whose exact `sql` already appears in wave 1 was dropped rather than repeated. `normalised: true` means a part of the literal was built by Lua concatenation or interpolation that could not be resolved statically and was replaced with a single `?`. `alsoIn` lists the other repo/file pairs that ship the byte-identical statement. A few `sources` entries contribute zero statements: they were surveyed and found to contain no SQL at all (ox_lib, ox_target, ox_commands, ox_police, ox_fuel and several Qbox resources), or everything they did contain turned out to be a byte-identical duplicate of wave 1 or of another wave-2 repo. They are kept so the negative result is recorded rather than re-discovered.",
+ "sources": [
+  {
+   "repo": "qbcore-framework/qb-houses",
+   "ref": "main @ 3f2478557f22e4f063c7f1cbe3a994993101c54f",
+   "files": [
+    "qb-houses.sql",
+    "server.lua"
+   ],
+   "note": "server.lua mixes MySQL.query.await, MySQL.query with a callback, MySQL.Sync.fetchSingle, MySQL.insert and MySQL.update in one file."
+  },
+  {
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "ref": "main @ e8652970aca3324d2a18a440f3d3871715338da8",
+   "files": [
+    "vehshop.sql",
+    "server.lua"
+   ],
+   "note": "vehshop.sql is the richest ALTER TABLE source in the qb tree: ADD UNIQUE INDEX, ADD CONSTRAINT ... FOREIGN KEY ... ON DELETE CASCADE, and four ADD COLUMN migrations. server.lua also contains the only @named-parameter query in the qb corpus."
+  },
+  {
+   "repo": "qbcore-framework/qb-apartments",
+   "ref": "main @ d9d40baaa69ecf556e270f6fcc3accaffbee6ebb",
+   "files": [
+    "qb-apartments.sql",
+    "server/main.lua"
+   ]
+  },
+  {
+   "repo": "qbcore-framework/qb-management",
+   "ref": "main @ 67510bb0f7c440f31d4e64269ed01f47ac4fc59d",
+   "files": [
+    "server/sv_boss.lua",
+    "server/sv_gang.lua"
+   ],
+   "note": "Both LIKE queries are built by Lua concatenation around a user-supplied job/gang name; the interpolated part is replaced with a single ? and the row marked normalised."
+  },
+  {
+   "repo": "qbcore-framework/qb-clothing",
+   "ref": "main @ 8cca4009dd473ab30c30e443ecad50830b816ed7",
+   "files": [
+    "qb-clothing.sql",
+    "server.lua"
+   ],
+   "note": "The DELETE-then-INSERT in qb-clothing:saveSkin carries a TODO explaining it only exists because playerskins has no unique key to upsert on."
+  },
+  {
+   "repo": "qbcore-framework/qb-inventory",
+   "ref": "main @ dc3d07fc60139de569df38c5ac178ed4cada4577",
+   "files": [
+    "qb-inventory.sql",
+    "migrate.sql",
+    "server/functions.lua",
+    "server/main.lua"
+   ],
+   "note": "migrate.sql is an INSERT ... SELECT with two UNION ALL arms and CONCAT in the projection - the only multi-arm set operation found anywhere in the qb tree. qb-inventory.sql has an inline CHECK (json_valid(...)) constraint."
+  },
+  {
+   "repo": "qbcore-fivem/qb-crypto",
+   "ref": "main @ b39e7e15f4cd4a5ab58dec4be7004eec7c8b7e3b",
+   "files": [
+    "qb-crypto.sql",
+    "server.lua"
+   ],
+   "note": "Only resource found that uses :named bind parameters with a plain Lua table, including a lowercase-keyword UPDATE and an ON DUPLICATE KEY UPDATE that reuses the same named params."
+  },
+  {
+   "repo": "qbcore-fivem/qb-vehiclesales",
+   "ref": "main @ a29e922c928444711a696a24545879976b30058a",
+   "files": [
+    "qb-vehiclesales.sql",
+    "server.lua"
+   ],
+   "note": "Uses MySQL.query.await on DELETE statements purely to read back result.affectedRows as an ownership check - two of the three DELETEs mix upper and lower case AND/and in the same predicate, verbatim."
+  },
+  {
+   "repo": "qbcore-fivem/qb-policejob",
+   "ref": "main @ 3ad3d190fa4d294f75506e2e3837b1124bfeb005",
+   "files": [
+    "server/main.lua",
+    "server/vehicle.lua",
+    "server/commands.lua"
+   ],
+   "note": "server/evidence.lua, server/interactions.lua and server/objects.lua contain no SQL at all - evidence is held in memory. server/commands.lua still uses the legacy MySQL.Async.insert."
+  },
+  {
+   "repo": "qbcore-fivem/qb-multicharacter",
+   "ref": "main @ 85a03c4f3bdc100e898b9fb65614a9ce914fe926",
+   "files": [
+    "server.lua"
+   ]
+  },
+  {
+   "repo": "qbcore-fivem/qb-lapraces",
+   "ref": "main @ 2a33aba3f44d24b466931bfff548fea84ce747da",
+   "files": [
+    "qb-lapraces.sql",
+    "server.lua"
+   ]
+  },
+  {
+   "repo": "qbcore-fivem/qb-weed",
+   "ref": "main @ 318b5b1532191b8a6163f1ce53d4f8c28e7c0712",
+   "files": [
+    "qb-weed.sql",
+    "server.lua"
+   ],
+   "note": "qb-weed.sql is a real in-place column retype migration: seven data-fixup UPDATEs comparing an int column against the old string values, then ALTER TABLE ... MODIFY COLUMN. Three of the seven UPDATEs are kept as representatives."
+  },
+  {
+   "repo": "qbcore-fivem/qb-ambulancejob",
+   "ref": "main @ 19bb190d7c41e6b79d836a45d7498bd3762d0bd4",
+   "files": [
+    "server/main.lua"
+   ],
+   "note": "Contains the only surviving MySQL.Async.execute call in the current qb tree, sitting next to a MySQL.update of the identical statement in the same function - good evidence that both dialects are live in one file."
+  },
+  {
+   "repo": "qbcore-fivem/qb-mechanicjob",
+   "ref": "main @ 9dded685057f3516f4904628a208fee24d92f105",
+   "files": [
+    "server/main.lua"
+   ],
+   "note": "Only place in the qb tree that does SELECT 1 as an existence probe (once lower-case `from`, once upper-case `FROM`) and the only column-self-reference UPDATE (drivingdistance = drivingdistance + ?)."
+  },
+  {
+   "repo": "qbcore-fivem/qb-drugs",
+   "ref": "main @ 51052d139bc482d9d0e94d4f47680b241e866bba",
+   "files": [
+    "server/deliveries.lua"
+   ],
+   "note": "The `dealers` table is created by no .sql file in the repo - the schema only exists implicitly in these five statements."
+  },
+  {
+   "repo": "qbcore-fivem/qb-scrapyard",
+   "ref": "main @ bcb987854a4d6911d64f80ee37ca754508488f52",
+   "files": [
+    "server.lua"
+   ],
+   "note": "Fully back-quoted variant of the plate-ownership probe that qb-policejob and qb-mechanicjob write unquoted - kept deliberately as a distinct lexing case."
+  },
+  {
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "ref": "main @ 646ad82fdf96a374c3efdd09c9a6080db2605cfd",
+   "files": [
+    "sql/security_hardening_2026_10_02.sql",
+    "security_indexes.sql",
+    "[esx_addons]/esx_society/esx_society.sql",
+    "[esx_addons]/esx_banking/banking.sql",
+    "[esx_addons]/esx_billing/esx_billing.sql",
+    "[esx_addons]/esx_license/esx_license.sql",
+    "[esx_addons]/esx_addonaccount/esx_addonaccount.sql",
+    "[esx_addons]/esx_addoninventory/esx_addoninventory.sql",
+    "[esx_addons]/esx_datastore/esx_datastore.sql",
+    "[esx_addons]/esx_policejob/esx_policejob.sql",
+    "[esx_addons]/esx_mechanicjob/update_mechanic_uniforms.sql",
+    "[esx_addons]/esx_dmvschool/esx_dmvschool.sql",
+    "[esx_addons]/esx_vehicleshop/esx_vehicleshop.sql",
+    "[esx_addons]/esx_garage/server/modules/migration.lua",
+    "[esx_addons]/esx_adminmenu/server/database.lua",
+    "[esx_addons]/esx_adminmenu/server/logs.lua",
+    "[esx_addons]/esx_license/server/main.lua",
+    "[esx_addons]/esx_society/server/economy.lua",
+    "[esx_addons]/esx_addonaccount/server/main.lua",
+    "[esx_addons]/esx_datastore/server/main.lua",
+    "[esx_addons]/esx_banking/server/main.lua",
+    "[esx_addons]/esx_billing/server/main.lua",
+    "[esx_addons]/esx_joblisting/server/main.lua"
+   ],
+   "note": "SUBSTITUTION: the org esx-framework has no standalone esx_society / esx_property / esx_vehicleshop / esx_billing / esx_jobs / esx_joblisting / esx_license / esx_datastore / esx_addonaccount / esx_addoninventory / esx_policejob / esx_ambulancejob / esx_mechanicjob / esx_dmvschool / esx_barbershop repositories; they are all consolidated into this one repo under [esx_addons]/. The org ESX-Org does not exist at all (GitHub search rejects it). esx_barbershop has no counterpart here (closest is esx_accessories, which is a pure localisation seed). esx_joblisting/server/main.lua contains no SQL at all."
+  },
+  {
+   "repo": "overextended/oxmysql",
+   "ref": "main @ bae715c244d7ef8136a025c8a35ced3daff51738",
+   "files": [
+    "tests/unit/database/rawTransaction.test.ts",
+    "tests/unit/utils/parseTransaction.test.ts",
+    "tests/unit/lib/MySQL.test.ts",
+    "tests/unit/database/rawExecute.test.ts"
+   ],
+   "note": "oxmysql ships no .sql files; its test suite mocks mysql2 entirely, so its SQL literals are deliberately trivial placeholders. oxmysql itself ships no .sql; only toy SQL literals in its unit tests (batch execute, multi-result-set)"
+  },
+  {
+   "repo": "overextended/ox_property",
+   "ref": "main @ 465f48f66aafb2994c4e87aabd3ab9fc48f04c0b",
+   "files": [
+    "ox_property.sql",
+    "server/main.lua",
+    "server/management.lua",
+    "server/parking.lua"
+   ]
+  },
+  {
+   "repo": "overextended/ox_banking",
+   "ref": "main @ 21b475bfe4a47aa0c6c23854d107146597aae2bc",
+   "files": [
+    "src/server/index.ts"
+   ]
+  },
+  {
+   "repo": "overextended/ox_mdt",
+   "ref": "main @ 7e8232edbadd4e449540a2e4cd32e4f5d92620be",
+   "files": [
+    "sql/install.sql",
+    "src/server/framework/db.ts"
+   ]
+  },
+  {
+   "repo": "overextended/ox_vehicledealer",
+   "ref": "main @ 3900bea8debc210c38c165a82e34b4e54862d421",
+   "files": [
+    "server/main.lua",
+    "server/showroom.lua",
+    "server/vehicleYard.lua",
+    "server/import.lua"
+   ]
+  },
+  {
+   "repo": "overextended/ox_police",
+   "ref": "main @ 5b8fac5692b0bf45b78bbc6b9a036e0a10d3ec1c",
+   "files": [
+    "server/main.lua"
+   ],
+   "note": "Surveyed, zero SQL: ox_police persists nothing to the database (statebags + ox_inventory exports only)."
+  },
+  {
+   "repo": "overextended/ox_fuel",
+   "ref": "main @ 84f93ba2a3e24a663514c65cb9b3965c703ffed1",
+   "files": [
+    "server.lua"
+   ],
+   "note": "Surveyed, zero SQL: fuel level lives in an entity statebag."
+  },
+  {
+   "repo": "overextended/ox_lib",
+   "ref": "main (not pinned - no file was read from this repo)",
+   "files": [],
+   "note": "Exists but contributes nothing: ox_lib is a library with no database layer. ox_target and ox_commands likewise contain no MySQL/oxmysql calls. ox_appearance DOES NOT EXIST in the overextended org (35 repos enumerated); substituted overextended/ox_property, overextended/ox_mdt and overextended/ox_banking, which do call oxmysql."
+  },
+  {
+   "repo": "Qbox-project/qbx_properties",
+   "ref": "main @ 9bbdb43d1c2d89ab6f90b5d6ec7f13cb0226566b",
+   "files": [
+    "property.sql",
+    "decorations.sql",
+    "property_garages.sql",
+    "server/property.lua",
+    "server/apartmentselect.lua",
+    "server/realtor.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbx_vehicleshop",
+   "ref": "main @ 9502c6494ccd5385d9043ff094973a3ccfeca96c",
+   "files": [
+    "vehshop.sql",
+    "migrate.sql",
+    "server/storage.lua"
+   ],
+   "note": "migrate.sql is CRLF in the repo; newlines normalised to \\n here"
+  },
+  {
+   "repo": "Qbox-project/qbx_weed",
+   "ref": "main @ 04fe6bac0fdbfce9224f3f848ee30cde933f60ae",
+   "files": [
+    "sql/qbx_weed.sql",
+    "sql/migration.sql",
+    "server/main.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbx_drugs",
+   "ref": "main @ 997e5aa208715910c24603f2bfdfc6bc46a72da2",
+   "files": [
+    "qbx_drugs.sql",
+    "server/deliveries.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbxsql",
+   "ref": "main @ 97c56c3813df570601c8e2106f826e1b7ea2d648",
+   "files": [
+    "src/schema/introspect.ts",
+    "src/schema/sql.ts",
+    "src/schema/planner.ts",
+    "src/schema/manager.ts",
+    "tests/fxserver/qbxsql_runtime_test/server.lua",
+    "tests/load/qbxsql_benchmark/server.lua",
+    "tests/integration/mysql.test.ts",
+    "tests/integration/schema-manager.test.ts"
+   ],
+   "note": "qbxsql is the Qbox SQL connector itself: DDL is generated from template literals, so those entries are normalised with ? standing in for interpolated identifiers/definitions"
+  },
+  {
+   "repo": "Qbox-project/qbx_police",
+   "ref": "main @ 7fa438fc175443692e87739a9140f0c6b770f98f",
+   "files": [
+    "server/storage.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbx_spawn",
+   "ref": "main @ 41654937969da6ad7b9d35fafa9bd2ab8fba4d5c",
+   "files": [
+    "server/main.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbx_scrapyard",
+   "ref": "main @ f175d09f2c2632404d47a116e17779d23fffd711",
+   "files": [
+    "server/main.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbx_mechanicjob",
+   "ref": "main @ df4f23fcd0716a4e5e35c7ee6b39f48e93f232f9",
+   "files": [
+    "server/main.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbx_adminmenu",
+   "ref": "main @ 0dcce39d238b7c00a23873c7e68f7ed6503e908a",
+   "files": [
+    "server/main.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbx_npwd",
+   "ref": "main @ c0e54a8560b26256b55e010b6ea71dcf003192c7",
+   "files": [
+    "server.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/npwd_qbx_mail",
+   "ref": "main @ 150532669293dd4eb1756fa66270544319c76faf",
+   "files": [
+    "server/server.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/npwd_qbx_garages",
+   "ref": "main @ 54fea7504303ed9129443118c39bf7d56a2f9b46",
+   "files": [
+    "server/server.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbx_vehiclesales",
+   "ref": "main @ 123ede54998453627277b66c610ac1e16a324594",
+   "files": [
+    "server/main.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbx_lapraces",
+   "ref": "main @ 5b7d8339ffac2203877be2ffa6cbaa8ea7d6f20e",
+   "files": [
+    "server/main.lua"
+   ]
+  },
+  {
+   "repo": "Qbox-project/qbx_pawnshop",
+   "ref": "main @ 7ced9287b20fbb1e11c713884f5f2e811452a30e",
+   "files": [
+    "server/main.lua"
+   ]
+  },
+  {
+   "repo": "Samuels-Development/sd-phone",
+   "ref": "main @ 1ba9ad122f67a7f208b9947e5d575bfe3ea7e1c6",
+   "files": [
+    "server/util.lua",
+    "server/migrate/store.lua",
+    "server/mdt/phone.lua",
+    "bridge/server/records.lua",
+    "bridge/server/banking.lua",
+    "server/birdy/store.lua",
+    "server/photos/store.lua"
+   ],
+   "note": "standalone oxmysql-based phone; richest source of information_schema + ALTER TABLE + ON DUPLICATE KEY UPDATE VALUES() in the wave"
+  },
+  {
+   "repo": "VORPCORE/vorp_core",
+   "ref": "main @ 362f2c48bc46668dd7fabff3689c78e5985b1fb1",
+   "files": [
+    "server/services/dbupdater/dbupdater.lua"
+   ],
+   "note": "RedM core, oxmysql; Information_Schema.Columns probe + ALTER TABLE MODIFY"
+  },
+  {
+   "repo": "mz-core/mz_bank",
+   "ref": "main @ fec26de9e87eb4504c35814e4859a333d7a425b3",
+   "files": [
+    "server/migrations.lua"
+   ],
+   "note": "schema verifier; GROUP_CONCAT ... SEPARATOR over information_schema.statistics"
+  },
+  {
+   "repo": "sumit961/serverFivem",
+   "ref": "main @ b546589a3d6ca598075e632ca83e3dd46be3cd7b",
+   "files": [
+    "resources/[core]/cm-house/sql/004_capacity_trigger.sql"
+   ],
+   "note": "only real CREATE TRIGGER found (DELIMITER $$ / SIGNAL SQLSTATE)"
+  },
+  {
+   "repo": "nd-framework/ND_Core",
+   "ref": "main @ 0e6caf7996fbf7a1d01f2d8f4eec2f4920f3343c",
+   "files": [
+    "database/characters.sql",
+    "database/vehicles.sql",
+    "database/moneylogs.sql",
+    "database/group_ranks.sql",
+    "server/main.lua"
+   ],
+   "note": "ND framework; FOREIGN KEY DDL and DATE_SUB(NOW(), INTERVAL 30 DAY)"
+  },
+  {
+   "repo": "Project-Sloth/ps-mdt",
+   "ref": "main @ 0be47ae0b76c9af8e0bf5dc9c4dc369b1587e476",
+   "files": [
+    "server/backend/citizens.lua",
+    "server/backend/management.lua"
+   ],
+   "note": "JSON_EXTRACT/JSON_UNQUOTE with CONVERT/COLLATE joins, SUM(CASE WHEN ...)"
+  },
+  {
+   "repo": "alfaben12/z-phone",
+   "ref": "main @ c6d111104404a884626eb457cd9043b717a46647",
+   "files": [
+    "server/feature/chat.lua"
+   ],
+   "note": "only real CTE (WITH) + ROW_NUMBER() OVER (PARTITION BY) + TIMESTAMPDIFF found"
+  },
+  {
+   "repo": "Project-Sloth/ps_lib",
+   "ref": "main @ 03ef1861d34a977b4374b4cf20bbaa806e154833",
+   "files": [
+    "modules/ORM/server/orm.lua"
+   ],
+   "note": "REPLACE INTO; dynamic query builder (entries normalised)"
+  },
+  {
+   "repo": "Kxiox/ks_bossmenu",
+   "ref": "main @ 27f450b6c4a8925ed05c6a6c738de2c1aea0542d",
+   "files": [
+    "server/mysql.lua"
+   ],
+   "note": "SHOW COLUMNS FROM + ALTER TABLE ADD COLUMN ... FIRST"
+  },
+  {
+   "repo": "ikalisz/test",
+   "ref": "main @ 1425f983c4b61b4c9c207eb5798793885f796453",
+   "files": [
+    "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql"
+   ],
+   "note": "tgiann-mdtv2's shipped mysqldump: LOCK/UNLOCK TABLES, /*!NNNNN SET ... */ directives, and a real double-comma syntax error kept verbatim"
+  },
+  {
+   "repo": "dollar-src/src-phone",
+   "ref": "main @ 7f75d199105af07a383723cad8adb491e6e51c21",
+   "files": [
+    "install.sql"
+   ],
+   "note": "ADD COLUMN IF NOT EXISTS / DROP COLUMN IF EXISTS / MODIFY COLUMN ... CHARACTER SET"
+  },
+  {
+   "repo": "XxNightLordxX/K9Script",
+   "ref": "claude/code-improver-subagent-qlt3bn @ 515d28172840f498606e21c844d4e24a50f31456",
+   "files": [
+    "john-k9/sql/migrations/0004_add_k9_certifications_active_cert_key.sql",
+    "john-k9/sql/migrations/0006_add_k9_certification_lifecycle.sql",
+    "john-k9/sql/rollback/0004_down.sql",
+    "john-k9/sql/maintenance_prune_k9_search_log.sql"
+   ],
+   "note": "PROVENANCE WARNING: this repo default branch is literally named claude/code-improver-subagent-qlt3bn and its sql/ tree is agent-generated migration scaffolding, not community-idiomatic FiveM SQL. Kept because the statements are syntactically real and it is the only source here for CREATE/DROP PROCEDURE guards over INFORMATION_SCHEMA, ALTER TABLE DROP INDEX / DROP COLUMN, and DELETE ... INTERVAL ... ORDER BY ... LIMIT. Do not treat it as evidence of what FiveM resources normally emit."
+  },
+  {
+   "repo": "RyanHardof/anpr-for-wk_wars2x",
+   "ref": "main @ cd330f3a5481bc8d103b793ad3af522049be3cc6",
+   "files": [
+    "wk_wars2x/anpr_database_setup.sql"
+   ],
+   "note": "only real CREATE OR REPLACE VIEW found (CASE + UNION ALL + JOIN); its commented example queries supply CURDATE/DATE_SUB INTERVAL HOUR"
+  }
+ ],
+ "statements": [
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `houselocations` (\n  `id` int(11) NOT NULL AUTO_INCREMENT,\n  `name` varchar(255) DEFAULT NULL,\n  `label` varchar(255) DEFAULT NULL,\n  `coords` text DEFAULT NULL,\n  `owned` tinyint(2) DEFAULT NULL,\n  `price` int(11) DEFAULT NULL,\n  `tier` tinyint(4) DEFAULT NULL,\n  `garage` text NOT NULL DEFAULT '{\"y\":0,\"x\":0,\"w\":0,\"z\":0}',\n  PRIMARY KEY (`id`),\n  KEY `name` (`name`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1",
+   "repo": "qbcore-framework/qb-houses",
+   "file": "qb-houses.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `player_houses` (\n  `id` int(255) NOT NULL AUTO_INCREMENT,\n  `house` varchar(50) NOT NULL,\n  `identifier` varchar(50) DEFAULT NULL,\n  `citizenid` varchar(50) DEFAULT NULL,\n  `keyholders` text DEFAULT NULL,\n  `decorations` text DEFAULT NULL,\n  `stash` text DEFAULT NULL,\n  `outfit` text DEFAULT NULL,\n  `logout` text DEFAULT NULL,\n  PRIMARY KEY (`id`),\n  KEY `house` (`house`),\n  KEY `citizenid` (`citizenid`),\n  KEY `identifier` (`identifier`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4",
+   "repo": "qbcore-framework/qb-houses",
+   "file": "qb-houses.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM houselocations",
+   "repo": "qbcore-framework/qb-houses",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM player_houses",
+   "repo": "qbcore-framework/qb-houses",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `player_vehicles` (\n    `id` int(11) NOT NULL AUTO_INCREMENT,\n    `license` varchar(50) DEFAULT NULL,\n    `citizenid` varchar(50) DEFAULT NULL,\n    `vehicle` varchar(50) DEFAULT NULL,\n    `hash` varchar(50) DEFAULT NULL,\n    `mods` text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,\n    `plate` varchar(15) NOT NULL,\n    `fakeplate` varchar(50) DEFAULT NULL,\n    `garage` varchar(50) DEFAULT 'pillboxgarage',\n    `fuel` int(11) DEFAULT 100,\n    `engine` float DEFAULT 1000,\n    `body` float DEFAULT 1000,\n    `state` int(11) DEFAULT 1,\n    `depotprice` int(11) NOT NULL DEFAULT 0,\n    `drivingdistance` int(50) DEFAULT NULL,\n    `status` text DEFAULT NULL,\n    PRIMARY KEY (`id`),\n    KEY `plate` (`plate`),\n    KEY `citizenid` (`citizenid`),\n    KEY `license` (`license`)\n) ENGINE=InnoDB AUTO_INCREMENT=1",
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "file": "vehshop.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `player_vehicles`\nADD UNIQUE INDEX UK_playervehicles_plate (plate)",
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "file": "vehshop.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `player_vehicles`\nADD CONSTRAINT FK_playervehicles_players FOREIGN KEY (citizenid)\nREFERENCES `players` (citizenid) ON DELETE CASCADE ON UPDATE CASCADE",
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "file": "vehshop.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `player_vehicles`\nADD COLUMN `balance` int(11) NOT NULL DEFAULT 0",
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "file": "vehshop.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `player_vehicles`\nADD COLUMN `paymentamount` int(11) NOT NULL DEFAULT 0",
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "file": "vehshop.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `player_vehicles`\nADD COLUMN `paymentsleft` int(11) NOT NULL DEFAULT 0",
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "file": "vehshop.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `player_vehicles`\nADD COLUMN `financetime` int(11) NOT NULL DEFAULT 0",
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "file": "vehshop.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT mods, vehicle FROM player_vehicles WHERE plate = ? AND citizenid = ?",
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE player_vehicles SET financetime = ? WHERE plate = ?",
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "DELETE FROM player_vehicles WHERE plate = @plate",
+   "repo": "qbcore-framework/qb-vehicleshop",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `apartments` (\n  `id` int(11) NOT NULL AUTO_INCREMENT,\n  `name` varchar(255) DEFAULT NULL,\n  `type` varchar(255) DEFAULT NULL,\n  `label` varchar(255) DEFAULT NULL,\n  `citizenid` varchar(255) DEFAULT NULL,\n  PRIMARY KEY (`id`),\n  KEY `citizenid` (`citizenid`),\n  KEY `name` (`name`)\n) ENGINE=InnoDB AUTO_INCREMENT=4144 DEFAULT CHARSET=latin1",
+   "repo": "qbcore-framework/qb-apartments",
+   "file": "qb-apartments.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT COUNT(*) as count FROM apartments WHERE name = ?",
+   "repo": "qbcore-framework/qb-apartments",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM apartments WHERE name = ?",
+   "repo": "qbcore-framework/qb-apartments",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM `players` WHERE `job` LIKE '%?%'",
+   "repo": "qbcore-framework/qb-management",
+   "file": "server/sv_boss.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT * FROM `players` WHERE `gang` LIKE '%?%'",
+   "repo": "qbcore-framework/qb-management",
+   "file": "server/sv_gang.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `playerskins` (\n  `id` int(11) NOT NULL AUTO_INCREMENT,\n  `citizenid` varchar(255) NOT NULL,\n  `model` varchar(255) NOT NULL,\n  `skin` text NOT NULL,\n  `active` tinyint(2) NOT NULL DEFAULT 1,\n  PRIMARY KEY (`id`),\n  KEY `citizenid` (`citizenid`),\n  KEY `active` (`active`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=latin1",
+   "repo": "qbcore-framework/qb-clothing",
+   "file": "qb-clothing.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `player_outfits` (\n  `id` int(11) NOT NULL AUTO_INCREMENT,\n  `citizenid` varchar(50) DEFAULT NULL,\n  `outfitname` varchar(50) NOT NULL,\n  `model` varchar(50) DEFAULT NULL,\n  `skin` text DEFAULT NULL,\n  `outfitId` varchar(50) NOT NULL,\n  PRIMARY KEY (`id`),\n  KEY `citizenid` (`citizenid`),\n  KEY `outfitId` (`outfitId`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4",
+   "repo": "qbcore-framework/qb-clothing",
+   "file": "qb-clothing.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "DELETE FROM playerskins WHERE citizenid = ?",
+   "repo": "qbcore-framework/qb-clothing",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO playerskins (citizenid, model, skin, active) VALUES (?, ?, ?, ?)",
+   "repo": "qbcore-framework/qb-clothing",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `inventories` (\n  `id` int(11) NOT NULL AUTO_INCREMENT,\n  `identifier` varchar(255) NOT NULL,\n  `items` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL CHECK (json_valid(`items`)),\n  PRIMARY KEY (`identifier`),\n  KEY `id` (`id`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+   "repo": "qbcore-framework/qb-inventory",
+   "file": "qb-inventory.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO inventories (identifier, items)\nSELECT\n  CONCAT('glovebox-', plate),\n  items\nFROM\n  gloveboxitems\n\nUNION ALL\n\nSELECT\n  stash,\n  items\nFROM\n  stashitems\n\nUNION ALL\n\nSELECT\n  CONCAT('trunk-', plate),\n  items\nFROM\n  trunkitems",
+   "repo": "qbcore-framework/qb-inventory",
+   "file": "migrate.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT inventory FROM players WHERE citizenid = ?",
+   "repo": "qbcore-framework/qb-inventory",
+   "file": "server/functions.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE inventories SET items = ? WHERE identifier = ?",
+   "repo": "qbcore-framework/qb-inventory",
+   "file": "server/functions.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO inventories (identifier, items) VALUES (?, ?) ON DUPLICATE KEY UPDATE items = ?",
+   "repo": "qbcore-framework/qb-inventory",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `crypto` (\n  `crypto` varchar(50) NOT NULL DEFAULT 'qbit',\n  `worth` int(11) NOT NULL DEFAULT 0,\n  `history` text DEFAULT NULL,\n  PRIMARY KEY (`crypto`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+   "repo": "qbcore-fivem/qb-crypto",
+   "file": "qb-crypto.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO `crypto` VALUES ('qbit', 1000, '[{\"NewWorth\":1000,\"PreviousWorth\":1000}]')",
+   "repo": "qbcore-fivem/qb-crypto",
+   "file": "qb-crypto.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM crypto WHERE crypto = ?",
+   "repo": "qbcore-fivem/qb-crypto",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE crypto set worth = :worth, history = :history where crypto = :crypto",
+   "repo": "qbcore-fivem/qb-crypto",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO crypto (crypto, worth, history) VALUES (:crypto, :worth, :history)",
+   "repo": "qbcore-fivem/qb-crypto",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO crypto (worth, history) VALUES (:worth, :history) ON DUPLICATE KEY UPDATE worth = :worth, history = :history",
+   "repo": "qbcore-fivem/qb-crypto",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM `players` WHERE `metadata` LIKE ?",
+   "repo": "qbcore-fivem/qb-crypto",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `occasion_vehicles` (\n  `id` int(11) NOT NULL AUTO_INCREMENT,\n  `seller` varchar(50) DEFAULT NULL,\n  `price` int(11) DEFAULT NULL,\n  `description` longtext DEFAULT NULL,\n  `plate` varchar(50) DEFAULT NULL,\n  `model` varchar(50) DEFAULT NULL,\n  `mods` text DEFAULT NULL,\n  `occasionid` varchar(50) DEFAULT NULL,\n  PRIMARY KEY (`id`),\n  KEY `occasionId` (`occasionid`)\n) ENGINE=InnoDB AUTO_INCREMENT=325 DEFAULT CHARSET=utf8mb4",
+   "repo": "qbcore-fivem/qb-vehiclesales",
+   "file": "qb-vehiclesales.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM occasion_vehicles",
+   "repo": "qbcore-fivem/qb-vehiclesales",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false,
+   "alsoIn": [
+    {
+     "repo": "Qbox-project/qbx_vehiclesales",
+     "file": "server/main.lua"
+    }
+   ]
+  },
+  {
+   "sql": "SELECT vehicle FROM player_vehicles WHERE plate = ?",
+   "repo": "qbcore-fivem/qb-vehiclesales",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "DELETE FROM inventories WHERE identifier = 'policetrash'",
+   "repo": "qbcore-fivem/qb-policejob",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO phone_invoices (citizenid, amount, society, sender, sendercitizenid) VALUES (?, ?, ?, ?, ?)",
+   "repo": "qbcore-fivem/qb-policejob",
+   "file": "server/commands.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM players WHERE license = ?",
+   "repo": "qbcore-fivem/qb-multicharacter",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM server_logs",
+   "repo": "qbcore-fivem/qb-multicharacter",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `lapraces` (\n  `id` int(11) NOT NULL AUTO_INCREMENT,\n  `name` varchar(50) DEFAULT NULL,\n  `checkpoints` text DEFAULT NULL,\n  `records` text DEFAULT NULL,\n  `creator` varchar(50) DEFAULT NULL,\n  `distance` int(11) DEFAULT NULL,\n  `raceid` varchar(50) DEFAULT NULL,\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB AUTO_INCREMENT=35 DEFAULT CHARSET=utf8mb4",
+   "repo": "qbcore-fivem/qb-lapraces",
+   "file": "qb-lapraces.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE lapraces SET records = ? WHERE raceid = ?",
+   "repo": "qbcore-fivem/qb-lapraces",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false,
+   "alsoIn": [
+    {
+     "repo": "Qbox-project/qbx_lapraces",
+     "file": "server/main.lua"
+    }
+   ]
+  },
+  {
+   "sql": "INSERT INTO lapraces (name, checkpoints, creator, distance, raceid) VALUES (?, ?, ?, ?, ?)",
+   "repo": "qbcore-fivem/qb-lapraces",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `house_plants` (\n  `id` int(11) NOT NULL AUTO_INCREMENT,\n  `building` varchar(50) DEFAULT NULL,\n  `stage` int(11) DEFAULT 1,\n  `sort` varchar(50) DEFAULT NULL,\n  `gender` varchar(50) DEFAULT NULL,\n  `food` int(11) DEFAULT 100,\n  `health` int(11) DEFAULT 100,\n  `progress` int(11) DEFAULT 0,\n  `coords` text DEFAULT NULL,\n  `plantid` varchar(50) DEFAULT NULL,\n  PRIMARY KEY (`id`),\n  KEY `building` (`building`),\n  KEY `plantid` (`plantid`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci",
+   "repo": "qbcore-fivem/qb-weed",
+   "file": "qb-weed.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE `house_plants` SET `stage` = 1 WHERE `stage` = 'stage-a'",
+   "repo": "qbcore-fivem/qb-weed",
+   "file": "qb-weed.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE `house_plants` SET `stage` = 2 WHERE `stage` = 'stage-b'",
+   "repo": "qbcore-fivem/qb-weed",
+   "file": "qb-weed.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE `house_plants` SET `stage` = 7 WHERE `stage` = 'stage-g'",
+   "repo": "qbcore-fivem/qb-weed",
+   "file": "qb-weed.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `house_plants` MODIFY COLUMN `stage` int(11) DEFAULT 1",
+   "repo": "qbcore-fivem/qb-weed",
+   "file": "qb-weed.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM house_plants WHERE building = ?",
+   "repo": "qbcore-fivem/qb-weed",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO house_plants (building, coords, gender, sort, plantid) VALUES (?, ?, ?, ?, ?)",
+   "repo": "qbcore-fivem/qb-weed",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT 1 from player_vehicles WHERE plate = ?",
+   "repo": "qbcore-fivem/qb-mechanicjob",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT 1 FROM player_vehicles WHERE plate = ? AND citizenid = ?",
+   "repo": "qbcore-fivem/qb-mechanicjob",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT name FROM dealers WHERE name = ?",
+   "repo": "qbcore-fivem/qb-drugs",
+   "file": "server/deliveries.lua",
+   "kind": "query",
+   "normalised": false,
+   "alsoIn": [
+    {
+     "repo": "Qbox-project/qbx_drugs",
+     "file": "server/deliveries.lua"
+    }
+   ]
+  },
+  {
+   "sql": "INSERT INTO dealers (name, coords, time, createdby) VALUES (?, ?, ?, ?)",
+   "repo": "qbcore-fivem/qb-drugs",
+   "file": "server/deliveries.lua",
+   "kind": "query",
+   "normalised": false,
+   "alsoIn": [
+    {
+     "repo": "Qbox-project/qbx_drugs",
+     "file": "server/deliveries.lua"
+    }
+   ]
+  },
+  {
+   "sql": "SELECT `plate` FROM `player_vehicles` WHERE `plate` = ?",
+   "repo": "qbcore-fivem/qb-scrapyard",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "DROP PROCEDURE IF EXISTS esx_hardening_20261002",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "sql/security_hardening_2026_10_02.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE PROCEDURE esx_hardening_20261002()\nBEGIN\n    IF EXISTS (SELECT 1 FROM user_licenses GROUP BY owner, type HAVING COUNT(*) > 1) THEN\n        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Duplicate user_licenses: reconcile before migration';\n    END IF;\n    IF EXISTS (SELECT 1 FROM addon_account_data GROUP BY account_name, COALESCE(owner, '') HAVING COUNT(*) > 1) THEN\n        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Duplicate addon accounts: reconcile balances before migration';\n    END IF;\n    IF EXISTS (SELECT 1 FROM addon_account_data WHERE account_name IS NULL OR owner = '') THEN\n        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Invalid addon account name/empty owner: reconcile before migration';\n    END IF;\n    IF EXISTS (SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()\n        AND TABLE_NAME IN ('billing', 'users', 'addon_account_data') AND ENGINE <> 'InnoDB') THEN\n        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Economy tables must use InnoDB';\n    END IF;\n\n    CREATE TABLE IF NOT EXISTS billing_payments (\n        bill_id INT NOT NULL,\n        operation_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,\n        identifier VARCHAR(60) NOT NULL,\n        sender VARCHAR(60) NOT NULL,\n        target_type VARCHAR(10) NOT NULL,\n        target VARCHAR(100) NOT NULL,\n        label VARCHAR(255) NOT NULL,\n        amount INT NOT NULL,\n        payment_account VARCHAR(20) NOT NULL,\n        state ENUM('claimed', 'applied') NOT NULL DEFAULT 'claimed',\n        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n        applied_at TIMESTAMP NULL DEFAULT NULL,\n        PRIMARY KEY (bill_id),\n        UNIQUE KEY uq_billing_payment_operation (operation_id),\n        KEY idx_billing_payment_state_created (state, created_at)\n    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;\n\n    IF NOT EXISTS (SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()\n        AND TABLE_NAME = 'user_licenses' AND NON_UNIQUE = 0 GROUP BY INDEX_NAME\n        HAVING COUNT(*) = 2 AND SUM(SUB_PART IS NOT NULL) = 0\n        AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) IN ('owner,type', 'type,owner')) THEN\n        ALTER TABLE user_licenses ADD UNIQUE KEY uq_user_licenses_owner_type (owner, type);\n    END IF;\n\n    IF NOT EXISTS (SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()\n        AND TABLE_NAME = 'billing' AND COLUMN_NAME = 'identifier' AND SEQ_IN_INDEX = 1 AND SUB_PART IS NULL) THEN\n        ALTER TABLE billing ADD KEY idx_billing_identifier (identifier);\n    END IF;\n\n    IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()\n        AND TABLE_NAME = 'addon_account_data' AND COLUMN_NAME = 'owner_key') THEN\n        ALTER TABLE addon_account_data ADD COLUMN owner_key VARCHAR(60)\n            GENERATED ALWAYS AS (COALESCE(owner, '')) STORED;\n    END IF;\n\n    IF NOT EXISTS (SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()\n        AND TABLE_NAME = 'addon_account_data' AND NON_UNIQUE = 0 GROUP BY INDEX_NAME\n        HAVING COUNT(*) = 2 AND SUM(SUB_PART IS NOT NULL) = 0\n        AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) IN ('account_name,owner_key', 'owner_key,account_name')) THEN\n        ALTER TABLE addon_account_data ADD UNIQUE KEY uq_addon_account_owner_key (account_name, owner_key);\n    END IF;\n\n    IF NOT EXISTS (SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()\n        AND TABLE_NAME = 'banking' AND COLUMN_NAME = 'time' AND SEQ_IN_INDEX = 1 AND SUB_PART IS NULL) THEN\n        ALTER TABLE banking ADD KEY idx_banking_time (time);\n    END IF;\nEND",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "sql/security_hardening_2026_10_02.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CALL esx_hardening_20261002()",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "sql/security_hardening_2026_10_02.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE user_licenses ADD UNIQUE KEY uq_user_licenses_owner_type (owner, type)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "sql/security_hardening_2026_10_02.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE billing ADD KEY idx_billing_identifier (identifier)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "sql/security_hardening_2026_10_02.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE addon_account_data ADD COLUMN owner_key VARCHAR(60)\n            GENERATED ALWAYS AS (COALESCE(owner, '')) STORED",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "sql/security_hardening_2026_10_02.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE addon_account_data ADD UNIQUE KEY uq_addon_account_owner_key (account_name, owner_key)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "sql/security_hardening_2026_10_02.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()\n        AND TABLE_NAME = 'user_licenses' AND NON_UNIQUE = 0 GROUP BY INDEX_NAME\n        HAVING COUNT(*) = 2 AND SUM(SUB_PART IS NOT NULL) = 0\n        AND GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) IN ('owner,type', 'type,owner')",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "sql/security_hardening_2026_10_02.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT 'Use sql/security_hardening_2026_10_02.sql after duplicate inspection and backup' AS migration",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "security_indexes.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `banking` (\n  `identifier` varchar(60) DEFAULT NULL,\n  `type` varchar(50) DEFAULT NULL,\n  `amount` int DEFAULT NULL,\n  `time` bigint(20) DEFAULT NULL,\n  `ID` int(11) NOT NULL AUTO_INCREMENT,\n  `balance` int(11) DEFAULT 0,\n  `label` varchar(255) DEFAULT NULL,\n  PRIMARY KEY (`ID`),\n  KEY `idx_banking_identifier_time` (`identifier`, `time`),\n  KEY `idx_banking_time` (`time`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_banking/banking.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SET @banking_migration := (SELECT IF(\n  (SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'banking' AND COLUMN_NAME = 'identifier') < 60,\n  'ALTER TABLE `banking` MODIFY COLUMN `identifier` VARCHAR(60) NULL',\n  'SELECT 1'))",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_banking/banking.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "PREPARE s FROM @banking_migration",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_banking/banking.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "EXECUTE s",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_banking/banking.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "DEALLOCATE PREPARE s",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_banking/banking.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SET @banking_migration := (SELECT IF(\n  EXISTS(SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'banking' AND INDEX_NAME = 'idx_banking_time'),\n  'SELECT 1',\n  'ALTER TABLE `banking` ADD INDEX `idx_banking_time` (`time`)'))",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_banking/banking.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SET @banking_migration := (SELECT IF(\n  EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'pincode'),\n  'SELECT 1',\n  'ALTER TABLE `users` ADD COLUMN `pincode` INT NULL'))",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_banking/banking.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE `user_licenses` (\n\t`id` int NOT NULL AUTO_INCREMENT,\n\t`type` varchar(60) NOT NULL,\n\t`owner` VARCHAR(60) NOT NULL,\n\n\tPRIMARY KEY (`id`),\n\tUNIQUE KEY `uq_user_licenses_owner_type` (`owner`, `type`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_license/esx_license.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `addon_account_data` (\n\t`id` INT NOT NULL AUTO_INCREMENT,\n\t`account_name` VARCHAR(100) DEFAULT NULL,\n\t`money` INT NOT NULL,\n\t`owner` VARCHAR(60) DEFAULT NULL,\n\t`owner_key` VARCHAR(60) GENERATED ALWAYS AS (COALESCE(`owner`, '')) STORED,\n\n\tPRIMARY KEY (`id`),\n\tUNIQUE KEY `uq_addon_account_owner_key` (`account_name`, `owner_key`),\n\tUNIQUE INDEX `index_addon_account_data_account_name_owner` (`account_name`, `owner`),\n\tINDEX `index_addon_account_data_account_name` (`account_name`),\n\tINDEX `index_addon_account_data_owner_account_name` (`owner`, `account_name`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_addonaccount/esx_addonaccount.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SET @addon_account_index := (SELECT IF(\n\tEXISTS(SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'addon_account_data' AND INDEX_NAME = 'index_addon_account_data_account_name_owner'),\n\t'SELECT 1',\n\t'ALTER TABLE `addon_account_data` ADD UNIQUE INDEX `index_addon_account_data_account_name_owner` (`account_name`, `owner`)'))",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_addonaccount/esx_addonaccount.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE `datastore_data` (\n\t`id` INT NOT NULL AUTO_INCREMENT,\n\t`name` VARCHAR(60) NOT NULL,\n\t`owner` VARCHAR(60),\n\t`data` LONGTEXT,\n\n\tPRIMARY KEY (`id`),\n\tUNIQUE INDEX `index_datastore_data_name_owner` (`name`, `owner`),\n\tINDEX `index_datastore_data_name` (`name`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_datastore/esx_datastore.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO `job_grades` (job_name, grade, name, label, salary, skin_male, skin_female) VALUES\n\t('police',0,'recruit','Recruit',20,'{}','{}'),\n\t('police',1,'officer','Officer',40,'{}','{}'),\n\t('police',4,'boss','Chief',100,'{}','{}')",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_policejob/esx_policejob.sql",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "CREATE TABLE `fine_types` (\n\t`id` int NOT NULL AUTO_INCREMENT,\n\t`label` varchar(255) DEFAULT NULL,\n\t`amount` int DEFAULT NULL,\n\t`category` int DEFAULT NULL,\n\n\tPRIMARY KEY (`id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_policejob/esx_policejob.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO `fine_types` (label, amount, category) VALUES\n\t('Misuse of a horn', 30, 0),\n\t('Driving without a License', 1500, 0),\n\t('Murder of an LEO', 30000, 3)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_policejob/esx_policejob.sql",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "SET @mechanic_skin_male = '{\"tshirt_1\":15,\"tshirt_2\":0,\"torso_1\":243,\"torso_2\":5,\"decals_1\":0,\"decals_2\":0,\"arms\":8,\"pants_1\":94,\"pants_2\":0,\"shoes_1\":67,\"shoes_2\":0,\"mask_1\":0,\"mask_2\":0,\"bproof_1\":0,\"bproof_2\":0,\"bags_1\":0,\"bags_2\":0,\"helmet_1\":-1,\"helmet_2\":0,\"glasses_1\":-1,\"glasses_2\":0,\"chain_1\":0,\"chain_2\":0,\"ears_1\":-1,\"ears_2\":0}'",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_mechanicjob/update_mechanic_uniforms.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE `job_grades`\nSET `skin_male` = @mechanic_skin_male\nWHERE `job_name` = 'mechanic'\n\tAND (`skin_male` IS NULL OR `skin_male` = '' OR `skin_male` = '{}')",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_mechanicjob/update_mechanic_uniforms.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE `vehicle_sold` (\n\t`client` VARCHAR(50) NOT NULL,\n\t`model` VARCHAR(50) NOT NULL,\n\t`plate` VARCHAR(50) NOT NULL,\n\t`soldby` VARCHAR(50) NOT NULL,\n\t`date` DATETIME NOT NULL,\n\n\tPRIMARY KEY (`plate`),\n\tKEY `idx_vehicle_sold_date_plate` (`date`, `plate`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_vehicleshop/esx_vehicleshop.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT `version` FROM `?` WHERE `name` = ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_garage/server/modules/migration.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `?` (\n            `name` VARCHAR(64) NOT NULL,\n            `version` VARCHAR(32) NOT NULL DEFAULT '0',\n            `applied_at` INT NOT NULL DEFAULT 0,\n            PRIMARY KEY (`name`)\n        )",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_garage/server/modules/migration.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'version'",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_garage/server/modules/migration.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `?` MODIFY COLUMN `version` VARCHAR(32) NOT NULL DEFAULT '0'",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_garage/server/modules/migration.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "INSERT INTO `?` (`name`, `version`, `applied_at`) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE `version` = ?, `applied_at` = ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_garage/server/modules/migration.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_garage/server/modules/migration.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? AND SEQ_IN_INDEX = 1 AND SUB_PART IS NULL",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_garage/server/modules/migration.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `owned_vehicles` ADD INDEX `?` ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_garage/server/modules/migration.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT COUNT(*)\n\t\tFROM INFORMATION_SCHEMA.STATISTICS\n\t\tWHERE TABLE_SCHEMA = DATABASE()\n\t\t\tAND TABLE_NAME = ?\n\t\t\tAND INDEX_NAME = ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/database.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT INDEX_NAME, SEQ_IN_INDEX, COLUMN_NAME\n\t\tFROM INFORMATION_SCHEMA.STATISTICS\n\t\tWHERE TABLE_SCHEMA = DATABASE()\n\t\t\tAND TABLE_NAME = ?\n\t\t\tAND SEQ_IN_INDEX <= ?\n\t\tORDER BY INDEX_NAME, SEQ_IN_INDEX",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/database.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE owned_vehicles ADD INDEX ? ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/database.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT COUNT(*)\n\t\tFROM INFORMATION_SCHEMA.COLUMNS\n\t\tWHERE TABLE_SCHEMA = DATABASE()\n\t\t\tAND TABLE_NAME = ?\n\t\t\tAND COLUMN_NAME = ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/database.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE users ADD COLUMN ? ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/database.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE users\n\t\t\tADD INDEX idx_adminmenu_first_last (firstname, lastname)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/database.lua",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS admin_logs (\n\t\t\tid INT AUTO_INCREMENT PRIMARY KEY,\n\t\t\tcreated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n\t\t\tactor_identifier VARCHAR(64) NOT NULL,\n\t\t\tactor_name VARCHAR(64) NULL,\n\t\t\tnamespace VARCHAR(32) NOT NULL,\n\t\t\taction VARCHAR(64) NOT NULL,\n\t\t\ttarget_identifier VARCHAR(64) NULL,\n\t\t\ttarget_name VARCHAR(64) NULL,\n\t\t\tsuccess TINYINT(1) NOT NULL DEFAULT 1,\n\t\t\terror VARCHAR(191) NULL,\n\t\t\tpayload TEXT NULL,\n\n\t\t\tINDEX idx_admin_logs_actor (actor_identifier),\n\t\t\tINDEX idx_admin_logs_target (target_identifier),\n\t\t\tINDEX idx_admin_logs_action (namespace, action),\n\t\t\tINDEX idx_admin_logs_created (created_at),\n\t\t\tINDEX idx_admin_logs_created_id (created_at, id)\n\t\t) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/database.lua",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE bans\n\t\t\tADD COLUMN banned_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/database.lua",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE bans\n\t\tSET banned_at = CURRENT_TIMESTAMP\n\t\tWHERE banned_at IS NULL\n\t\t\tOR CAST(banned_at AS CHAR) = ''\n\t\t\tOR CAST(banned_at AS CHAR) = '0000-00-00 00:00:00'",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/database.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE bans\n\t\tSET identifier = CONCAT('license:', identifier)\n\t\tWHERE identifier IS NOT NULL\n\t\t\tAND identifier <> ''\n\t\t\tAND identifier NOT LIKE '%:%'",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/database.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO admin_logs (created_at, actor_identifier, actor_name, namespace, action, target_identifier, target_name, success, error, payload) VALUES (FROM_UNIXTIME(?),?,?,?,?,?,NULL,?,NULL,?)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/logs.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT id, created_at, actor_identifier, actor_name, namespace, action,\n        target_identifier, target_name, success, error, payload\n        FROM admin_logs WHERE (\n            actor_name LIKE ?\n            OR actor_identifier LIKE ?\n            OR target_name LIKE ?\n            OR target_identifier LIKE ?\n            OR action LIKE ?\n        ) AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) AND id < ? ORDER BY id DESC LIMIT ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/logs.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "DELETE l FROM admin_logs l\n        JOIN (\n            SELECT id FROM (\n                SELECT id\n                FROM admin_logs\n                WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)\n                ORDER BY created_at ASC, id ASC\n                LIMIT ?\n            ) expired_ids\n        ) expired ON expired.id = l.id",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_adminmenu/server/logs.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "INSERT INTO user_licenses (type, owner) VALUES (?, ?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_license/server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT ENGINE FROM information_schema.TABLES\n                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_society/server/economy.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS society_moneywash_operations (\n            operation_id VARCHAR(100) NOT NULL PRIMARY KEY,\n            identifier VARCHAR(60) NOT NULL, society VARCHAR(60) NOT NULL,\n            amount INT NOT NULL, state VARCHAR(16) NOT NULL DEFAULT 'queued',\n            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n            KEY idx_moneywash_pending (state, operation_id)\n        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_society/server/economy.lua",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO society_moneywash_operations (operation_id, identifier, society, amount)\n                SELECT CONCAT('legacy:', id), identifier, society, amount FROM society_moneywash\n                WHERE NOT EXISTS (SELECT 1 FROM society_moneywash_operations p WHERE p.operation_id = CONCAT('legacy:', society_moneywash.id))",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_society/server/economy.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "DELETE w FROM society_moneywash w JOIN society_moneywash_operations p ON p.operation_id = CONCAT('legacy:', w.id)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_society/server/economy.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT identifier FROM users WHERE identifier = ? FOR UPDATE",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_society/server/economy.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO society_moneywash_operations (operation_id, identifier, society, amount)\n                SELECT ?, identifier, ?, ? FROM users WHERE identifier = ? AND accounts = ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_society/server/economy.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE users u JOIN society_moneywash_operations p ON p.identifier = u.identifier\n                SET u.accounts = ? WHERE p.operation_id = ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_society/server/economy.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE addon_account_data a JOIN society_moneywash_operations p ON p.operation_id = ?\n                                SET a.money = ? WHERE a.account_name = ? AND a.owner IS NULL AND p.state = 'queued'",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_society/server/economy.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE society_moneywash_operations p SET state = 'paid' WHERE operation_id = ? AND state = 'queued'\n                                AND EXISTS (SELECT 1 FROM addon_account_data a WHERE a.account_name = ? AND a.owner IS NULL)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_society/server/economy.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT account_name, MAX(money) AS money FROM addon_account_data WHERE owner IS NULL AND account_name IN (?) GROUP BY account_name",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_addonaccount/server/main.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "INSERT IGNORE INTO addon_account_data (account_name, money) VALUES (?, ?)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_addonaccount/server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT account_name, money FROM addon_account_data WHERE owner = ? AND account_name IN (?)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_addonaccount/server/main.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "INSERT IGNORE INTO addon_account_data (account_name, money, owner) VALUES (?, ?, ?)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_addonaccount/server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM datastore_data LEFT JOIN datastore ON datastore_data.name = datastore.name UNION SELECT * FROM datastore_data RIGHT JOIN datastore ON datastore_data.name = datastore.name",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_datastore/server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO datastore_data (name, owner, data) SELECT ?, NULL, '{}' FROM (SELECT COUNT(*) AS matches FROM datastore_data WHERE name = ? AND owner IS NULL) AS existing WHERE existing.matches = 0",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_datastore/server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO datastore_data (name, owner, data) SELECT ?, ?, '{}' FROM (SELECT COUNT(*) AS matches FROM datastore_data WHERE name = ? AND owner = ?) AS existing WHERE existing.matches = 0",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_datastore/server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO billing_payments (bill_id, operation_id, identifier, sender, target_type, target, label, amount, payment_account, state)\n                SELECT id, ?, identifier, sender, target_type, target, label, amount, ?, 'claimed' FROM billing\n                WHERE id = ? AND identifier = ? AND amount = ? AND sender = ? AND target_type = ? AND target <=> ?",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_billing/server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "DELETE FROM billing WHERE id = ? AND identifier = ? AND EXISTS\n                (SELECT 1 FROM billing_payments WHERE bill_id = ? AND operation_id = ?)",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_billing/server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO billing (id, identifier, sender, target_type, target, label, amount)\n                    SELECT bill_id, identifier, sender, target_type, target, label, amount FROM billing_payments\n                    WHERE bill_id = ? AND operation_id = ? AND state = 'claimed'",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_billing/server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE billing_payments SET state = 'applied', applied_at = CURRENT_TIMESTAMP WHERE bill_id = ? AND operation_id = ? AND state = 'claimed'",
+   "repo": "esx-framework/ESX-Legacy-Addons",
+   "file": "[esx_addons]/esx_billing/server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `ox_property` (\n  `name` VARCHAR(50) NOT NULL,\n  `owner` INT(11) UNSIGNED,\n  `group` VARCHAR(50),\n  `permissions` TEXT NOT NULL DEFAULT '[{}]',\n  INDEX `FK_ox_property_characters` (`owner`) USING BTREE,\n  INDEX `FK_ox_property_groups` (`group`) USING BTREE,\n  CONSTRAINT `FK_ox_property_characters` FOREIGN KEY (`owner`) REFERENCES `characters` (`charId`) ON UPDATE CASCADE ON DELETE SET NULL,\n  CONSTRAINT `FK_ox_property_groups` FOREIGN KEY (`group`) REFERENCES `ox_groups` (`name`) ON UPDATE CASCADE ON DELETE SET NULL\n)",
+   "repo": "overextended/ox_property",
+   "file": "ox_property.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT JSON_VALUE(data, \"$.label\") AS `label`, `group`, `stored` FROM `vehicles` WHERE `id` = ? AND `owner` = ?",
+   "repo": "overextended/ox_property",
+   "file": "server/parking.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE `vehicles` SET `data` = JSON_SET(`data`, \"$.label\", ?) WHERE `id` = ? AND `owner` = ?",
+   "repo": "overextended/ox_property",
+   "file": "server/parking.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT `model`, `stored` FROM `vehicles` WHERE `id` = ? AND (`owner` = ? OR `group` IN (?))",
+   "repo": "overextended/ox_property",
+   "file": "server/parking.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT `id`, `plate`, `owner`, `group`, `stored`, `model`, JSON_VALUE(data, \"$.label\") AS `label` FROM `vehicles` WHERE `owner` = ? OR `group` IN (?)",
+   "repo": "overextended/ox_property",
+   "file": "server/parking.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT id, name, data FROM ox_doorlock WHERE name LIKE ?",
+   "repo": "overextended/ox_property",
+   "file": "server/management.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE ox_property SET permissions = ? WHERE name = ?",
+   "repo": "overextended/ox_property",
+   "file": "server/management.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT id, model, JSON_QUERY(data, \"$.display\") as display FROM vehicles WHERE stored = \"displayed\"",
+   "repo": "overextended/ox_vehicledealer",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT id, model FROM vehicles WHERE stored = ?",
+   "repo": "overextended/ox_vehicledealer",
+   "file": "server/showroom.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT DISTINCT\n      COALESCE(access.role, gg.accountRole) AS role,\n      account.*,\n      COALESCE(c.fullName, g.label) AS ownerName\n    FROM\n      accounts account\n    LEFT JOIN characters c ON account.owner = c.charId\n    LEFT JOIN ox_groups g\n      ON account.group = g.name\n    LEFT JOIN character_groups cg\n      ON cg.charId = ?\n      AND cg.name = account.group\n    LEFT JOIN ox_group_grades gg\n      ON account.group = gg.group\n      AND cg.grade = gg.grade\n    LEFT JOIN accounts_access access\n      ON account.id = access.accountId\n      AND access.charId = ?\n    WHERE\n      account.type != 'inactive'\n      AND (\n        access.charId = ?\n        OR (\n          account.group IS NOT NULL\n          AND gg.accountRole IS NOT NULL\n        )\n      )\n    GROUP BY\n      account.id\n    ORDER BY\n      account.owner = ? DESC,\n      account.isDefault DESC",
+   "repo": "overextended/ox_banking",
+   "file": "src/server/index.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n      LOWER(DAYNAME(d.date)) as day,\n      CAST(COALESCE(SUM(CASE WHEN at.toId = ? THEN at.amount ELSE 0 END), 0) AS UNSIGNED) as income,\n      CAST(COALESCE(SUM(CASE WHEN at.fromId = ? THEN at.amount ELSE 0 END), 0) AS UNSIGNED) as expenses\n    FROM (\n      SELECT CURDATE() as date\n      UNION ALL SELECT DATE_SUB(CURDATE(), INTERVAL 1 DAY)\n      UNION ALL SELECT DATE_SUB(CURDATE(), INTERVAL 2 DAY)\n      UNION ALL SELECT DATE_SUB(CURDATE(), INTERVAL 3 DAY)\n      UNION ALL SELECT DATE_SUB(CURDATE(), INTERVAL 4 DAY)\n      UNION ALL SELECT DATE_SUB(CURDATE(), INTERVAL 5 DAY)\n      UNION ALL SELECT DATE_SUB(CURDATE(), INTERVAL 6 DAY)\n    ) d\n    LEFT JOIN accounts_transactions at ON d.date = DATE(at.date) AND (at.toId = ? OR at.fromId = ?)\n    GROUP BY d.date\n    ORDER BY d.date ASC",
+   "repo": "overextended/ox_banking",
+   "file": "src/server/index.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT id, amount, UNIX_TIMESTAMP(date) as date, toId, fromId, message,\n    CASE\n      WHEN toId = ? THEN 'inbound'\n      ELSE 'outbound'\n    END AS 'type'\n    FROM accounts_transactions\n    WHERE toId = ? OR fromId = ?\n    ORDER BY id DESC\n    LIMIT 5",
+   "repo": "overextended/ox_banking",
+   "file": "src/server/index.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT ai.id, ai.amount, UNIX_TIMESTAMP(ai.dueDate) as dueDate, UNIX_TIMESTAMP(ai.paidAt) as paidAt, CONCAT(a.label, ' - ', IFNULL(co.fullName, g.label)) AS label,\n     CASE\n        WHEN ai.payerId IS NOT NULL THEN 'paid'\n        WHEN NOW() > ai.dueDate THEN 'overdue'\n        ELSE 'unpaid'\n     END AS status\n     FROM accounts_invoices ai\n     LEFT JOIN accounts a ON a.id = ai.fromAccount\n     LEFT JOIN characters co ON (a.owner IS NOT NULL AND co.charId = a.owner)\n     LEFT JOIN ox_groups g ON (a.owner IS NULL AND g.name = a.group)\n     WHERE ai.toAccount = ?\n     ORDER BY ai.id DESC\n     LIMIT 5",
+   "repo": "overextended/ox_banking",
+   "file": "src/server/index.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT c.stateId, c.fullName AS name, gg.accountRole AS role FROM character_groups cg\n        LEFT JOIN accounts a ON cg.name = a.group\n        LEFT JOIN characters c ON c.charId = cg.charId\n        LEFT JOIN ox_group_grades gg ON (cg.name = gg.group AND cg.grade = gg.grade)\n        WHERE cg.name = ? AND MATCH(c.fullName) AGAINST (? IN BOOLEAN MODE)\n        ORDER BY role DESC\n        LIMIT 12\n        OFFSET ?",
+   "repo": "overextended/ox_banking",
+   "file": "src/server/index.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT COUNT(*) FROM `accounts_access` aa LEFT JOIN characters c ON c.charId = aa.charId WHERE accountId = ? AND MATCH(c.fullName) AGAINST (? IN BOOLEAN MODE)",
+   "repo": "overextended/ox_banking",
+   "file": "src/server/index.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT c.stateId, a.role, c.fullName AS `name` FROM `accounts_access` a\n      LEFT JOIN `characters` c ON c.charId = a.charId\n      WHERE a.accountId = ?\n      AND MATCH(c.fullName) AGAINST (? IN BOOLEAN MODE)\n      ORDER BY a.role DESC\n      LIMIT 12\n      OFFSET ?",
+   "repo": "overextended/ox_banking",
+   "file": "src/server/index.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "INSERT INTO `accounts_access` (`accountId`, `charId`, `role`) VALUES (?, ?, 'owner') ON DUPLICATE KEY UPDATE `role` = 'owner'",
+   "repo": "overextended/ox_banking",
+   "file": "src/server/index.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n            at.id,\n            at.fromId,\n            at.toId,\n            at.message,\n            at.amount,\n            CONCAT(fa.id, ' - ', IFNULL(cf.fullName, ogf.label)) AS fromAccountLabel,\n            CONCAT(ta.id, ' - ', IFNULL(ct.fullName, ogt.label)) AS toAccountLabel,\n            UNIX_TIMESTAMP(at.date) AS date,\n            c.fullName AS name,\n            CASE\n              WHEN at.toId = ? THEN 'inbound'\n              ELSE 'outbound'\n            END AS 'type',\n            CASE\n                WHEN at.toId = ? THEN at.toBalance\n                ELSE at.fromBalance\n            END AS newBalance\n          FROM accounts_transactions at\n          LEFT JOIN characters c ON c.charId = at.actorId\n          LEFT JOIN accounts ta ON ta.id = at.toId\n          LEFT JOIN accounts fa ON fa.id = at.fromId\n          LEFT JOIN characters ct ON (ta.owner IS NOT NULL AND at.fromId = ? AND ct.charId = ta.owner)\n          LEFT JOIN characters cf ON (fa.owner IS NOT NULL AND at.toId = ? AND cf.charId = fa.owner)\n          LEFT JOIN ox_groups ogt ON (ta.owner IS NULL AND at.fromId = ? AND ogt.name = ta.group)\n          LEFT JOIN ox_groups ogf ON (fa.owner IS NULL AND at.toId = ? AND ogf.name = fa.group)\n          WHERE (at.fromId = ? OR at.toId = ?) AND (MATCH(c.fullName) AGAINST (? IN BOOLEAN MODE) OR MATCH(at.message) AGAINST (? IN BOOLEAN MODE))  AND (at.fromId = ?) AND (DATE(at.date) BETWEEN ? AND ?)\n          ORDER BY at.id DESC\n          LIMIT 6\n          OFFSET ?",
+   "repo": "overextended/ox_banking",
+   "file": "src/server/index.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT\n            ai.id,\n            c.fullName as sentBy,\n            CONCAT(a.id, ' - ', IFNULL(co.fullName, g.label)) AS label,\n            ai.amount,\n            ai.message,\n            UNIX_TIMESTAMP(ai.sentAt) AS sentAt,\n            UNIX_TIMESTAMP(ai.dueDate) as dueDate,\n            'unpaid' AS type\n          FROM accounts_invoices ai\n          LEFT JOIN accounts a ON ai.fromAccount = a.id\n        LEFT JOIN characters c ON ai.actorId = c.charId\n        LEFT JOIN characters co ON (a.owner IS NOT NULL AND co.charId = a.owner)\n        LEFT JOIN ox_groups g ON (a.owner IS NULL AND g.name = a.group)\n      WHERE (ai.toAccount = ? AND ai.paidAt IS NULL) AND (MATCH(a.label) AGAINST (? IN BOOLEAN MODE) OR MATCH(ai.message) AGAINST (? IN BOOLEAN MODE)) AND (DATE(ai.dueDate) BETWEEN ? AND ?)\n    ORDER BY ai.id DESC\n    LIMIT 6\n    OFFSET ?",
+   "repo": "overextended/ox_banking",
+   "file": "src/server/index.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "CREATE TABLE\n    IF NOT EXISTS `ox_mdt_offenses` (\n        `label` varchar(100) NOT NULL,\n        `type` ENUM('misdemeanor', 'felony', 'infraction') NOT NULL,\n        `category` ENUM(\n            'OFFENSES AGAINST PERSONS',\n            'OFFENSES INVOLVING THEFT',\n            'OFFENSES INVOLVING FRAUD',\n            'OFFENSES INVOLVING DAMAGE TO PROPERTY',\n            'OFFENSES AGAINST PUBLIC ADMINISTRATION',\n            'OFFENSES AGAINST PUBLIC ORDER',\n            'OFFENSES AGAINST HEALTH AND MORALS',\n            'OFFENSES AGAINST PUBLIC SAFETY',\n            'OFFENSES INVOLVING THE OPERATION OF A VEHICLE',\n            'OFFENSES INVOLVING THE WELL-BEING OF WILDLIFE') NOT NULL,\n        `description` varchar(250) NOT NULL,\n        `time` int (10) unsigned NOT NULL DEFAULT 0,\n        `fine` int (10) unsigned NOT NULL DEFAULT 0,\n        PRIMARY KEY (`label`) USING BTREE\n    )",
+   "repo": "overextended/ox_mdt",
+   "file": "sql/install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE\n    IF NOT EXISTS `ox_mdt_reports` (\n        `id` int (10) unsigned NOT NULL AUTO_INCREMENT,\n        `title` varchar(50) NOT NULL,\n        `description` text DEFAULT NULL,\n        `author` varchar(50) DEFAULT NULL,\n        `date` datetime DEFAULT curtime(),\n        PRIMARY KEY (`id`) USING BTREE,\n        FULLTEXT INDEX `title_desc_author` (`title`, `description`, `author`)\n    )",
+   "repo": "overextended/ox_mdt",
+   "file": "sql/install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE\n    `ox_mdt_reports_criminals` (\n        `reportid` INT (10) UNSIGNED NOT NULL,\n        `stateid` VARCHAR(7) NOT NULL,\n        `reduction` TINYINT (3) UNSIGNED NULL DEFAULT NULL,\n        `warrantExpiry` DATE NULL DEFAULT NULL,\n        `processed` TINYINT (1) NULL DEFAULT NULL,\n        `pleadedGuilty` TINYINT (1) NULL DEFAULT NULL,\n        INDEX `reportid` (`reportid`) USING BTREE,\n        INDEX `FK_ox_mdt_reports_reports_characters` (`stateid`) USING BTREE,\n        CONSTRAINT `ox_mdt_reports_criminals_ibfk_1` FOREIGN KEY (`stateid`) REFERENCES `characters` (`stateid`) ON UPDATE CASCADE ON DELETE CASCADE,\n        CONSTRAINT `ox_mdt_reports_criminals_ibfk_2` FOREIGN KEY (`reportid`) REFERENCES `ox_mdt_reports` (`id`) ON UPDATE CASCADE ON DELETE CASCADE\n    )",
+   "repo": "overextended/ox_mdt",
+   "file": "sql/install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE\n    IF NOT EXISTS `ox_mdt_profiles` (\n    `id` INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,\n    `stateid`  VARCHAR(7)  NOT NULL,\n    `image`    VARCHAR(255) NULL,\n    `notes`    TEXT        NULL,\n    `callsign` VARCHAR(10) NULL,\n    CONSTRAINT `ox_mdt_profiles_pk` UNIQUE (`callsign`),\n    CONSTRAINT `ox_mdt_profiles_pk2` UNIQUE (`stateid`),\n    CONSTRAINT `ox_mdt_profiles_characters_stateId_fk`\n        FOREIGN KEY (`stateid`) REFERENCES `characters` (`stateId`)\n            ON UPDATE CASCADE ON DELETE CASCADE\n)",
+   "repo": "overextended/ox_mdt",
+   "file": "sql/install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `characters` ADD FULLTEXT INDEX `idx_mdt_search` (`stateId`, `firstName`, `lastName`)",
+   "repo": "overextended/ox_mdt",
+   "file": "sql/install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `vehicles` ADD FULLTEXT INDEX `idx_mdt_search` (`plate`)",
+   "repo": "overextended/ox_mdt",
+   "file": "sql/install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n        ox_licenses.label,\n        JSON_VALUE(character_licenses.data, \"$.issued\") AS `issued`\n\n      FROM character_licenses\n      LEFT JOIN ox_licenses ON ox_licenses.name = character_licenses.name\n\n      WHERE character_licenses.charId = ?",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n        firstName,\n        lastName,\n        DATE_FORMAT(dateofbirth, \"%Y-%m-%d\") as dob,\n        stateId\n      FROM characters\n      WHERE MATCH (stateId, firstName, lastName) AGAINST (? IN BOOLEAN MODE)",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n        a.id,\n        a.contents,\n        a.creator AS stateId,\n        b.firstName,\n        b.lastName,\n        c.image,\n        c.callSign,\n        DATE_FORMAT(a.createdAt, \"%Y-%m-%d %T\") AS createdAt\n      FROM `ox_mdt_announcements` a\n      LEFT JOIN `characters` b ON b.stateId = a.creator\n      LEFT JOIN `ox_mdt_profiles` c ON c.stateId = a.creator\n\n      ORDER BY id DESC LIMIT ? OFFSET ?",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n        a.id,\n        a.creator AS stateId,\n        a.contents,\n        b.callSign,\n        b.image,\n        c.firstName,\n        c.lastName,\n        JSON_ARRAYAGG(d.image) AS images,\n        DATE_FORMAT(a.createdAt, \"%Y-%m-%d %T\") AS createdAt\n      FROM\n        `ox_mdt_bolos` a\n      LEFT JOIN\n        `ox_mdt_profiles` b\n      ON\n        b.stateId = a.creator\n      LEFT JOIN\n        `characters` c\n      ON\n        c.stateId = b.stateId\n      LEFT JOIN\n        `ox_mdt_bolos_images` d\n      ON\n        d.boloId = a.id\n      GROUP BY `id` ORDER BY `id` DESC LIMIT ? OFFSET ?",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE IGNORE `ox_mdt_reports_criminals` SET `warrantExpiry` = ?, `processed` = ?, `pleadedGuilty` = ? WHERE `reportid` = ? AND `stateId` = ?",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO ox_mdt_profiles (stateid, image, notes)\n      VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE image = ?",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO ox_mdt_profiles (stateId, image, notes, callSign)\n      VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE callSign = ?",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n          charge AS label,\n          SUM(count) AS count\n        FROM ox_mdt_reports_charges\n        WHERE charge IS NOT NULL AND stateId = ?\n        GROUP BY charge",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n        p.id,\n        c.firstName,\n        c.lastName,\n        c.stateId,\n        cg.name AS `group`,\n        cg.grade,\n        p.image,\n        p.callSign\n      FROM\n        character_groups cg\n      LEFT JOIN\n        characters c ON cg.charId = c.charId\n      LEFT JOIN\n        ox_mdt_profiles p ON c.stateId = p.stateId\n      WHERE\n        cg.name IN (?)\n        AND MATCH (c.stateId, c.firstName, c.lastName) AGAINST (? IN BOOLEAN MODE)\n      ORDER BY\n        p.callSign ASC",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT `id`, `title`, `author`, DATE_FORMAT(`date`, \"%Y-%m-%d %T\") as date FROM `ox_mdt_reports` WHERE MATCH (`title`, `author`, `description`) AGAINST (? IN BOOLEAN MODE) ORDER BY `id` DESC LIMIT 10 OFFSET ?",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT DISTINCT\n          criminal.stateId,\n          characters.firstName,\n          characters.lastName,\n          characters.dateOfBirth AS dob,\n          criminal.reduction,\n          DATE_FORMAT(criminal.warrantExpiry, \"%Y-%m-%d\") AS warrantExpiry,\n          criminal.processed,\n          criminal.pleadedGuilty\n        FROM\n          ox_mdt_reports_criminals criminal\n        LEFT JOIN\n          characters ON characters.stateId = criminal.stateId\n        WHERE\n          reportid = ?",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n        c.stateId,\n        c.firstName,\n        c.lastName,\n        DATE_FORMAT(c.dateofbirth, \"%Y-%m-%d\") AS dob,\n        p.image\n      FROM\n        characters c\n      LEFT JOIN ox_mdt_profiles p ON p.stateid = c.stateid\n      LEFT JOIN vehicles v ON v.owner = c.charId\n      WHERE\n        MATCH (c.stateId, c.firstName, c.lastName) AGAINST (? IN BOOLEAN MODE)\n        OR MATCH (v.plate) AGAINST (? IN BOOLEAN MODE)\n      GROUP BY\n        c.charId\n      ORDER BY\n        c.stateId DESC\n      LIMIT 10 OFFSET ?",
+   "repo": "overextended/ox_mdt",
+   "file": "src/server/framework/db.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT 1",
+   "repo": "overextended/oxmysql",
+   "file": "tests/unit/lib/MySQL.test.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `properties` (\n    `id` INT NOT NULL AUTO_INCREMENT,\n    `property_name` VARCHAR(255) NOT NULL, /* simple label that can be used to identify which property it is. I.e. used for spawn list */\n    `coords` JSON NOT NULL,\n    `price` INT NOT NULL DEFAULT 0,\n    `owner` VARCHAR(50) COLLATE utf8mb4_unicode_ci, /* citizen ID of the owner */\n    `interior` VARCHAR(255) NOT NULL, /* the interior name, can range from IPL name to a shell hash that needs to spawn in */\n    `keyholders` JSON NOT NULL DEFAULT (JSON_OBJECT()), /* citizen IDs of other people that have access */\n    `rent_interval` INT DEFAULT NULL, /* the rent interval in hours */\n    `interact_options` JSON NOT NULL DEFAULT (JSON_OBJECT()), /* clothing and exit points */\n    `stash_options` JSON NOT NULL DEFAULT (JSON_OBJECT()), /* multiple stash support */\n    FOREIGN KEY (owner) REFERENCES `players` (`citizenid`),\n    PRIMARY KEY (id)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+   "repo": "Qbox-project/qbx_properties",
+   "file": "property.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `properties_decorations` (\n    `id` BIGINT NOT NULL AUTO_INCREMENT,\n    `property_id` INT NOT NULL,\n    `model` VARCHAR(255) NOT NULL,\n    `coords` JSON NOT NULL,\n    `rotation` JSON NOT NULL,\n    FOREIGN KEY (property_id) REFERENCES `properties` (`id`) ON DELETE CASCADE,\n    PRIMARY KEY (id)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+   "repo": "Qbox-project/qbx_properties",
+   "file": "decorations.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `properties` ADD COLUMN IF NOT EXISTS `garage` JSON DEFAULT NULL AFTER `stash_options`",
+   "repo": "Qbox-project/qbx_properties",
+   "file": "property_garages.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT `id` FROM `properties` WHERE `property_name` = ? AND `owner` = ?",
+   "repo": "Qbox-project/qbx_properties",
+   "file": "server/property.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE properties SET owner = ?, keyholders = JSON_OBJECT() WHERE id = ?",
+   "repo": "Qbox-project/qbx_properties",
+   "file": "server/property.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `vehicle_financing` (\n    `vehicleId` int(11) NOT NULL,\n    `balance` int(11) DEFAULT NULL,\n    `paymentamount` int(11) DEFAULT NULL,\n    `paymentsleft` int(11) DEFAULT NULL,\n    `financetime` int(11) DEFAULT NULL,\n    PRIMARY KEY (`vehicleId`),\n    FOREIGN KEY `vehicleId` (`vehicleId`) REFERENCES `player_vehicles` (`id`) ON DELETE CASCADE ON UPDATE CASCADE\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+   "repo": "Qbox-project/qbx_vehicleshop",
+   "file": "vehshop.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `vehicle_financing` (\n    `vehicleId` int(11) NOT NULL,\n    `balance` int(11) DEFAULT NULL,\n    `paymentamount` int(11) DEFAULT NULL,\n    `paymentsleft` tinyint(4) DEFAULT NULL,\n    `financetime` int(11) DEFAULT NULL,\n    PRIMARY KEY (`vehicleId`),\n    FOREIGN KEY `vehicleId` (`vehicleId`) REFERENCES `player_vehicles` (`id`) ON DELETE CASCADE ON UPDATE CASCADE\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+   "repo": "Qbox-project/qbx_vehicleshop",
+   "file": "migrate.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO vehicle_financing (vehicleId, balance, paymentamount, paymentsleft, financetime)\nSELECT id, balance, paymentamount, paymentsleft, financetime\nFROM player_vehicles\nWHERE balance > 0 OR paymentamount > 0 OR paymentsleft > 0 OR financetime > 0",
+   "repo": "Qbox-project/qbx_vehicleshop",
+   "file": "migrate.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE player_vehicles\nDROP COLUMN balance,\nDROP COLUMN paymentamount,\nDROP COLUMN paymentsleft,\nDROP COLUMN financetime",
+   "repo": "Qbox-project/qbx_vehicleshop",
+   "file": "migrate.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO vehicle_financing (vehicleId, balance, paymentamount, paymentsleft, financetime) VALUES (?, ?, ?, ?, ?)",
+   "repo": "Qbox-project/qbx_vehicleshop",
+   "file": "server/storage.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE vehicle_financing AS vf INNER JOIN player_vehicles AS pv ON vf.vehicleId = pv.id SET vf.balance = ?, vf.paymentamount = ?, vf.paymentsleft = ?, vf.financetime = ? WHERE pv.id = ?",
+   "repo": "Qbox-project/qbx_vehicleshop",
+   "file": "server/storage.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `weed_plants` (\n  `id` int(11) NOT NULL AUTO_INCREMENT,\n  `property` varchar(30) NULL,\n  `stage` tinyint NOT NULL DEFAULT 1,\n  `sort` varchar(30) NOT NULL,\n  `gender` enum('male', 'female') NOT NULL,\n  `food` tinyint NOT NULL DEFAULT 100,\n  `health` tinyint NOT NULL DEFAULT 100,\n  `stageProgress` tinyint NOT NULL DEFAULT 0,\n  `coords` tinytext NOT NULL,\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4",
+   "repo": "Qbox-project/qbx_weed",
+   "file": "sql/qbx_weed.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `house_plants` RENAME TO `weed_plants`",
+   "repo": "Qbox-project/qbx_weed",
+   "file": "sql/migration.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "DROP INDEX `building` ON `weed_plants`",
+   "repo": "Qbox-project/qbx_weed",
+   "file": "sql/migration.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `weed_plants` CHANGE COLUMN `building` `property` varchar(30) NULL",
+   "repo": "Qbox-project/qbx_weed",
+   "file": "sql/migration.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `weed_plants` CHANGE COLUMN `stage` `stage` tinyint NOT NULL DEFAULT 1",
+   "repo": "Qbox-project/qbx_weed",
+   "file": "sql/migration.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `weed_plants` CHANGE COLUMN `progress` `stageProgress` tinyint NOT NULL DEFAULT 0",
+   "repo": "Qbox-project/qbx_weed",
+   "file": "sql/migration.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM weed_plants WHERE id = ?",
+   "repo": "Qbox-project/qbx_weed",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `dealers` (\n  `id` int(11) NOT NULL AUTO_INCREMENT,\n  `name` varchar(50) NOT NULL DEFAULT '0',\n  `coords` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,\n  `time` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL,\n  `createdby` varchar(50) NOT NULL DEFAULT '0',\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+   "repo": "Qbox-project/qbx_drugs",
+   "file": "qbx_drugs.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT count(*) FROM player_vehicles WHERE plate = ?",
+   "repo": "Qbox-project/qbx_police",
+   "file": "server/storage.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT position FROM players WHERE citizenid = ?",
+   "repo": "Qbox-project/qbx_spawn",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT 1 FROM player_vehicles WHERE plate = ?",
+   "repo": "Qbox-project/qbx_scrapyard",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT count(*) from player_vehicles WHERE plate = ?",
+   "repo": "Qbox-project/qbx_mechanicjob",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE players SET phone_number = ? WHERE citizenid = ?",
+   "repo": "Qbox-project/qbx_npwd",
+   "file": "server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO player_mails (`citizenid`, `sender`, `subject`, `message`, `mailid`, `read`, `button`) VALUES (?, ?, ?, ?, ?, ?, ?)",
+   "repo": "Qbox-project/npwd_qbx_mail",
+   "file": "server/server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT TABLE_NAME AS tableName, ENGINE AS engine, TABLE_COLLATION AS collation\n       FROM INFORMATION_SCHEMA.TABLES\n       WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME IN (?)",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/introspect.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT TABLE_NAME AS tableName, COLUMN_NAME AS columnName, DATA_TYPE AS dataType,\n              COLUMN_TYPE AS columnType, IS_NULLABLE AS isNullable, COLUMN_DEFAULT AS defaultValue,\n              EXTRA AS extra, CHARACTER_MAXIMUM_LENGTH AS maximumLength,\n              NUMERIC_PRECISION AS numericPrecision, NUMERIC_SCALE AS numericScale,\n              COLUMN_COMMENT AS comment\n       FROM INFORMATION_SCHEMA.COLUMNS\n       WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (?)\n       ORDER BY TABLE_NAME, ORDINAL_POSITION",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/introspect.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT TABLE_NAME AS tableName, INDEX_NAME AS indexName, COLUMN_NAME AS columnName,\n              NON_UNIQUE AS nonUnique, SEQ_IN_INDEX AS sequenceNumber, INDEX_TYPE AS indexType\n       FROM INFORMATION_SCHEMA.STATISTICS\n       WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (?)\n       ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/introspect.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT k.TABLE_NAME AS tableName, k.CONSTRAINT_NAME AS constraintName,\n              k.COLUMN_NAME AS columnName, k.REFERENCED_TABLE_NAME AS referencedTable,\n              k.REFERENCED_COLUMN_NAME AS referencedColumn, k.ORDINAL_POSITION AS sequenceNumber,\n              r.DELETE_RULE AS deleteRule, r.UPDATE_RULE AS updateRule\n       FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE k\n       JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS r\n         ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA\n        AND r.TABLE_NAME = k.TABLE_NAME\n        AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME\n       WHERE k.TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_NAME IS NOT NULL AND k.TABLE_NAME IN (?)\n       ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/introspect.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES\n           WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'qbxsql_schema_registry'",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/manager.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT version FROM qbxsql_schema_registry WHERE resource_name = 'legacy_housing'",
+   "repo": "Qbox-project/qbxsql",
+   "file": "tests/integration/schema-manager.test.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT id FROM information_schema.processlist WHERE db = ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "tests/integration/mysql.test.ts",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO qbxsql_schema_registry (resource_name, name, checksum, version, status, error, started_at, applied_at)\n       VALUES (?, ?, ?, ?, 'running', NULL, CURRENT_TIMESTAMP(6), NULL)\n       ON DUPLICATE KEY UPDATE name = VALUES(name), checksum = VALUES(checksum),\n         status = 'running', error = NULL, started_at = CURRENT_TIMESTAMP(6), applied_at = NULL",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/manager.ts",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "INSERT INTO qbxsql_benchmark_values (id, value, payload) VALUES (?, 0, ?) ON DUPLICATE KEY UPDATE payload = VALUES(payload)",
+   "repo": "Qbox-project/qbxsql",
+   "file": "tests/load/qbxsql_benchmark/server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "RENAME TABLE ? TO ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? RENAME COLUMN ? TO ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "DROP TABLE IF EXISTS ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? DROP COLUMN ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? ADD COLUMN ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? MODIFY COLUMN ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? DROP INDEX ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? DROP FOREIGN KEY ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? DROP PRIMARY KEY, ADD PRIMARY KEY (?)",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? DROP PRIMARY KEY",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? ADD CONSTRAINT ? FOREIGN KEY (?) REFERENCES ? (?) ON DELETE ? ON UPDATE ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? ADD UNIQUE KEY ? (?)",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? ADD FULLTEXT KEY ? (?)",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? ADD COLUMN ?, ALGORITHM=INSTANT",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? DROP COLUMN ?, ALGORITHM=INPLACE, LOCK=NONE",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? MODIFY COLUMN ?, ALGORITHM=INPLACE, LOCK=NONE",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/planner.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? DROP INDEX ?, ADD ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/planner.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? DROP FOREIGN KEY ?, ADD CONSTRAINT ? FOREIGN KEY (?) REFERENCES ? (?)",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/planner.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? ENGINE=?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/planner.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE ? CONVERT TO CHARACTER SET ? COLLATE ?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/planner.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "CREATE TABLE ? (\n  ?\n) ENGINE=? DEFAULT CHARSET=? COLLATE=?",
+   "repo": "Qbox-project/qbxsql",
+   "file": "src/schema/sql.ts",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "INSERT INTO fxsql_values (name, enabled, payload) VALUES (@name, @enabled, @payload)",
+   "repo": "Qbox-project/qbxsql",
+   "file": "tests/fxserver/qbxsql_runtime_test/server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT @value AS value",
+   "repo": "Qbox-project/qbxsql",
+   "file": "tests/fxserver/qbxsql_runtime_test/server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO fxsql_values (name, enabled) VALUES (@name, true)",
+   "repo": "Qbox-project/qbxsql",
+   "file": "tests/fxserver/qbxsql_runtime_test/server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE fxsql_values SET enabled = false WHERE name = @name",
+   "repo": "Qbox-project/qbxsql",
+   "file": "tests/fxserver/qbxsql_runtime_test/server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT ? AS value UNION ALL SELECT ? AS value",
+   "repo": "Qbox-project/qbxsql",
+   "file": "tests/fxserver/qbxsql_runtime_test/server.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM Information_Schema.Columns\n            WHERE Table_Name = 'users' AND COLUMN_NAME = 'char' AND DATA_TYPE = 'int'",
+   "repo": "VORPCORE/vorp_core",
+   "file": "server/services/dbupdater/dbupdater.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `users` MODIFY COLUMN `char` INT DEFAULT 5;",
+   "repo": "VORPCORE/vorp_core",
+   "file": "server/services/dbupdater/dbupdater.lua",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT VERSION();",
+   "repo": "VORPCORE/vorp_core",
+   "file": "server/services/dbupdater/dbupdater.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT COUNT(*) FROM information_schema.statistics\n        WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `?` ADD INDEX ? ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE `?` ADD UNIQUE INDEX ? ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT COUNT(*) FROM information_schema.tables\n        WHERE table_schema = DATABASE() AND table_name = ? AND table_type = 'BASE TABLE'",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "query",
+   "normalised": false,
+   "alsoIn": [
+    {
+     "repo": "Samuels-Development/sd-phone",
+     "file": "server/migrate/store.lua"
+    }
+   ]
+  },
+  {
+   "sql": "SELECT COLUMN_NAME AS name FROM information_schema.columns\n        WHERE table_schema = DATABASE() AND table_name = ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "query",
+   "normalised": false,
+   "alsoIn": [
+    {
+     "repo": "Samuels-Development/sd-phone",
+     "file": "bridge/server/records.lua"
+    }
+   ]
+  },
+  {
+   "sql": "ALTER TABLE `?` ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.columns\n        WHERE table_schema = DATABASE() AND table_name = ? AND COLUMN_NAME = ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `?` MODIFY COLUMN ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS\n        WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ?\n          AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY'",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "DELETE c FROM `?` c\n        LEFT JOIN `?` p ON p.`?` = c.`?`\n        WHERE c.`?` IS NOT NULL AND p.`?` IS NULL",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "ALTER TABLE `?` ADD CONSTRAINT `?` FOREIGN KEY (`?`)\n        REFERENCES `?`(`?`) ON DELETE CASCADE ON UPDATE CASCADE",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS phone_migrations (\n            name       VARCHAR(64) NOT NULL,\n            applied_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,\n            stats      JSON        NULL,\n            PRIMARY KEY (name)\n        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "ddl",
+   "normalised": false,
+   "alsoIn": [
+    {
+     "repo": "Samuels-Development/sd-phone",
+     "file": "server/migrate/store.lua"
+    }
+   ]
+  },
+  {
+   "sql": "INSERT IGNORE INTO phone_migrations (name, stats) VALUES (?, ?)",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "query",
+   "normalised": false,
+   "alsoIn": [
+    {
+     "repo": "Samuels-Development/sd-phone",
+     "file": "server/migrate/store.lua"
+    }
+   ]
+  },
+  {
+   "sql": "SELECT COUNT(*) FROM information_schema.columns\n        WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "query",
+   "normalised": false,
+   "alsoIn": [
+    {
+     "repo": "Samuels-Development/sd-phone",
+     "file": "server/migrate/store.lua"
+    }
+   ]
+  },
+  {
+   "sql": "RENAME TABLE `?` TO `?`",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT table_collation FROM information_schema.tables\n        WHERE table_schema = DATABASE() AND table_name = ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `?` CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/util.lua",
+   "kind": "ddl",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT c.id, c.caller, c.callee, c.duration, c.answered, UNIX_TIMESTAMP(c.timestamp) AS ts\n        FROM ? c\n        WHERE EXISTS (SELECT 1 FROM `?` o WHERE o.number = c.caller OR o.number = c.callee)",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/migrate/store.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT id, is_group, name, UNIX_TIMESTAMP(last_message_timestamp) AS created_at\n        FROM ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/migrate/store.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT m.id, m.channel_id, m.sender, m.content, m.attachments,\n               UNIX_TIMESTAMP(m.timestamp) AS ts\n        FROM ? m\n        WHERE m.channel_id IN (\n            SELECT mm.channel_id FROM ? mm JOIN `?` o ON o.number = mm.phone_number\n        )\n        ORDER BY m.channel_id ASC, m.timestamp ASC",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/migrate/store.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT p.id, p.phone_number, p.link, p.is_favourite, UNIX_TIMESTAMP(p.`timestamp`) AS created_ts\n        FROM ? p JOIN `?` o ON o.number = p.phone_number",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/migrate/store.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT w.id, w.phone_number, w.amount, w.company, UNIX_TIMESTAMP(w.`timestamp`) AS ts\n        FROM ? w JOIN `?` o ON o.number = w.phone_number",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/migrate/store.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "INSERT INTO phone_settings (citizenid, phone_number, passcode) VALUES (?, ?, ?)\n        ON DUPLICATE KEY UPDATE\n            phone_number = IF(phone_number IS NULL OR phone_number = '', VALUES(phone_number), phone_number),\n            passcode     = IF(passcode IS NULL OR passcode = '', VALUES(passcode), passcode)",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/migrate/store.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO phone_sim_cards (number, identity, owner_cid) VALUES ? ON DUPLICATE KEY UPDATE number = number",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/migrate/store.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "INSERT INTO phone_settings\n            (citizenid, wallpaper, blur_lock, blur_home, theme, brightness, phone_scale, hour24,\n             ringtone, notification_tone, ringtone_volume, call_volume, setup_done)\n        VALUES\n    ? ON DUPLICATE KEY UPDATE\n            wallpaper         = IF(wallpaper IS NULL, VALUES(wallpaper), wallpaper),\n            blur_lock         = IF(blur_lock IS NULL, VALUES(blur_lock), blur_lock),\n            blur_home         = IF(blur_home IS NULL, VALUES(blur_home), blur_home),\n            theme             = IF(theme IS NULL, VALUES(theme), theme),\n            brightness        = IF(brightness IS NULL, VALUES(brightness), brightness),\n            phone_scale       = IF(phone_scale IS NULL, VALUES(phone_scale), phone_scale),\n            hour24            = IF(hour24 IS NULL, VALUES(hour24), hour24),\n            ringtone          = IF(ringtone IS NULL, VALUES(ringtone), ringtone),\n            notification_tone = IF(notification_tone IS NULL, VALUES(notification_tone), notification_tone),\n            ringtone_volume   = IF(ringtone_volume IS NULL, VALUES(ringtone_volume), ringtone_volume),\n            call_volume       = IF(call_volume IS NULL, VALUES(call_volume), call_volume),\n            setup_done        = IF(setup_done IS NULL, VALUES(setup_done), setup_done)",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/migrate/store.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT citizenid, phone_number FROM phone_settings WHERE phone_number IN (?)",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/mdt/phone.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT COUNT(*) FROM (SELECT 1 FROM phone_contacts WHERE citizenid = ? LIMIT ?) c",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/mdt/phone.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT name, phone, email, favorite, created_at\n        FROM phone_contacts WHERE citizenid = ?\n        ORDER BY favorite DESC, name ASC LIMIT ? OFFSET ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/mdt/phone.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT conversation,\n               COUNT(*)            AS messages,\n               MAX(created_at)     AS last_at,\n               SUBSTRING_INDEX(GROUP_CONCAT(body ORDER BY created_at DESC SEPARATOR '\\n'), '\\n', 1) AS last_body\n        FROM phone_messages WHERE citizenid = ?\n        GROUP BY conversation\n        ORDER BY last_at DESC LIMIT ? OFFSET ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/mdt/phone.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "WHERE citizenid LIKE ?\n                   OR JSON_UNQUOTE(JSON_EXTRACT(charinfo, '$.firstname')) COLLATE utf8mb4_general_ci LIKE ?\n                   OR JSON_UNQUOTE(JSON_EXTRACT(charinfo, '$.lastname'))  COLLATE utf8mb4_general_ci LIKE ?\n                   OR JSON_UNQUOTE(JSON_EXTRACT(charinfo, '$.phone'))     COLLATE utf8mb4_general_ci LIKE ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "bridge/server/records.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT charid, firstname, lastname FROM nd_characters WHERE charid IN (?)",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "bridge/server/records.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "UPDATE players SET money = JSON_SET(money, '$.bank', JSON_EXTRACT(money, '$.bank') + ?) WHERE citizenid = ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "bridge/server/banking.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE users SET accounts = JSON_SET(accounts, '$.bank', JSON_EXTRACT(accounts, '$.bank') + ?) WHERE identifier = ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "bridge/server/banking.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "(SELECT id, from_handle, to_handle, body, kind, meta, reactions, read_flag,\n                created_at, UNIX_TIMESTAMP(created_at) AS created_s\n         FROM phone_birdy_dms WHERE from_handle = ? ORDER BY created_at DESC LIMIT 2500)\n        UNION ALL\n        (SELECT id, from_handle, to_handle, body, kind, meta, reactions, read_flag,\n                created_at, UNIX_TIMESTAMP(created_at) AS created_s\n         FROM phone_birdy_dms WHERE to_handle = ? ORDER BY created_at DESC LIMIT 2500)",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/birdy/store.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM (\n            SELECT id, from_handle, to_handle, body, kind, meta, reactions,\n                   created_at, UNIX_TIMESTAMP(created_at) AS created_s\n            FROM phone_birdy_dms\n            WHERE (from_handle = ? AND to_handle = ?) OR (from_handle = ? AND to_handle = ?)\n            ORDER BY created_at DESC LIMIT 500\n        ) recent ORDER BY created_at ASC",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/birdy/store.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS phone_photos (\n            id         VARCHAR(16)  NOT NULL,\n            citizenid  VARCHAR(64)  NOT NULL,\n            url        VARCHAR(512) NOT NULL,\n            trusted    TINYINT(1)   NOT NULL DEFAULT 0,\n            favorite   TINYINT(1)   NOT NULL DEFAULT 0,\n            created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,\n            PRIMARY KEY (id),\n            INDEX idx_phone_photos_owner (citizenid, created_at)\n        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/photos/store.lua",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT 1 FROM information_schema.columns\n        WHERE table_schema = DATABASE() AND table_name = 'phone_photos' AND column_name = 'trusted'",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/photos/store.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "UPDATE phone_photos SET trusted = 1 WHERE trusted = 0 AND id REGEXP ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/photos/store.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT id, url, favorite, created_at, UNIX_TIMESTAMP(created_at) AS ts\n        FROM phone_photos\n        WHERE citizenid = ? AND url REGEXP ? AND (created_at < FROM_UNIXTIME(?) OR (created_at = FROM_UNIXTIME(?) AND id < ?))\n        ORDER BY created_at DESC, id DESC\n        LIMIT ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/photos/store.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT COUNT(*) AS total,\n               SUM(favorite = 1) AS favorites,\n               SUM(url REGEXP ?) AS videos\n        FROM phone_photos\n        WHERE citizenid = ?",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/photos/store.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT IGNORE INTO phone_photo_album_items (album_id, photo_id)\n            SELECT ?, ?\n            WHERE EXISTS (SELECT 1 FROM phone_photos WHERE id = ? AND citizenid = ?)",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/photos/store.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "DELETE FROM phone_photo_album_items WHERE photo_id IN (?)",
+   "repo": "Samuels-Development/sd-phone",
+   "file": "server/photos/store.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT ENGINE AS engine, TABLE_COLLATION AS table_collation\n    FROM information_schema.tables\n    WHERE table_schema = DATABASE() AND table_name = ?\n    LIMIT 1",
+   "repo": "mz-core/mz_bank",
+   "file": "server/migrations.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT column_name, data_type, column_type, character_maximum_length,\n           is_nullable, column_default, extra\n    FROM information_schema.columns\n    WHERE table_schema = DATABASE() AND table_name = ?",
+   "repo": "mz-core/mz_bank",
+   "file": "server/migrations.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT index_name, non_unique,\n           GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',') AS column_list\n    FROM information_schema.statistics\n    WHERE table_schema = DATABASE() AND table_name = ?\n    GROUP BY index_name, non_unique",
+   "repo": "mz-core/mz_bank",
+   "file": "server/migrations.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT IGNORE INTO mz_bank_schema_migrations (version, name) VALUES (?, ?)",
+   "repo": "mz-core/mz_bank",
+   "file": "server/migrations.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "DROP TRIGGER IF EXISTS `trg_vslot_capacity_ins`;",
+   "repo": "sumit961/serverFivem",
+   "file": "resources/[core]/cm-house/sql/004_capacity_trigger.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TRIGGER `trg_vslot_capacity_ins`\nBEFORE INSERT ON `cm_house_vehicle_slots`\nFOR EACH ROW\nBEGIN\n    DECLARE cap INT DEFAULT 0;\n    SELECT IFNULL(g.capacity, 0) INTO cap\n    FROM cm_houses h\n    LEFT JOIN cm_house_garage_templates g ON g.id = h.garage_template_id\n    WHERE h.id = NEW.house_id;\n\n    IF NEW.slot_index < 1 OR NEW.slot_index > cap THEN\n        SIGNAL SQLSTATE '45000'\n        SET MESSAGE_TEXT = 'slot_index exceeds the garage template capacity';\n    END IF;\nEND$$",
+   "repo": "sumit961/serverFivem",
+   "file": "resources/[core]/cm-house/sql/004_capacity_trigger.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TRIGGER `trg_vslot_capacity_upd`\nBEFORE UPDATE ON `cm_house_vehicle_slots`\nFOR EACH ROW\nBEGIN\n    DECLARE cap INT DEFAULT 0;\n    SELECT IFNULL(g.capacity, 0) INTO cap\n    FROM cm_houses h\n    LEFT JOIN cm_house_garage_templates g ON g.id = h.garage_template_id\n    WHERE h.id = NEW.house_id;\n\n    IF NEW.slot_index < 1 OR NEW.slot_index > cap THEN\n        SIGNAL SQLSTATE '45000'\n        SET MESSAGE_TEXT = 'slot_index exceeds the garage template capacity';\n    END IF;\nEND$$",
+   "repo": "sumit961/serverFivem",
+   "file": "resources/[core]/cm-house/sql/004_capacity_trigger.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `nd_characters` (\n    `charid` INT(10) NOT NULL AUTO_INCREMENT,\n    `user_id` INT(11) DEFAULT NULL,\n    `identifier` VARCHAR(200) NOT NULL DEFAULT '0',\n    `name` VARCHAR(50) DEFAULT NULL,\n    `firstname` VARCHAR(50) DEFAULT NULL,\n    `lastname` VARCHAR(50) DEFAULT NULL,\n    `dob` VARCHAR(50) DEFAULT NULL,\n    `gender` VARCHAR(50) DEFAULT NULL,\n    `cash` INT(10) DEFAULT '0',\n    `bank` INT(10) DEFAULT '0',\n    `phonenumber` VARCHAR(20) DEFAULT NULL,\n    `deleted_at` DATETIME NULL DEFAULT NULL,\n    `groups` LONGTEXT DEFAULT ('[]'),\n    `metadata` LONGTEXT DEFAULT ('[]'),\n    `inventory` LONGTEXT DEFAULT ('[]'),\n    PRIMARY KEY (`charid`) USING BTREE,\n    INDEX `idx_nd_characters_user_id` (`user_id`),\n    CONSTRAINT `fk_nd_characters_user_id` FOREIGN KEY (`user_id`) REFERENCES `nd_users` (`user_id`) ON UPDATE CASCADE ON DELETE SET NULL\n);",
+   "repo": "nd-framework/ND_Core",
+   "file": "database/characters.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `nd_vehicles` (\n    `id` INT(11) NOT NULL AUTO_INCREMENT,\n    `owner` INT(11) DEFAULT NULL,\n    `plate` VARCHAR(255) DEFAULT NULL,\n    `glovebox` LONGTEXT DEFAULT ('[]'),\n    `trunk` LONGTEXT DEFAULT ('[]'),\n    `properties` LONGTEXT DEFAULT ('[]'),\n    `stored` INT(11) DEFAULT '1',\n    `impounded` INT(11) DEFAULT '0',\n    `stolen` INT(11) DEFAULT '0',\n    `metadata` LONGTEXT DEFAULT ('[]'),\n    PRIMARY KEY (`id`) USING BTREE,\n    INDEX `owner` (`owner`) USING BTREE,\n    CONSTRAINT `vehowner` FOREIGN KEY (`owner`) REFERENCES `nd_characters` (`charid`) ON UPDATE CASCADE ON DELETE CASCADE\n);",
+   "repo": "nd-framework/ND_Core",
+   "file": "database/vehicles.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `nd_money_log` (\n    `log_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n    `character_id` INT(10) NOT NULL,\n    `action` VARCHAR(50) DEFAULT NULL,\n    `account` ENUM('cash', 'bank') NOT NULL,\n    `amount` INT(10) NOT NULL,\n    `reason` VARCHAR(255) DEFAULT NULL,\n    `trace` TEXT DEFAULT NULL,\n    `date_time` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    PRIMARY KEY (`log_id`),\n    KEY `idx_character_id` (`character_id`),\n    CONSTRAINT `fk_moneylog_character` FOREIGN KEY (`character_id`) REFERENCES `nd_characters` (`charid`) ON UPDATE CASCADE ON DELETE CASCADE\n);",
+   "repo": "nd-framework/ND_Core",
+   "file": "database/moneylogs.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `nd_group_ranks` (\n    `id` INT NOT NULL AUTO_INCREMENT,\n    `group_name` VARCHAR(50) NOT NULL,\n    `label` VARCHAR(100) NOT NULL,\n    `weight` INT NOT NULL DEFAULT 1,\n    `isBoss` TINYINT(1) NOT NULL DEFAULT 0,\n    PRIMARY KEY (`id`),\n    INDEX `idx_group_name` (`group_name`),\n    CONSTRAINT `fk_group_ranks_group` FOREIGN KEY (`group_name`) REFERENCES `nd_groups`(`name`) ON DELETE CASCADE ON UPDATE CASCADE\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+   "repo": "nd-framework/ND_Core",
+   "file": "database/group_ranks.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "DELETE FROM nd_characters WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 30 DAY)",
+   "repo": "nd-framework/ND_Core",
+   "file": "server/main.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT citizenid\n        FROM mdt_reports_warrants\n        WHERE expirydate >= NOW()\n        AND citizenid IN (?)\n        GROUP BY citizenid",
+   "repo": "Project-Sloth/ps-mdt",
+   "file": "server/backend/citizens.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT mp.id, p.citizenid, JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.firstname')) AS firstname,\n        JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.lastname')) AS lastname,\n        JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.gender')) AS gender,\n        JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.birthdate')) AS dateofbirth,\n        JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.phone')) AS phone,\n        JSON_UNQUOTE(JSON_EXTRACT(p.job, '$.label')) AS job,\n        JSON_UNQUOTE(JSON_EXTRACT(p.metadata, '$.fingerprint')) AS fingerprint,\n        JSON_UNQUOTE(JSON_EXTRACT(p.metadata, '$.dna')) AS dna\n        FROM players AS p\n        LEFT JOIN mdt_profiles AS mp\n        ON CONVERT(p.citizenid USING utf8mb4) COLLATE utf8mb4_general_ci = CONVERT(mp.citizenid USING utf8mb4) COLLATE utf8mb4_general_ci",
+   "repo": "Project-Sloth/ps-mdt",
+   "file": "server/backend/citizens.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT DISTINCT\n            mp.id, p.citizenid,\n            JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.firstname')) AS firstname,\n            JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.lastname')) AS lastname,\n            JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.gender')) AS gender,\n            JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.birthdate')) AS dateofbirth,\n            JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.phone')) AS phone,\n            JSON_UNQUOTE(JSON_EXTRACT(p.job, '$.label')) AS job,\n            JSON_UNQUOTE(JSON_EXTRACT(p.metadata, '$.fingerprint')) AS fingerprint,\n            JSON_UNQUOTE(JSON_EXTRACT(p.metadata, '$.dna')) AS dna\n        FROM players AS p\n        LEFT JOIN mdt_profiles AS mp ON p.citizenid = mp.citizenid\n        WHERE\n            LOWER(JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.firstname'))) LIKE ? OR\n            LOWER(JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.lastname'))) LIKE ? OR\n            LOWER(CONCAT(JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.firstname')), ' ', JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.lastname')))) LIKE ? OR\n            LOWER(p.citizenid) LIKE ? OR\n            LOWER(JSON_UNQUOTE(JSON_EXTRACT(p.charinfo, '$.phone'))) LIKE ? OR\n            LOWER(JSON_UNQUOTE(JSON_EXTRACT(p.job, '$.label'))) LIKE ? OR\n            LOWER(JSON_UNQUOTE(JSON_EXTRACT(p.metadata, '$.fingerprint'))) LIKE ? OR\n            LOWER(JSON_UNQUOTE(JSON_EXTRACT(p.metadata, '$.dna'))) LIKE ?\n        LIMIT ?",
+   "repo": "Project-Sloth/ps-mdt",
+   "file": "server/backend/citizens.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT subject_id\n        FROM mdt_bolos\n        WHERE type = ? AND status = ?\n        AND subject_id IN (?)",
+   "repo": "Project-Sloth/ps-mdt",
+   "file": "server/backend/citizens.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "INSERT INTO mdt_citizen_licenses (citizenid, license_id, active, granted_by)\n        VALUES (?, ?, ?, ?)\n        ON DUPLICATE KEY UPDATE active = VALUES(active), granted_by = VALUES(granted_by)",
+   "repo": "Project-Sloth/ps-mdt",
+   "file": "server/backend/citizens.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "INSERT INTO mdt_permission_roles (job, grade, permissions, updated_by)\n        VALUES (?, ?, ?, ?)\n        ON DUPLICATE KEY UPDATE permissions = VALUES(permissions), updated_by = VALUES(updated_by)",
+   "repo": "Project-Sloth/ps-mdt",
+   "file": "server/backend/management.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT t.id, t.name, t.type, t.color, t.job_type, t.description, t.created_at,\n                   (SELECT COUNT(*) FROM mdt_profiles_tags pt WHERE pt.tag = t.name) +\n                   (SELECT COUNT(*) FROM mdt_reports_tags rt WHERE rt.tag = t.name) AS usage_count\n            FROM mdt_tags t\n            WHERE t.job_type = 'ems' OR t.job_type = 'all'\n            ORDER BY t.type ASC, t.name ASC",
+   "repo": "Project-Sloth/ps-mdt",
+   "file": "server/backend/management.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n            r.author,\n            r.authorplaintext,\n            COUNT(*) as total_reports,\n            SUM(CASE WHEN r.type = 'Arrest Report' THEN 1 ELSE 0 END) as total_arrests,\n            SUM(CASE WHEN r.type = 'Citation' THEN 1 ELSE 0 END) as total_citations\n        FROM mdt_reports r\n        WHERE r.author IS NOT NULL AND r.author != ''\n        GROUP BY r.author, r.authorplaintext\n        ORDER BY total_reports DESC\n        LIMIT 25",
+   "repo": "Project-Sloth/ps-mdt",
+   "file": "server/backend/management.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "WITH ConversationParticipants AS (\n            SELECT conversationid\n            FROM zp_conversation_participants\n            WHERE citizenid IN (?, ?)\n            GROUP BY conversationid\n            HAVING COUNT(DISTINCT citizenid) = 2\n        ),\n        InvalidConversations AS (\n            SELECT conversationid\n            FROM zp_conversation_participants\n            GROUP BY conversationid\n            HAVING COUNT(DISTINCT citizenid) > 2\n        )\n        SELECT\n            CASE\n                WHEN EXISTS (SELECT 1 FROM InvalidConversations) THEN NULL\n                ELSE (SELECT conversationid FROM ConversationParticipants)\n            END AS conversationid",
+   "repo": "alfaben12/z-phone",
+   "file": "server/feature/chat.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "WITH LatestMessages AS (\n                SELECT\n                    conversationid,\n                    content,\n                    created_at,\n                    is_deleted,\n                    ROW_NUMBER() OVER (PARTITION BY conversationid ORDER BY created_at DESC) AS rn\n                FROM\n                    zp_conversation_messages\n            )\n            SELECT\n                from_user.avatar,\n\t\t\t\tfrom_user.citizenid,\n                CASE\n                    WHEN c.is_group = 0 THEN\n                        COALESCE(\n                            contact.contact_name,\n                            from_user.phone_number\n                        )\n                    ELSE c.name\n                END AS conversation_name,\n                from_user.phone_number,\n                DATE_FORMAT(from_user.last_seen, '%d/%m/%Y %H:%i') as last_seen,\n                0 as isRead,\n\t\t\t\tCASE\n                    WHEN last_msg.is_deleted = 1 THEN\n                        'This message was deleted'\n                    WHEN last_msg.content = '' THEN\n                        'media'\n                    ELSE last_msg.content\n                END AS last_message,\n                DATE_FORMAT(last_msg.created_at, '%H:%i') AS last_message_time,\n                c.id as conversationid,\n\t\t\t\tc.is_group\n            FROM\n                zp_conversations c\n            JOIN\n                zp_conversation_participants p\n                ON c.id = p.conversationid\n            LEFT JOIN\n                zp_conversation_participants other_participant\n                ON c.id = other_participant.conversationid\n                AND other_participant.citizenid != p.citizenid\n            LEFT JOIN\n                zp_users from_user\n                ON other_participant.citizenid = from_user.citizenid\n            LEFT JOIN\n                zp_contacts contact\n                ON contact.citizenid = p.citizenid\n                AND contact.contact_citizenid = other_participant.citizenid\n            LEFT JOIN\n                LatestMessages last_msg\n                ON c.id = last_msg.conversationid AND last_msg.rn = 1\n            WHERE\n                p.citizenid = ?\n            GROUP BY conversation_name\n            ORDER BY\n                last_msg.created_at DESC",
+   "repo": "alfaben12/z-phone",
+   "file": "server/feature/chat.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n                *\n            FROM\n                (\n                SELECT\n                    zpcm.id,\n                    zpcm.content as message,\n                    zpcm.media,\n                    DATE_FORMAT(zpcm.created_at, '%d %b %Y %H:%i') as time,\n                    zpcm.sender_citizenid,\n                    zpcm.is_deleted,\n                    TIMESTAMPDIFF(MINUTE, zpcm.created_at, NOW()) AS minute_diff\n                FROM\n                    zp_conversation_messages zpcm\n                WHERE\n                    conversationid = ?\n                ORDER BY\n                    id DESC\n                    LIMIT 200\n                ) AS subquery\n            ORDER BY\n                id ASC;",
+   "repo": "alfaben12/z-phone",
+   "file": "server/feature/chat.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n            COALESCE(\n                (SELECT contact_name FROM zp_contacts WHERE citizenid = ? and contact_citizenid = ?),\n                (SELECT phone_number FROM zp_users WHERE citizenid = ?)\n            ) AS name",
+   "repo": "alfaben12/z-phone",
+   "file": "server/feature/chat.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM zp_users WHERE phone_number IN (?)",
+   "repo": "alfaben12/z-phone",
+   "file": "server/feature/chat.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n            from_user.avatar,\n\t\t\tfrom_user.citizenid,\n            CASE\n                WHEN c.is_group = 0 THEN\n                    COALESCE(\n                        contact.contact_name,\n                        from_user.phone_number\n                    )\n                ELSE c.name\n            END AS conversation_name,\n            DATE_FORMAT(from_user.last_seen, '%d/%m/%Y %H:%i') as last_seen,\n            0 as is_read,\n            c.id as conversationid,\n\t\t\tc.is_group\n        FROM\n            zp_conversations c\n        JOIN\n            zp_conversation_participants p\n            ON c.id = p.conversationid\n        LEFT JOIN\n            zp_conversation_participants other_participant\n            ON c.id = other_participant.conversationid\n            AND other_participant.citizenid != p.citizenid\n        LEFT JOIN\n            zp_users from_user\n            ON other_participant.citizenid = from_user.citizenid\n        LEFT JOIN\n            zp_contacts contact\n            ON contact.citizenid = p.citizenid\n            AND contact.contact_citizenid = other_participant.citizenid\n        WHERE\n            c.id = ? and p.citizenid = ?\n        LIMIT 1",
+   "repo": "alfaben12/z-phone",
+   "file": "server/feature/chat.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "REPLACE INTO ps_cache_metadata (cache_key, table_name, expires_at, data)\n                VALUES (?, ?, ?, ?)",
+   "repo": "Project-Sloth/ps_lib",
+   "file": "modules/ORM/server/orm.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "DELETE FROM ps_cache_metadata WHERE expires_at < NOW()",
+   "repo": "Project-Sloth/ps_lib",
+   "file": "modules/ORM/server/orm.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM ? WHERE ? = ? ORDER BY ? ASC LIMIT ?",
+   "repo": "Project-Sloth/ps_lib",
+   "file": "modules/ORM/server/orm.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SELECT * FROM ? WHERE ? = ? LIMIT ? OFFSET ?",
+   "repo": "Project-Sloth/ps_lib",
+   "file": "modules/ORM/server/orm.lua",
+   "kind": "query",
+   "normalised": true
+  },
+  {
+   "sql": "SHOW COLUMNS FROM `ks_bossmenu_time_tracking`",
+   "repo": "Kxiox/ks_bossmenu",
+   "file": "server/mysql.lua",
+   "kind": "query",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `ks_bossmenu_time_tracking` ADD COLUMN `id` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST",
+   "repo": "Kxiox/ks_bossmenu",
+   "file": "server/mysql.lua",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `ks_bossmenu_time_tracking` ADD COLUMN `time_end` int(11) NOT NULL DEFAULT 0",
+   "repo": "Kxiox/ks_bossmenu",
+   "file": "server/mysql.lua",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `ks_bossmenu_time_tracking` ADD INDEX `idx_identifier_job_open` (`identifier`, `job`, `time_end`)",
+   "repo": "Kxiox/ks_bossmenu",
+   "file": "server/mysql.lua",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `ks_bossmenu_time_tracking` (\n            `id` int(11) NOT NULL AUTO_INCREMENT,\n            `identifier` varchar(46) NOT NULL,\n            `job` varchar(50) NOT NULL,\n            `time_start` int(11) NOT NULL,\n            `time_end` int(11) NOT NULL DEFAULT 0,\n            PRIMARY KEY (`id`),\n            KEY `idx_identifier_job_open` (`identifier`, `job`, `time_end`),\n            KEY `idx_job_time_start` (`job`, `time_start`)\n        ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;",
+   "repo": "Kxiox/ks_bossmenu",
+   "file": "server/mysql.lua",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;",
+   "repo": "ikalisz/test",
+   "file": "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;",
+   "repo": "ikalisz/test",
+   "file": "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "DROP TABLE IF EXISTS `tgiann_mdt_arananlar`;",
+   "repo": "ikalisz/test",
+   "file": "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE `tgiann_mdt_cezalar` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `citizenid` varchar(50) DEFAULT NULL,\n  `aciklama` longtext,\n  `ceza` varchar(255) DEFAULT NULL,\n  `polis` mediumtext,\n  `zanli` mediumtext,\n  `cezalar` longtext,\n  `olayid` int DEFAULT NULL,\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;",
+   "repo": "ikalisz/test",
+   "file": "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "LOCK TABLES `tgiann_mdt_cezalar` WRITE;",
+   "repo": "ikalisz/test",
+   "file": "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "/*!40000 ALTER TABLE `tgiann_mdt_cezalar` DISABLE KEYS */;",
+   "repo": "ikalisz/test",
+   "file": "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "UNLOCK TABLES;",
+   "repo": "ikalisz/test",
+   "file": "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `players`\nADD COLUMN `aranma` longtext, AFTER `daily`;",
+   "repo": "ikalisz/test",
+   "file": "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `players`\nADD COLUMN `photo` varchar(500) DEFAULT 'resimsiz',, AFTER `aranma`;",
+   "repo": "ikalisz/test",
+   "file": "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE `tgiann_notlar` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `citizenid` varchar(255) NOT NULL,\n  `yazi` longtext NOT NULL,\n  PRIMARY KEY (`id`),\n  KEY `citizenid` (`citizenid`)\n) ENGINE=InnoDB AUTO_INCREMENT=55 DEFAULT CHARSET=utf8mb3;",
+   "repo": "ikalisz/test",
+   "file": "resources/[tgiann]/tgiann-mdtv2/tg-mdt.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `src_phone_data`\n    MODIFY COLUMN `citizenid` VARCHAR(50)\n    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL;",
+   "repo": "dollar-src/src-phone",
+   "file": "install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE src_phone_messages ADD COLUMN IF NOT EXISTS sender_deleted TINYINT(1) NOT NULL DEFAULT 0;",
+   "repo": "dollar-src/src-phone",
+   "file": "install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE src_phone_yellowpages DROP COLUMN IF EXISTS `phone_number`;",
+   "repo": "dollar-src/src-phone",
+   "file": "install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `src_phone_messages` MODIFY COLUMN `text` MEDIUMTEXT NOT NULL;",
+   "repo": "dollar-src/src-phone",
+   "file": "install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `src_phone_z_users` (\n    `citizenid`    VARCHAR(50)  NOT NULL,\n    `handle`       VARCHAR(30)  NOT NULL,\n    `username`     VARCHAR(60)  NOT NULL,\n    `bio`          TEXT         DEFAULT '',\n    `avatar_url`   VARCHAR(255) DEFAULT NULL,\n    `avatar_color` VARCHAR(10)  DEFAULT '#1d9bf0',\n    `banner_color` VARCHAR(10)  DEFAULT '#16181c',\n    `banner_url`   VARCHAR(500) DEFAULT NULL,\n    `verified`     ENUM('premium','business','government') DEFAULT NULL,\n    `joined_at`    BIGINT       NOT NULL,\n    `password`     VARCHAR(255) DEFAULT NULL,\n    PRIMARY KEY (`citizenid`),\n    UNIQUE KEY `uq_handle` (`handle`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+   "repo": "dollar-src/src-phone",
+   "file": "install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `src_phone_cloud_kv` (\n  `account_id` BIGINT UNSIGNED NOT NULL,\n  `key` VARCHAR(64) NOT NULL,\n  `value` MEDIUMTEXT NOT NULL,\n  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n  PRIMARY KEY (`account_id`, `key`),\n  CONSTRAINT `fk_phone_cloud_kv_account`\n    FOREIGN KEY (`account_id`) REFERENCES `src_phone_cloud_accounts` (`id`) ON DELETE CASCADE\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;",
+   "repo": "dollar-src/src-phone",
+   "file": "install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `src_phone_playlist_tracks` (\n    `id`            INT AUTO_INCREMENT PRIMARY KEY,\n    `playlist_id`   INT          NOT NULL,\n    `video_id`      VARCHAR(20)  NOT NULL,\n    `title`         VARCHAR(200) NOT NULL DEFAULT '',\n    `artist`        VARCHAR(100) NOT NULL DEFAULT '',\n    `thumbnail_url` VARCHAR(300) NOT NULL DEFAULT '',\n    `position`      INT          NOT NULL DEFAULT 0,\n    FOREIGN KEY (`playlist_id`) REFERENCES `src_phone_playlists`(`id`) ON DELETE CASCADE,\n    KEY `idx_pt_playlist` (`playlist_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+   "repo": "dollar-src/src-phone",
+   "file": "install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `src_phone_myfans_purchases` (\n  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n  `buyer_citizenid` VARCHAR(64) NOT NULL,\n  `creator_citizenid` VARCHAR(64) NOT NULL,\n  `post_id` BIGINT UNSIGNED DEFAULT NULL,\n  `amount` INT UNSIGNED NOT NULL,\n  `platform_fee` INT UNSIGNED NOT NULL DEFAULT 0,\n  `purchase_type` ENUM('post','message','tip','subscription') NOT NULL,\n  `created_at` BIGINT NOT NULL,\n  PRIMARY KEY (`id`),\n  UNIQUE KEY `uq_myfans_post_purchase` (`buyer_citizenid`, `post_id`, `purchase_type`),\n  KEY `idx_myfans_creator_sales` (`creator_citizenid`, `created_at`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;",
+   "repo": "dollar-src/src-phone",
+   "file": "install.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "DROP PROCEDURE IF EXISTS `john_k9_migration_0004_require_base_table`;",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/migrations/0004_add_k9_certifications_active_cert_key.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE PROCEDURE `john_k9_migration_0004_require_base_table`()\nBEGIN\n    IF NOT EXISTS (\n        SELECT 1 FROM INFORMATION_SCHEMA.TABLES\n        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'k9_certifications'\n    ) THEN\n        SELECT 'STOPPED - WRONG ORDER' AS status,\n               'Table k9_certifications does not exist in this database. This migration only ever ALTERs that table, so it must exist first. Run sql/install.sql before this file -- it creates every john-k9 table, including the one this migration changes, in one pass. Nothing has been changed by this migration.' AS detail;\n        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'john-k9 0004 stopped: k9_certifications missing. See detail above. Run install.sql first.';\n    END IF;\nEND$$",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/migrations/0004_add_k9_certifications_active_cert_key.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CALL `john_k9_migration_0004_require_base_table`();",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/migrations/0004_add_k9_certifications_active_cert_key.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE PROCEDURE `john_k9_migration_0004_add_active_cert_key_column`()\nBEGIN\n    IF NOT EXISTS (\n        SELECT 1\n        FROM INFORMATION_SCHEMA.COLUMNS\n        WHERE TABLE_SCHEMA = DATABASE()\n          AND TABLE_NAME = 'k9_certifications'\n          AND COLUMN_NAME = 'active_cert_key'\n    ) THEN\n        ALTER TABLE `k9_certifications`\n            ADD COLUMN `active_cert_key` VARCHAR(105)\n                GENERATED ALWAYS AS (\n                    CASE WHEN `active` = 1\n                         THEN CONCAT(`citizenid`, '::', `job`)\n                         ELSE NULL\n                    END\n                ) VIRTUAL\n                AFTER `active`;\n    END IF;\nEND$$",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/migrations/0004_add_k9_certifications_active_cert_key.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE PROCEDURE `john_k9_migration_0004_add_idx_citizen_job_active`()\nBEGIN\n    IF NOT EXISTS (\n        SELECT 1\n        FROM INFORMATION_SCHEMA.STATISTICS\n        WHERE TABLE_SCHEMA = DATABASE()\n          AND TABLE_NAME = 'k9_certifications'\n          AND INDEX_NAME = 'idx_citizen_job_active'\n    ) THEN\n        ALTER TABLE `k9_certifications`\n            ADD KEY `idx_citizen_job_active` (`citizenid`, `job`, `active`);\n    END IF;\nEND$$",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/migrations/0004_add_k9_certifications_active_cert_key.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE PROCEDURE `john_k9_migration_0004_add_uq_one_active_cert_per_job`()\nBEGIN\n    IF NOT EXISTS (\n        SELECT 1\n        FROM INFORMATION_SCHEMA.STATISTICS\n        WHERE TABLE_SCHEMA = DATABASE()\n          AND TABLE_NAME = 'k9_certifications'\n          AND INDEX_NAME = 'uq_one_active_cert_per_job'\n    ) THEN\n        ALTER TABLE `k9_certifications`\n            ADD UNIQUE KEY `uq_one_active_cert_per_job` (`active_cert_key`);\n    END IF;\nEND$$",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/migrations/0004_add_k9_certifications_active_cert_key.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `k9_certifications`\n            ADD COLUMN `tier` VARCHAR(20) NOT NULL DEFAULT 'certified' AFTER `active`;",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/migrations/0006_add_k9_certification_lifecycle.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `k9_certifications`\n            ADD COLUMN `expires_at` DATETIME DEFAULT NULL AFTER `revoke_reason`;",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/migrations/0006_add_k9_certification_lifecycle.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `k9_certifications`\n            ADD KEY `idx_expires_at` (`expires_at`);",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/migrations/0006_add_k9_certification_lifecycle.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `k9_certification_specializations` (\n  `id`               INT UNSIGNED NOT NULL AUTO_INCREMENT,\n  `citizenid`        VARCHAR(50)  NOT NULL,\n  `job`              VARCHAR(50)  NOT NULL,\n  `specialization`   VARCHAR(30)  NOT NULL,          -- a key from Config.K9Specializations, validated at the application layer\n  `granted_by`       VARCHAR(50)  NOT NULL,\n  `granted_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  `revoked_by`       VARCHAR(50)  DEFAULT NULL,\n  `revoked_at`       DATETIME     DEFAULT NULL,\n  `active`           TINYINT(1)   NOT NULL DEFAULT 1,\n\n  `active_spec_key`  VARCHAR(135)\n                       GENERATED ALWAYS AS (\n                         CASE WHEN `active` = 1\n                              THEN CONCAT(`citizenid`, '::', `job`, '::', `specialization`)\n                              ELSE NULL\n                         END\n                       ) VIRTUAL,\n\n  PRIMARY KEY (`id`),\n\n  KEY `idx_citizen_job_active` (`citizenid`, `job`, `active`),\n\n  KEY `idx_job_spec_active` (`job`, `specialization`, `active`),\n\n  UNIQUE KEY `uq_one_active_spec_per_citizen_job` (`active_spec_key`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/migrations/0006_add_k9_certification_lifecycle.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `k9_certifications` DROP INDEX `uq_one_active_cert_per_job`;",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/rollback/0004_down.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `k9_certifications` DROP COLUMN `active_cert_key`;",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/rollback/0004_down.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "DELETE FROM `k9_search_log`\nWHERE `searched_at` < DATE_SUB(NOW(), INTERVAL 90 DAY)\nORDER BY `id` ASC\nLIMIT 5000;",
+   "repo": "XxNightLordxX/K9Script",
+   "file": "john-k9/sql/maintenance_prune_k9_search_log.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE OR REPLACE VIEW `anpr_all_flagged_plates` AS\nSELECT\n    ov.plate,\n    ov.citizenid,\n    lpw.title as reason,\n    CASE\n        WHEN lpw.priority = 'low' THEN 'LOW'\n        WHEN lpw.priority = 'high' THEN 'HIGH'\n        WHEN lpw.priority = 'critical' THEN 'CRITICAL'\n        ELSE 'MEDIUM'\n    END as severity,\n    lpw.created_by as officer,\n    lpw.created_at as timestamp,\n    'warrant' as source_type,\n    lpw.warrant_status as status\nFROM owned_vehicles ov\nJOIN lbtablet_police_warrants lpw ON ov.citizenid = lpw.linked_profile_id\nWHERE lpw.warrant_status = 'active'\n\nUNION ALL\n\nSELECT\n    afp.plate,\n    NULL as citizenid,\n    afp.reason,\n    afp.severity,\n    afp.officer,\n    afp.timestamp,\n    'manual' as source_type,\n    afp.status\nFROM anpr_flagged_plates afp\nWHERE afp.status = 'active';",
+   "repo": "RyanHardof/anpr-for-wk_wars2x",
+   "file": "wk_wars2x/anpr_database_setup.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "CREATE TABLE IF NOT EXISTS `anpr_flagged_plates` (\n    `id` INT AUTO_INCREMENT PRIMARY KEY,\n    `plate` VARCHAR(12) NOT NULL UNIQUE,\n    `reason` TEXT NOT NULL,\n    `severity` ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') DEFAULT 'MEDIUM',\n    `officer` VARCHAR(255) NOT NULL,\n    `timestamp` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    `status` ENUM('active', 'inactive') DEFAULT 'active',\n    INDEX `idx_plate` (`plate`),\n    INDEX `idx_status` (`status`),\n    INDEX `idx_severity` (`severity`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;",
+   "repo": "RyanHardof/anpr-for-wk_wars2x",
+   "file": "wk_wars2x/anpr_database_setup.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT * FROM anpr_alerts WHERE DATE(timestamp) = CURDATE() ORDER BY timestamp DESC;",
+   "repo": "RyanHardof/anpr-for-wk_wars2x",
+   "file": "wk_wars2x/anpr_database_setup.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n    COUNT(*) as total_reads,\n    COUNT(DISTINCT plate) as unique_plates,\n    COUNT(DISTINCT officer_name) as active_officers\nFROM anpr_plate_reads\nWHERE timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR);",
+   "repo": "RyanHardof/anpr-for-wk_wars2x",
+   "file": "wk_wars2x/anpr_database_setup.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "SELECT\n    afp.plate,\n    afp.reason,\n    COUNT(aa.id) as hit_count,\n    MAX(aa.timestamp) as last_hit\nFROM anpr_all_flagged_plates afp\nLEFT JOIN anpr_alerts aa ON afp.plate = aa.plate\nGROUP BY afp.plate, afp.reason\nORDER BY hit_count DESC;",
+   "repo": "RyanHardof/anpr-for-wk_wars2x",
+   "file": "wk_wars2x/anpr_database_setup.sql",
+   "kind": "ddl",
+   "normalised": false
+  },
+  {
+   "sql": "ALTER TABLE `owned_vehicles` ADD INDEX IF NOT EXISTS `idx_plate` (`plate`);",
+   "repo": "RyanHardof/anpr-for-wk_wars2x",
+   "file": "wk_wars2x/anpr_database_setup.sql",
+   "kind": "ddl",
+   "normalised": false
+  }
+ ]
+}

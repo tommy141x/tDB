@@ -1,12 +1,9 @@
 /**
  * Does PocketBase hand secrets back out of GET /api/settings, or mask them?
- *
- * This decides whether syncSettingsToConfig() preserves an SMTP password / S3
- * secret when it writes PocketBase's settings back into config.lua, or whether
- * it overwrites the real credential in config.lua with a mask.
- *
- * Also checks the inverse: does PATCHing a masked value back clear the stored
- * secret, or does PocketBase treat the mask as "leave it alone"?
+ * That decides whether syncSettingsToConfig() can write PocketBase's settings
+ * back into config.lua without overwriting the real SMTP password / S3 secret
+ * with a mask. Also checks the inverse: does PATCHing a masked value back clear
+ * the stored secret?
  *
  * Dev harness, throwaway instance. Run from the resource root:
  *   node .dev/probe-settings-roundtrip.js
@@ -85,7 +82,7 @@ async function main() {
       return json;
     };
 
-    // 1. Write real secrets, exactly as configureSettings() does.
+    // Write real secrets, exactly as configureSettings() does.
     console.log("=== writing settings with real secrets");
     await api("PATCH", {
       smtp: {
@@ -109,7 +106,7 @@ async function main() {
       },
     });
 
-    // 2. Read them back, exactly as syncSettingsToConfig() does.
+    // Read them back, exactly as syncSettingsToConfig() does.
     console.log("=== reading them back");
     const got = await api("GET");
     console.log("  smtp:", JSON.stringify(got.smtp));
@@ -124,8 +121,8 @@ async function main() {
     console.log(`  s3.secret returned     : ${JSON.stringify(s3Secret)}`);
     console.log(`  s3.secret is real      : ${s3Secret === S3_SECRET}`);
 
-    // 3. The inverse: feed what we read straight back, as a restart would.
-    //    If the mask is stored verbatim, the real credential is destroyed.
+    // The inverse: feed what we read straight back, as a restart would. If the
+    // mask is stored verbatim, the real credential is destroyed.
     console.log("");
     console.log("=== PATCHing the read-back value straight back");
     await api("PATCH", { smtp: got.smtp, s3: got.s3 });

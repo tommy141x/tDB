@@ -1,27 +1,14 @@
 /**
- * Make plain Node resolve require() the way citizen-scripting-node does, so
- * the harnesses load the resource's real sources unmodified.
+ * Make plain Node resolve require() the way citizen-scripting-node does, so the
+ * harnesses load the resource's real sources unmodified.
  *
- * The rule is not "FiveM resolves from the resource root". It is narrower, and
- * the difference is load-bearing:
- *
- *   - A script listed in fxmanifest's server_scripts is evaluated against a
- *     synthetic `<resource>//dummy.js`, so ITS requires resolve from the
- *     resource root: "./server/utils/config-loader.js".
- *   - Anything those scripts pull in is an ordinary CommonJS module and
- *     resolves from its own directory: a file in utils/ says "./x.js", and a
- *     file in adapters/ says "../utils/x.js".
- *
- * An earlier version of this shim rewrote "./utils/..." to the resource root
- * for every requiring file, which quietly made both spellings work here. That
- * is why server/utils/auth-manager.js shipped with require("./server/utils/process-utils.js")
- * - green in every harness, and a hard load failure on the server:
- *
- *     Error loading script server/utils/client.js in resource tDB:
- *     Cannot find module './utils/process-utils.js'
- *
- * So the rewrite is applied ONLY to the manifest scripts. A nested module that
- * gets the base wrong now fails here exactly as it would in game.
+ * The rule is narrower than "FiveM resolves from the resource root". A script
+ * listed in fxmanifest's server_scripts is evaluated against a synthetic
+ * `<resource>//dummy.js`, so its requires resolve from the resource root;
+ * anything those scripts pull in is an ordinary CommonJS module and resolves
+ * from its own directory. So the rewrite below is applied ONLY to the manifest
+ * scripts, and a nested module that gets the base wrong fails here exactly as
+ * it would in game.
  *
  * Usage, before requiring anything from the resource:
  *   const ROOT = require("./fivem-require.js");

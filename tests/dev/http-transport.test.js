@@ -1,13 +1,11 @@
 /**
- * The node:http transport, and the hook that installs it.
+ * The node:http transport and the hook that installs it.
  *
- * This exists because FiveM's Node (v26.3.0) leaks one unhandled promise
- * rejection for every `fetch()` that carries a request body - and every query
- * tDB serves is a POST with a body. See utils/http-transport.js for the
- * measurements. The leak itself cannot be reproduced here (local Node is
- * clean), so what this pins is the replacement: that the SDK really does stop
- * using global fetch, and that the transport behaves like fetch where the SDK
- * and the adapters depend on it.
+ * FiveM's Node (v26.3.0) leaks one unhandled promise rejection per `fetch()`
+ * carrying a request body, and every query tDB serves is a POST with one;
+ * utils/http-transport.js has the measurements. The leak cannot be reproduced
+ * here (local Node is clean), so what this pins is the replacement: the SDK
+ * really does stop using global fetch, and the transport behaves like fetch.
  *
  * Dev harness. Run from the resource root: node .dev/http-transport.test.js
  */
@@ -52,10 +50,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const show = (v) => JSON.stringify(v);
 
 async function main() {
-  // ----------------------------------------------------------------------
   // A local server that reports exactly what it received, so the transport's
   // wire behaviour can be checked without involving PocketBase.
-  // ----------------------------------------------------------------------
   const seenRequests = [];
   const echo = http.createServer((req, res) => {
     const chunks = [];
@@ -122,7 +118,6 @@ async function main() {
       await sleep(200);
     }
 
-    // --------------------------------------------------------------------
     console.log("\n=== It behaves like fetch");
 
     const { nodeFetch } = httpTransport;
@@ -210,7 +205,6 @@ async function main() {
     );
     ok(refused !== "resolved", "a connection failure rejects", show(refused));
 
-    // --------------------------------------------------------------------
     console.log("\n=== install() routes the SDK through it");
 
     const pb = new PocketBase(URL_BASE);
@@ -278,7 +272,6 @@ async function main() {
       globalThis.fetch = realFetch;
     }
 
-    // --------------------------------------------------------------------
     console.log("\n=== install() chains rather than replaces");
 
     const chained = new PocketBase(URL_BASE);
@@ -316,7 +309,6 @@ async function main() {
       show(transportUsed),
     );
 
-    // --------------------------------------------------------------------
     console.log("\n=== the resource actually installs it");
 
     const clientSource = fs.readFileSync(path.join(ROOT, "server/utils/client.js"), "utf8");
@@ -338,7 +330,9 @@ async function main() {
   console.log(`\n==== ${pass} passed, ${fail} failed ====`);
   if (fail) {
     console.log("\nFailures:");
-    failures.forEach((f) => console.log(`  - ${f}`));
+    failures.forEach((f) => {
+      console.log(`  - ${f}`);
+    });
   }
   process.exitCode = fail === 0 ? 0 : 1;
 }
