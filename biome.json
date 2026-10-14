@@ -1,0 +1,83 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/.build",
+      "!**/.runtime",
+      "!**/pb_data",
+      "!**/pb_migrations",
+      "!**/server/vendor",
+      "!**/tests/dev/snippets"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        "noExplicitAny": "warn",
+        "noArrayIndexKey": "error",
+        "noConsole": "off"
+      },
+      "style": {
+        "useConst": "error",
+        "useTemplate": "warn",
+        "useSingleVarDeclarator": "warn"
+      },
+      "correctness": {
+        "noUnusedVariables": "warn",
+        "noUnusedImports": "error"
+      },
+      "performance": {
+        "noAccumulatingSpread": "warn"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "trailingCommas": "es5",
+      "semicolons": "always",
+      "arrowParentheses": "always"
+    },
+    "globals": [
+      "Bun",
+      "emit",
+      "emitNet",
+      "on",
+      "onNet",
+      "source",
+      "exports",
+      "GetCurrentResourceName",
+      "GetResourcePath",
+      "GetResourceMetadata",
+      "GetResourceState",
+      "$app",
+      "$apis",
+      "routerAdd"
+    ]
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  }
+}

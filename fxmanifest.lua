@@ -8,24 +8,29 @@ author 'TIMMYG Studios'
 version '1.0.0'
 
 -- Runs PocketBase 0.40.4 by Gani Georgiev (MIT). See CREDITS.
---
--- The binary is no longer committed. `bun scripts/fetch-runtime.ts` downloads
--- it into .runtime/ and verifies it against the checksums PocketBase publishes
--- with the release. Before this, linux and windows had drifted onto different
--- builds (0.40.3 and 0.40.4) because each was updated by hand.
+-- The binary is not committed: `bun scripts/fetch-runtime.ts` fetches it into
+-- .runtime/ and checks it against the published checksums.
 
 lua54 'yes'
 node_version '22'
 
--- The HTTP router this resource depends on (see the `dependency` note below)
--- landed in tLib 0.6, so that is the real floor.
-tlib_min_version '0.6'
+-- 1.0, not 0.6: server/utils/server.js calls tLib's `RegisterWebApp` export to
+-- publish the admin UI, and that export landed with the HTTP router owning the
+-- one external port — after 0.6, the only earlier release. A lower floor lets
+-- the gate pass and then fails with "No such export", which is the cryptic error
+-- this declaration exists to replace.
+tlib_min_version '1.0'
 
-tlib_modules { 'versioncheck' }
 
+-- config.lua is deliberately NOT listed here.
+--
+-- It is gitignored and created from config.example.lua on first start, so on a
+-- fresh install it does not exist yet when FiveM builds this list - and a
+-- server_script that is missing at load time stops the whole resource. Nothing
+-- in tDB's Lua reads the Config table anyway; server/utils/config-loader.js
+-- parses the file directly, and it is the only reader.
 server_scripts {
     '@tLib/imports.lua',
-    'config.lua',
     'server/utils/version.lua',
     'server/utils/config-loader.js',
     'server/utils/process-utils.js',
@@ -37,11 +42,6 @@ provide 'mysql-async'
 provide 'ghmattimysql'
 provide 'oxmysql'
 
--- tDB never opens a port of its own — PocketBase binds loopback, and tLib's
--- router is the only thing that can make the admin UI reachable. Required
--- rather than optional so the failure is "tLib is missing" at start, not an
--- admin UI that silently never appears.
+-- tDB opens no port of its own: PocketBase binds loopback and tLib's router is
+-- what makes the admin UI reachable. Required, so a missing tLib fails at start.
 dependency 'tLib'
-
--- Testing script
--- server_script 'tests.lua'

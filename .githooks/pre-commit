@@ -1,0 +1,32 @@
+#!/bin/sh
+# Managed by tLib — shared/ts/secrets/hook.ts writes this file.
+# ⛔ Do not edit here. Run `bun run ../tLib/scripts/secret-gate.ts --write-hooks`
+#    (or `bun run secrets:install-hooks`) to refresh it; a control asserts every
+#    resource's copy is byte-identical to tLib's.
+#
+# Layer 1 of 3. Refuses a commit that stages a credential-shaped key with a
+# value in a config file. Layer 2 blanks the staged copy of a release; layer 3
+# is the CI assertion on HEAD, which is the one that cannot be skipped.
+#
+# Bypass with `git commit --no-verify` if you must — CI will still catch it,
+# which is the point of there being three layers rather than one.
+set -e
+
+gate=""
+if [ -f "scripts/secret-gate.ts" ]; then
+  gate="scripts/secret-gate.ts"          # we are tLib
+elif [ -f "../tLib/scripts/secret-gate.ts" ]; then
+  gate="../tLib/scripts/secret-gate.ts"  # the sibling layout every clone uses
+fi
+
+if [ -z "$gate" ]; then
+  # Loud, and non-blocking. A missing sibling tLib is a checkout problem, not a
+  # secret; blocking every commit on it would get the hook uninstalled, and then
+  # there is no layer 1 at all. CI remains the guarantee.
+  echo "⚠ secret gate SKIPPED: no ../tLib/scripts/secret-gate.ts found." >&2
+  echo "  Clone tLib beside this repo to get the pre-commit check back." >&2
+  echo "  CI still asserts HEAD, so this is a convenience you are missing, not a hole." >&2
+  exit 0
+fi
+
+exec bun run "$gate" --staged

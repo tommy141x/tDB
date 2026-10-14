@@ -1,21 +1,26 @@
 node_modules/
-
-# Generated output. One root, so a new build artifact never needs a new rule
-# here and can never reach a release by being forgotten.
 .build/
 
-# Fetched at setup, never authored. The PocketBase release binaries live here
-# and are reproducible from a pinned version + checksum, so they have no
-# business in history.
+# Fetched at setup from a pinned version + checksum.
 .runtime/
 
-# PocketBase's own state. pb_data is a live database, pb_migrations is
-# generated from it.
+# PocketBase's own state.
 pb_data/
 pb_migrations/
 
-# Scratch, stale copies and backups.
+__pycache__/
+
 *.backup
 *.bak
 *.old
 *.log
+
+# The operator's copy, created from config.example.lua on first run. tDB writes
+# the generated superuser password into it, so it must never be tracked.
+config.lua
+
+# The developer's real credentials. Never committed, never packaged.
+# The tracked config.lua holds blanks permanently; tlib.secrets overlays this
+# file onto Config at server start. See tLib/shared/imports/secrets/server.lua.
+config.local.lua
+config/config.local.lua

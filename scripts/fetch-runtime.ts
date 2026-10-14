@@ -1,17 +1,11 @@
 /**
- * Fetch the PocketBase binary into .runtime/.
+ * Fetch the PocketBase binary into .runtime/, one pinned version for every
+ * platform. Committing the binaries instead cost a 57 MB .git and still let the
+ * two platforms drift a patch apart.
  *
- * This exists because the binaries used to be committed. That cost tDB a 57 MB
- * .git for a 33 MB executable that changes with every upgrade, and it still did
- * not keep the two platforms in step: at the time of writing, bin/pocketbase-linux
- * was 0.40.3 while bin/pocketbase-win.exe was 0.40.4, because each had been
- * replaced by hand on a different day. One pinned version here fixes both
- * problems at once.
- *
- * Integrity is checked against the checksums.txt that PocketBase publishes with
- * the release rather than against hashes recorded here, so this file never has
- * to be updated in lockstep with the archive contents, and a tampered mirror
- * cannot pass by also editing our copy of the expected hash.
+ * Integrity is checked against the checksums.txt PocketBase publishes with the
+ * release, not hashes recorded here, so a tampered mirror cannot pass by also
+ * editing our copy of the expected hash.
  *
  *   bun scripts/fetch-runtime.ts            # current platform
  *   bun scripts/fetch-runtime.ts --all      # both, for building a release
@@ -51,12 +45,8 @@ const TARGETS: Target[] = [
 const sha256 = (buf: Uint8Array) =>
   createHash("sha256").update(buf).digest("hex");
 
-/**
- * The release's checksums.txt, as { asset -> sha256 }.
- *
- * Fetched once and reused for every target so that asking for --all does not
- * pull the same file twice.
- */
+// The release's checksums.txt as { asset -> sha256 }. Fetched once and reused,
+// so --all does not pull it twice.
 async function publishedChecksums(): Promise<Map<string, string>> {
   const res = await fetch(`${BASE}/checksums.txt`);
   if (!res.ok) {
@@ -73,16 +63,9 @@ async function publishedChecksums(): Promise<Map<string, string>> {
   return map;
 }
 
-/**
- * Extract one member from a ZIP, in process.
- *
- * Shelling out was tried first and is not portable enough to keep: the `tar` on
- * PATH under Git Bash is GNU tar, which cannot read a ZIP at all, while the
- * bsdtar that can is a Windows-only absolute path. Rather than branch per
- * platform on which archiver happens to be installed, this reads the container
- * directly -- it is about forty lines, and it removes the last external
- * dependency from a script whose whole job is to make setup reproducible.
- */
+// Extract one member from a ZIP, in process. Shelling out is not portable
+// enough: the `tar` on PATH under Git Bash is GNU tar, which cannot read a ZIP,
+// and the bsdtar that can is a Windows-only absolute path.
 function extractMember(zip: Uint8Array, member: string): Uint8Array {
   const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
   const u16 = (o: number) => view.getUint16(o, true);
@@ -116,7 +99,7 @@ function extractMember(zip: Uint8Array, member: string): Uint8Array {
 
     if (name === member) {
       // The local header repeats the name and extra fields, and its extra
-      // length routinely differs from the central one -- read it, never reuse.
+      // length routinely differs from the central one. Read it, never reuse.
       if (u32(localOffset) !== 0x04034b50) throw new Error("corrupt local header");
       const dataStart =
         localOffset + 30 + u16(localOffset + 26) + u16(localOffset + 28);
@@ -152,8 +135,7 @@ async function fetchTarget(t: Target, sums: Map<string, string>, force: boolean)
 
   const actual = sha256(archive);
   if (actual !== expected) {
-    // Fail rather than warn. A mismatch here means the bytes are not what
-    // PocketBase published, and the only safe move is to not run them.
+    // These are not the bytes PocketBase published, so do not run them.
     throw new Error(
       `checksum mismatch for ${t.asset}\n  expected ${expected}\n  got      ${actual}`,
     );

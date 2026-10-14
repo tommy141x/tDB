@@ -1,0 +1,232 @@
+name: Docs Sync
+
+# Mirrors docs/ into the site repo (TIMMYG-Studios/tWeb). Inlined rather than
+# calling the shared reusable workflow, which act_runner serves stale from cache.
+#
+# tWeb's CI only runs after this pushes, so everything checkable is checked here
+# first: see scripts/check-docs.mjs.
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**"]
+  workflow_dispatch:
+
+env:
+  SLUG: tDB
+
+jobs:
+  sync-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tDB (source)
+        uses: https://github.com/actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ubuntu-latest ships node but not bun, and this repo is bun-only.
+      - name: Set up bun
+        uses: https://github.com/oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Validate documentation
+        run: bun run docs:check
+
+      - name: Checkout tWeb (docs target)
+        uses: https://github.com/actions/checkout@v4
+        with:
+          repository: TIMMYG-Studios/tWeb
+          token: ${{ secrets.REPO_TOKEN }}
+          path: tWeb
+          fetch-depth: 1
+
+      # This directory is owned entirely by this repo, so it is replaced wholesale.
+      # `find | tar` rather than `cp *.mdx`, which silently drops nested folders.
+      - name: Sync documentation
+        run: |
+          set -euo pipefail
+          SRC="docs/content"
+          DEST="tWeb/src/content/docs/$SLUG"
+
+          expected=$(find "$SRC" -name '*.mdx' -type f | wc -l)
+          if [ "$expected" -eq 0 ]; then
+            echo "::error::No .mdx files in $SRC, refusing to publish an empty docs tree."
+            exit 1
+          fi
+
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          (cd "$SRC" && find . -name '*.mdx' -type f -print0 | tar --null -T - -cf -) \
+            | tar -xf - -C "$DEST"
+
+          actual=$(find "$DEST" -name '*.mdx' -type f | wc -l)
+          if [ "$actual" -ne "$expected" ]; then
+            echo "::error::Copied $actual of $expected page(s), aborting before push."
+            exit 1
+          fi
+          echo "Synced $actual page(s)."
+
+      # Media cannot be replaced wholesale: public/assets/$SLUG is shared with the
+      # marketing page. The manifest records what this sync published last time, so
+      # only files deleted here are removed; anything else is left alone.
+      - name: Sync media
+        run: |
+          set -euo pipefail
+          DEST="tWeb/public/assets/$SLUG"
+          MANIFEST="tWeb/.docs-sync/$SLUG-media.txt"
+          mkdir -p "$DEST" "$(dirname "$MANIFEST")"
+
+          if [ -d docs/public ]; then
+            (cd docs/public && find . -type f ! -name '.gitkeep' | sed 's|^\./||' | LC_ALL=C sort) > /tmp/media-new.txt
+          else
+            : > /tmp/media-new.txt
+          fi
+
+          if [ -f "$MANIFEST" ]; then
+            LC_ALL=C sort "$MANIFEST" > /tmp/media-old.txt
+            removed=0
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              if [ -e "$DEST/$f" ]; then
+                rm -f "$DEST/$f"
+                removed=$((removed + 1))
+                echo "  removed $f"
+              fi
+            done < <(comm -23 /tmp/media-old.txt /tmp/media-new.txt)
+            echo "Removed $removed stale media file(s)."
+          else
+            echo "No previous manifest, first tracked sync."
+          fi
+
+          if [ -d docs/public ]; then
+            cp -r docs/public/. "$DEST/"
+            rm -f "$DEST/.gitkeep"
+          fi
+          find "$DEST" -mindepth 1 -type d -empty -delete || true
+
+          # A partial copy must not reach the manifest, or the next run would treat
+          # the missing files as owned and delete them from the live site.
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if [ ! -e "$DEST/$f" ]; then
+              echo "::error::$f did not copy, aborting before the manifest is written."
+              exit 1
+            fi
+          done < /tmp/media-new.txt
+
+          cp /tmp/media-new.txt "$MANIFEST"
+          echo "Published $(wc -l < /tmp/media-new.txt) media file(s)."
+
+      - name: Sync product page
+        env:
+          PRODUCT_SLUG: tdb
+          ASSET_DIR: tDB
+        run: |
+          set -euo pipefail
+          SRC="docs/product.mdx"
+          DEST="tWeb/src/content/software/$PRODUCT_SLUG.mdx"
+
+          # Same reading as the release notes above: an absent source means
+          # "this repo has nothing to say yet", never "delete the live page".
+          if [ ! -f "$SRC" ]; then
+            echo "No $SRC — leaving tWeb's existing product page for $PRODUCT_SLUG alone."
+            exit 0
+          fi
+
+          # Frontmatter only, for the key/slug/pricing checks. The body below
+          # the closing --- is MDX and must not be scanned for `amount:`.
+          fm=$(awk 'NR==1 && $0=="---" {inside=1; next} inside && $0=="---" {exit} inside {print}' "$SRC")
+          if [ -z "$fm" ]; then
+            echo "::error::$SRC has no YAML frontmatter block."
+            exit 1
+          fi
+
+          # tWeb's software collection asserts file name == slug. Catching it
+          # here fails the run that caused it instead of the next unrelated
+          # push to tWeb, which is the one nobody can explain.
+          slug=$(printf '%s\n' "$fm" | sed -n 's/^slug:[[:space:]]*//p' | tr -dc 'a-z0-9')
+          if [ "$slug" != "$PRODUCT_SLUG" ]; then
+            echo "::error::$SRC declares slug '$slug' but syncs to $PRODUCT_SLUG.mdx."
+            exit 1
+          fi
+
+          for key in name tagline category tags updatedAt popularity provider media pricing; do
+            if ! printf '%s\n' "$fm" | grep -q "^$key:"; then
+              echo "::error::$SRC is missing required frontmatter key '$key'."
+              exit 1
+            fi
+          done
+
+          # Amounts are minor units (cents). A float is a rounding bug and a
+          # string is a build failure, so require a plain integer.
+          amounts=$(printf '%s\n' "$fm" | sed -n 's/^[[:space:]]*amount:[[:space:]]*//p' | tr -d '"')
+          if [ -z "$amounts" ]; then
+            echo "::error::$SRC has no pricing tier with an amount."
+            exit 1
+          fi
+          while IFS= read -r a; do
+            case "$a" in
+              '' | *[!0-9]*)
+                echo "::error::pricing amount '$a' is not a non-negative integer (minor units)."
+                exit 1
+                ;;
+            esac
+          done <<<"$amounts"
+
+          # Whole file, not just frontmatter: a <ZoomableImage> in the body
+          # breaks the live page exactly as silently as a gallery entry does,
+          # and a renamed screenshot is the failure that actually happens.
+          srcs=$(grep -o '/assets/[A-Za-z0-9._/-]*' "$SRC" | sort -u || true)
+          while IFS= read -r s; do
+            [ -n "$s" ] || continue
+            case "$s" in
+              "/assets/$ASSET_DIR"/*)
+                rel="docs/public/${s#/assets/$ASSET_DIR/}"
+                if [ ! -f "$rel" ]; then
+                  echo "::error::$SRC references $s but there is no $rel in this repo."
+                  exit 1
+                fi
+                ;;
+              /assets/*)
+                echo "::error::$SRC references $s, outside this repo's /assets/$ASSET_DIR/."
+                exit 1
+                ;;
+            esac
+          done <<<"$srcs"
+
+          docsurl=$(printf '%s\n' "$fm" | sed -n 's/^docsUrl:[[:space:]]*//p' | tr -d '"')
+          if [ -n "$docsurl" ] && ! printf '%s' "$docsurl" | grep -qE '^/docs/[A-Za-z0-9/-]+$'; then
+            echo "::error::docsUrl '$docsurl' is not a /docs/... path tWeb will accept."
+            exit 1
+          fi
+
+          mkdir -p "$(dirname "$DEST")"
+          cp "$SRC" "$DEST"
+          echo "Synced product page -> src/content/software/$PRODUCT_SLUG.mdx"
+
+      - name: Commit + push to tWeb
+        env:
+          PRODUCT_SLUG: tdb
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          cd tWeb
+          git config user.name "Gitea Actions Bot"
+          git config user.email "actions@gitea.local"
+
+          git add "src/content/docs/$SLUG/" "public/assets/$SLUG/" ".docs-sync/$SLUG-media.txt"
+
+          # A single file, so `git add` on it is fatal if the sync step above
+          # took its absent-source exit. Guard it the same way as the changelog.
+          if [ -f "src/content/software/$PRODUCT_SLUG.mdx" ]; then
+            git add "src/content/software/$PRODUCT_SLUG.mdx"
+          fi
+
+          if git diff --staged --quiet; then
+            echo "No documentation changes to sync."
+          else
+            git commit -m "docs($SLUG): sync from source ($ACTOR@${SHA:0:7})"
+            git push
+          fi
