@@ -32,15 +32,17 @@ Fixed when the call runs and returns a value instead of erroring.
 
 ## "Only superusers can perform this action", repeating
 
-**Cause.** The credentials in `config.lua` no longer match the database. Token
-expiry is *not* the cause: tDB refreshes the superuser token ahead of time, on a
-schedule read from the token itself.
+**Cause.** The superuser credentials tDB is using no longer match the database.
+Token expiry is *not* the cause: tDB refreshes the superuser token ahead of time,
+on a schedule read from the token itself.
 
 **Fix.**
 
-1. Open `config.lua` and blank both `Config.Superuser.Email` and `Password`.
+1. Unset `tdb_superuser_email` and `tdb_superuser_password` in `server.cfg`, and
+   delete the `Config.Superuser` block from `config.local.lua`.
 2. Restart the resource. tDB reprovisions the superuser and writes the new
-   credentials back, printing the new password once in the startup box.
+   credentials back to `config.local.lua`, printing the new password once in the
+   startup box.
 
 Fixed when the startup box reports the client authenticated.
 
@@ -134,7 +136,7 @@ Open an issue on the
 
 - The exact error text from the server console, as text rather than a screenshot
 - The full startup box
-- Your `config.lua` **with the superuser password and S3 secret removed**
+- Your `config.lua` — it holds no credentials, so it is safe to paste as-is
 - The statement involved, if it's a SQL error
 
 ---

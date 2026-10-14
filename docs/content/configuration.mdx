@@ -9,15 +9,47 @@ published: true
 Everything lives in `config.lua`, in the resource folder. The defaults are meant
 to work as shipped; most servers change nothing.
 
-<Callout type="info" title="config.lua is created for you">
-  The resource ships `config.example.lua`, the fully-commented template. On first
-  start tDB copies it to `config.lua` and edits that copy from then on. Edit
-  `config.lua` — updates overwrite the example. `config.lua` is gitignored on
-  purpose: tDB writes the generated superuser password into it.
+<Callout type="info" title="Credentials do not go in config.lua">
+  Every credential-shaped key in `config.lua` ships blank and is meant to stay
+  blank, so the file is safe to commit and safe to paste. Set a real value as a
+  server convar instead — see [Where a credential comes
+  from](#where-a-credential-comes-from).
 
-  Every default below is the value in `config.example.lua`, and the same value
+  Every default below is the value shipped in `config.lua`, and the same value
   tDB falls back to when a key is missing.
 </Callout>
+
+## Where a credential comes from
+
+Three places, and the first one that is set wins:
+
+| | Where | Set it by |
+| --- | --- | --- |
+| 1 | a server convar | `set tdb_superuser_password "…"` in `server.cfg` |
+| 2 | `config.local.lua` | editing that file; it is gitignored and never packaged |
+| 3 | `config.lua` | nothing — it ships blank and stays blank |
+
+The convar name is `tdb_`, then the option's path with the dots as underscores,
+lowercased: `Config.Superuser.Password` is `tdb_superuser_password`,
+`Config.Advanced.S3.SecretKey` is `tdb_advanced_s3_secretkey`.
+
+If you already have a password, the convar is the route to use: nothing is
+written to disk and nothing can be committed by accident. It also overrides a
+password tDB generated earlier, with no file to clean up first.
+
+`config.local.lua` exists because a convar cannot be written to. tDB generates a
+superuser password on first start and has to keep it somewhere, or the admin
+login would change on every restart. It uses the same syntax as `config.lua` and
+needs only the keys you are overriding:
+
+```lua title="config.local.lua"
+Config = Config or {}
+
+Config.Superuser = {
+    Email = "admin@localhost.local",
+    Password = "…",
+}
+```
 
 ## Top level
 
@@ -37,18 +69,23 @@ Config.Superuser = {
 }
 ```
 
-Left empty, tDB generates both on first start and writes them back into this
-file. Fill them in yourself to pin a known login.
+Blank here, always. To pin a login you already have:
 
-The generated password is printed in the server console **once**, on the run that
-creates it. Every later start redacts it, so after that run it lives only in
-`config.lua`.
+```txt title="server.cfg"
+set tdb_superuser_email "admin@example.com"
+set tdb_superuser_password "…"
+```
+
+With neither convar set, tDB generates both on first start and writes them into
+`config.local.lua`. The generated password is printed in the server console
+**once**, on the run that creates it. Every later start redacts it, so after
+that run it lives only in `config.local.lua`.
 
 <Callout type="warning" title="These are stored in plain text">
-  `config.lua` holds the superuser password unencrypted. Keep the file out of
-  version control and off shared hosting panels. Rotating it means changing it
-  here and in the admin UI, or blanking both fields and restarting to have tDB
-  reprovision.
+  Both the convar and `config.local.lua` hold the superuser password
+  unencrypted. Keep `server.cfg` and `config.local.lua` off shared hosting
+  panels. To rotate: delete the pair from `config.local.lua`, unset the convars,
+  restart.
 </Callout>
 
 ## Backups
@@ -196,8 +233,9 @@ Settings only ever travel `config.lua` → PocketBase. PocketBase's
 `GET /api/settings` omits `s3.secret` entirely — it comes back undefined, not
 masked — so reading the instance's settings into `config.lua` would replace a real
 credential with an empty string. An S3 secret you set in the admin UI is therefore
-never written into `config.lua` for you; copy it across yourself if you want
-`Manage = true`.
+never written back for you. If you want `Manage = true`, supply the keys yourself
+as `tdb_advanced_s3_accesskey` and `tdb_advanced_s3_secretkey`; the fields in
+`config.lua` stay blank.
 
 Other fields in the block are still compared, so a rotated `SecretKey` is pushed
 even when the bucket, region and endpoint are unchanged.

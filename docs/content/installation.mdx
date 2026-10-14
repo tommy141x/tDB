@@ -48,13 +48,15 @@ ensure tDB
 
 ### Start the server
 
-On first start tDB creates `config.lua` from `config.example.lua`, then
-provisions PocketBase itself: it creates the superuser, writes the credentials
-into `config.lua`, and authenticates. The PocketBase web installer never appears.
+On first start tDB provisions PocketBase itself: it creates the superuser, writes
+the credentials into `config.local.lua`, and authenticates. The PocketBase web
+installer never appears.
 
 **Copy the superuser password out of that first startup box.** It is shown once,
 on the run that generates it, and redacted on every start after. It is also in
-`config.lua`, which is gitignored and must stay that way.
+`config.local.lua`, which is gitignored and must stay that way. To pin a login of
+your own instead, set `tdb_superuser_email` and `tdb_superuser_password` in
+`server.cfg` — see [Configuration](/docs/tDB/configuration#where-a-credential-comes-from).
 
 You're done when the startup box reports the database ready and prints an admin
 URL. If it says **Waiting for tLib's HTTP listener** instead, that's not an

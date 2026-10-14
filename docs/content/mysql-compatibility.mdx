@@ -23,7 +23,37 @@ construct. tDB does not quietly change the meaning of a statement.
 | `ON UPDATE CURRENT_TIMESTAMP` | a trigger |
 | `DELETE ... LIMIT`, `LIMIT offset, count` | SQLite's forms |
 | backticks, `IF()`, `IFNULL()`, `CONCAT()`, `NOW()`, `UNIX_TIMESTAMP()` | SQLite equivalents |
+| `MATCH (a, b) AGAINST (? IN BOOLEAN MODE)` | a substring search, `a LIKE '%'\|\|?\|\|'%' OR b LIKE …` — see the note below |
+| `ALTER TABLE … MODIFY`/`CHANGE COLUMN`, `ADD FOREIGN KEY` | the table is rebuilt, carrying rows, indexes and triggers across |
+| `SET @v := (SELECT IF(…)) ` + `PREPARE`/`EXECUTE` | the condition is evaluated and the chosen branch runs |
+| `CREATE PROCEDURE … IF NOT EXISTS … END IF` + `CALL` | the same: the condition is evaluated against the live schema |
+| `SIGNAL SQLSTATE '…' SET MESSAGE_TEXT = 'x'` (in a trigger) | `SELECT RAISE(ABORT, 'x')` |
+| `UPDATE a JOIN b ON … SET …`, multi-table `DELETE` | an `EXISTS` subquery |
+| `IN (?)` with an array, `VALUES ?` with rows | expanded into a list, as mysql2 does |
 | `DATABASE()`, `SCHEMA()` | `'main'`, the name SQLite gives its primary schema |
+
+## Full-text search is approximated
+
+`MATCH … AGAINST` becomes a substring search across the same columns. This is a
+**stated approximation**, not an equivalence, and the differences are:
+
+- **No relevance ranking.** `MATCH` in MySQL orders by relevance when you do not
+  order by anything else. Of the nine `MATCH` statements measured across
+  ox_banking and ox_mdt, seven carry their own `ORDER BY`, so they do not read
+  relevance even on MySQL — but the two that do not will come back in an
+  arbitrary order.
+- **`BOOLEAN MODE` operators are taken literally.** Searching for `+john` looks
+  for the text `+john`, and `john*` for `john*`. MySQL would treat those as
+  "must contain" and "prefix".
+- **It is more permissive than MySQL, not less.** MySQL applies a minimum token
+  length (`innodb_ft_min_token_size`, 3 by default), so a two-character search
+  returns nothing there and does return rows here.
+
+The alternative was to refuse the statement, which is what tDB used to do — and
+that meant the resource's search box returned an error rather than rows. SQLite's
+real full-text search is FTS5, a virtual table needing a shadow copy of each
+searched table plus triggers to keep it in sync; a `SELECT` cannot create that,
+and nothing asked for it.
 | `VERSION()` | `sqlite_version()`. Not spoofed as MySQL, so a script that version-gates on MariaDB takes its own not-MariaDB branch |
 | `INT UNSIGNED ... AUTO_INCREMENT` | `INTEGER ... AUTOINCREMENT`. SQLite accepts AUTOINCREMENT only on a column declared exactly `INTEGER` |
 | `AUTO_INCREMENT` on a column of a composite `PRIMARY KEY` | the key narrows to that column, and the index the wider key gave you is created separately |
