@@ -1,31 +1,9 @@
 /**
- * oxmysql compatibility adapter.
- *
- * Presents the oxmysql export surface (and the mysql-async / ghmattimysql names
- * it in turn replaces) on top of PocketBase's SQLite database, so scripts
- * written against oxmysql - qb-core, ox_core, lb-phone and friends - run
- * unmodified.
- *
- * How it works: MySQL statements are translated to SQLite by
- * utils/sql-translator.js and executed through the pb_hooks SQL routes, which
- * return dynamically shaped, correctly typed rows. This adapter's own job is
- * narrow - argument handling, statement classification, and returning exactly
- * what each oxmysql export returns.
- *
- * Return values were taken from oxmysql 2.12.0's own source rather than from
- * its docs, because two of them are easy to get backwards:
- *
- *   - `execute` and `fetch` are aliases of `query` (rows), NOT of `update`.
- *     The mysql-async compatibility layer separately maps its `execute` to
- *     `update`, which is where the confusion comes from.
- *   - `prepare` and `rawExecute` return different things depending on whether a
- *     callback was supplied. Every await/async path in oxmysql goes through the
- *     callback form, so that path unpacks a single row - and a single-column
- *     row down to its bare value.
- *
- * Anything that cannot be translated faithfully raises an error naming the
- * construct. A wrong row is far worse than a failed call: it corrupts save data
- * silently, and the script author has no reason to suspect the database layer.
+ * oxmysql compatibility adapter: the oxmysql export surface (plus the
+ * mysql-async / ghmattimysql names it provides) over PocketBase's SQLite.
+ * MySQL is translated by utils/sql-translator.js and run through the pb_hooks
+ * SQL routes. Anything that cannot be translated faithfully raises an error
+ * naming the construct, because a silently wrong row corrupts save data.
  */
 
 // Relative to this file: a required module resolves from its own directory,
@@ -33,7 +11,9 @@
 const translator = require("../utils/sql-translator.js");
 const { describeRouteError } = require("../utils/route-error.js");
 
-// Export name -> how the result is shaped. See the note above about `execute`.
+// Export name -> result shape, read off oxmysql 2.12.0's source rather than its
+// docs: `execute` and `fetch` alias `query` (rows), not `update`. Only the
+// mysql-async compat layer maps its own `execute` to `update`.
 const RESULT_MODES = {
   query: "rows",
   execute: "rows",
@@ -48,9 +28,13 @@ const RESULT_MODES = {
   store: "store",
 };
 
-// Legacy names oxmysql provides on behalf of the resources it replaces. The
-// manifest declares `provide 'mysql-async'` and `provide 'ghmattimysql'`, so
-// these have to exist for that claim to be true.
+// Legacy names oxmysql provides on behalf of the resources it replaces.
+//
+// These are the mysql-async spellings, and oxmysql publishes them UNDER THE
+// `mysql-async` RESOURCE NAME, not under its own. tDB registers them both ways:
+// as `exports.tDB:mysql_fetch_all` and, via ExportRouter.registerAliases, as
+// `exports['mysql-async']:mysql_fetch_all` - which is the one real scripts
+// call. See ALIASED_RESOURCES below.
 const LEGACY_ALIASES = {
   mysql_execute: "update",
   mysql_insert: "insert",
@@ -60,8 +44,40 @@ const LEGACY_ALIASES = {
   mysql_store: "store",
 };
 
+// Which export names to publish under which other resource's name.
+//
+// Transcribed from oxmysql's own registration loop and its two compatibility
+// tables (src/index.ts, src/compatibility/*.ts):
+//
+//   * oxmysql publishes everything it has, plus `_async` and `Sync` for each.
+//   * ghmattimysql gets execute/scalar/transaction/store, plus `Sync` forms.
+//     Its `execute` maps from `query`, so it means ROWS.
+//   * mysql-async gets the six `mysql_*` names, plain only - oxmysql does not
+//     give that one `Sync` variants.
+//
+// Note the trap `ghmattimysql:execute` sets: it is rows, while
+// `mysql-async:mysql_execute` is affectedRows. Both names already resolve
+// correctly through RESULT_MODES and LEGACY_ALIASES, so publishing the NAME is
+// all that is needed here - the meaning is already right.
+const GHMATTI_METHODS = ["execute", "scalar", "transaction", "store"];
+
 // Statements that return rows. Everything else is run for its effect.
-const ROW_KEYWORDS = ["SELECT", "WITH", "VALUES", "PRAGMA", "EXPLAIN"];
+//
+// SHOW is here because the translator rewrites `SHOW TABLES [LIKE ?]` into a
+// SELECT over sqlite_master, so by the time anything executes it IS a row
+// query -- but canHandle() runs on the ORIGINAL text, before translation, and
+// a leading keyword it does not recognise means no adapter claims the call at
+// all. Measured 2026-10-13: night_shifts probes `SHOW TABLES LIKE ?` per table
+// at startup and gates playerConnecting on the result, so every one of those
+// failing with "No adapter could handle export 'scalar'" left the server
+// rejecting all connections with "currently migrating the database".
+// DESCRIBE/DESC return rows too, and are rewritten the same way SHOW is.
+const ROW_KEYWORDS = ["SELECT", "WITH", "VALUES", "PRAGMA", "EXPLAIN", "SHOW", "DESCRIBE", "DESC"];
+
+// Anything that opens with a word and is not obviously a collection name. A
+// statement claimed this way is still translated, so an unknown construct is
+// refused by name rather than falling through to a misleading router error.
+const STATEMENT_SHAPED = /^\s*[A-Za-z_][A-Za-z0-9_]*\s+\S/;
 
 // Leading keywords accepted as SQL at all.
 const SQL_KEYWORDS = ROW_KEYWORDS.concat([
@@ -123,9 +139,23 @@ class OxMySQLAdapter {
     ]);
   }
 
-  // ==========================================================================
+  /**
+   * Which export names to publish under which OTHER resource's name, so an
+   * unported script's `exports.oxmysql:query(...)` reaches tDB.
+   */
+  static aliasedResources() {
+    const ghmatti = [];
+    for (const name of GHMATTI_METHODS) ghmatti.push(name, `${name}Sync`);
+
+    return {
+      // Everything, since a consumer written against oxmysql may call any of it.
+      oxmysql: OxMySQLAdapter.buildExportList(),
+      ghmattimysql: ghmatti,
+      "mysql-async": Object.keys(LEGACY_ALIASES),
+    };
+  }
+
   // Cache controls
-  // ==========================================================================
 
   enableCache(ttl = 60000, maxSize = 100) {
     this.cacheConfig = { enabled: true, ttl, maxSize };
@@ -139,10 +169,7 @@ class OxMySQLAdapter {
     return true;
   }
 
-  /**
-   * Drop cached results. Called automatically after every write, so a cached
-   * read can never outlive the data it described.
-   */
+  // Called after every write, so a cached read cannot outlive its data.
   invalidateCache(pattern) {
     if (!pattern) {
       this.queryCache.clear();
@@ -161,10 +188,9 @@ class OxMySQLAdapter {
   }
 
   cacheKey(sql, params) {
-    // \u0000 as the separator: it cannot occur in SQL, so no pair of
-    // (sql, params) can collide with another by concatenation. Written as an
-    // escape rather than a literal - a raw NUL byte in the source makes the
-    // file binary to git and ripgrep.
+    // NUL separator: it cannot occur in SQL, so no two (sql, params) pairs can
+    // collide by concatenation. Escaped, not literal - a raw NUL byte would make
+    // the file binary to git and ripgrep.
     return `${sql}\u0000${JSON.stringify(params === undefined ? null : params)}`;
   }
 
@@ -192,9 +218,7 @@ class OxMySQLAdapter {
     this.queryCache.set(this.cacheKey(sql, params), { at: Date.now(), value });
   }
 
-  // ==========================================================================
   // Dispatch
-  // ==========================================================================
 
   canHandle(exportName, args) {
     if (!this.supportedExports.includes(exportName)) return false;
@@ -213,7 +237,19 @@ class OxMySQLAdapter {
 
     if (typeof args[0] !== "string") return false;
 
-    return SQL_KEYWORDS.includes(OxMySQLAdapter.leadingKeyword(args[0]));
+    // Claim anything that reads as a statement, not only the keywords we know.
+    //
+    // An unrecognised leading keyword used to mean no adapter claimed the call,
+    // and the router then reported "No adapter could handle export 'scalar'" --
+    // which names the export, not the statement, and reads like a tDB wiring
+    // fault. The caller sent SQL; the honest answer is which construct is
+    // unsupported, and the translator already produces exactly that. So take
+    // the call and let it explain itself.
+    if (SQL_KEYWORDS.includes(OxMySQLAdapter.leadingKeyword(args[0]))) {
+      return true;
+    }
+
+    return STATEMENT_SHAPED.test(args[0]);
   }
 
   handle(exportName, args) {
@@ -274,13 +310,9 @@ class OxMySQLAdapter {
     return this.wrapAsync(handler, `oxmysql:${exportName}`)();
   }
 
-  // ==========================================================================
   // Execution
-  // ==========================================================================
 
-  /**
-   * Run one statement and shape the result the way the calling export does.
-   */
+  // Run one statement and shape the result the way the calling export does.
   async runStatement(mode, sql, params, call) {
     await this.ready();
 
@@ -291,9 +323,8 @@ class OxMySQLAdapter {
     const wantsRows = mode === "rows" || mode === "row" || mode === "scalar";
     const kind = OxMySQLAdapter.statementKind(sql);
 
-    // A row-shaped export against a write statement, or the reverse, is not an
-    // error in oxmysql - it just yields nothing useful. Mirror that rather than
-    // inventing a failure.
+    // In oxmysql a row-shaped export against a write statement (or the reverse)
+    // is not an error, it just yields nothing useful. Mirror that.
     if (wantsRows && kind !== "rows") {
       const result = await this.execute(sql, params);
       return mode === "rows" ? result : null;
@@ -318,13 +349,10 @@ class OxMySQLAdapter {
   }
 
   /**
-   * prepare/rawExecute accept one set of parameters or many, and unpack their
-   * result differently depending on whether a callback was given.
-   *
-   * This mirrors oxmysql exactly, including the asymmetry: its async and await
-   * paths all supply a callback internally, so those unwrap a lone row - and a
-   * lone single-column row down to the value itself - while a direct call
-   * without a callback returns the rows array.
+   * prepare/rawExecute take one parameter set or many. The callback asymmetry is
+   * oxmysql's: its async/await paths all supply a callback internally, so those
+   * unwrap a lone row, and a lone single-column row down to the bare value,
+   * while a callback-less call gets the rows array.
    */
   async runParameterSets(mode, sql, params, call) {
     const sets = OxMySQLAdapter.parameterSets(params);
@@ -342,16 +370,13 @@ class OxMySQLAdapter {
           results.push(result);
         } else {
           const keyword = OxMySQLAdapter.leadingKeyword(sql);
-          results.push(
-            keyword === "INSERT" ? result.insertId : result.affectedRows,
-          );
+          results.push(keyword === "INSERT" ? result.insertId : result.affectedRows);
         }
       }
     }
 
     if (results.length !== 1) return results;
 
-    // Without a callback, hand back the single result untouched.
     if (!call.callback) return results[0];
 
     if (unpack && kind === "rows") {
@@ -366,10 +391,7 @@ class OxMySQLAdapter {
     return results[0];
   }
 
-  /**
-   * Run several statements atomically. Returns true or false, never throws -
-   * which is what oxmysql callers branch on.
-   */
+  // Atomic. Returns true/false and never throws; oxmysql callers branch on that.
   async runTransaction(queries, params) {
     await this.ready();
 
@@ -379,10 +401,8 @@ class OxMySQLAdapter {
       for (const entry of OxMySQLAdapter.parseTransaction(queries, params)) {
         const translated = await this.translate(entry.sql, entry.params);
 
-        // The statement first, then what it spun off. An inline KEY becomes a
-        // CREATE INDEX on a table that does not exist yet if these run the
-        // other way round - which is how they used to be ordered here, while
-        // execute() below had it right.
+        // Statement first, then what it spun off: reversed, an inline KEY
+        // becomes a CREATE INDEX on a table that does not exist yet.
         statements.push({ sql: translated.sql, params: translated.params });
         for (const extra of translated.extraStatements) {
           statements.push({ sql: extra });
@@ -402,9 +422,6 @@ class OxMySQLAdapter {
     }
   }
 
-  /**
-   * Run a row-returning statement.
-   */
   async select(sql, params) {
     const cached = this.readCache(sql, params);
     if (cached !== undefined) return cached;
@@ -420,23 +437,18 @@ class OxMySQLAdapter {
     return response.rows;
   }
 
-  /**
-   * Run a statement for its effect.
-   *
-   * Some MySQL DDL becomes several SQLite statements - an inline KEY becomes a
-   * CREATE INDEX, an ON UPDATE CURRENT_TIMESTAMP becomes a trigger. Those go
-   * out as one atomic batch, so a table can never end up created without the
-   * indexes and triggers that were declared with it.
-   */
+  // Some MySQL DDL becomes several SQLite statements (inline KEY -> CREATE INDEX,
+  // ON UPDATE CURRENT_TIMESTAMP -> trigger). Those go out as one atomic batch so
+  // a table cannot end up created without the indexes and triggers declared with it.
   async execute(sql, params) {
     const translated = await this.translate(sql, params);
     let response;
 
     if (translated.extraStatements.length) {
       const batch = await this.send("/api/tdb/batch", {
-        statements: [
-          { sql: translated.sql, params: translated.params },
-        ].concat(translated.extraStatements.map((extra) => ({ sql: extra }))),
+        statements: [{ sql: translated.sql, params: translated.params }].concat(
+          translated.extraStatements.map((extra) => ({ sql: extra }))
+        ),
         transaction: true,
       });
       response = batch.results[0];
@@ -457,9 +469,7 @@ class OxMySQLAdapter {
     };
   }
 
-  // ==========================================================================
   // Translation
-  // ==========================================================================
 
   async ready() {
     if (!this.translatorReady) {
@@ -468,20 +478,22 @@ class OxMySQLAdapter {
     await this.translatorReady;
   }
 
-  /**
-   * Translate MySQL to SQLite, loading any schema the translation needs first.
-   */
-  async translate(sql, params) {
-    // ON DUPLICATE KEY UPDATE needs a conflict target, which only the table's
-    // schema can supply. Translation itself is synchronous, so the schema is
-    // fetched up front and resolved from cache during the translation.
-    if (/\bON\s+DUPLICATE\s+KEY\b/i.test(sql)) {
-      const match = /\bINSERT\s+(?:IGNORE\s+)?INTO\s+[`"\[]?([A-Za-z0-9_$]+)/i.exec(
-        sql,
-      );
-      if (match) await this.loadSchema(match[1]);
-    }
+  // ON DUPLICATE KEY UPDATE needs a conflict target that only the table's
+  // schema can supply, and translateSync below is synchronous, so the schema is
+  // fetched up front and resolved from cache inside it.
+  async prepareSchema(sql) {
+    if (!/\bON\s+DUPLICATE\s+KEY\b/i.test(sql)) return;
 
+    const match = /\bINSERT\s+(?:IGNORE\s+)?INTO\s+[`"\[]?([A-Za-z0-9_$]+)/i.exec(sql);
+    if (match) await this.loadSchema(match[1]);
+  }
+
+  // Throws synchronously. Split out of translate() so a caller that expects a
+  // failure can catch it without a promise ever existing: FiveM's runtime
+  // reports a rejected promise even when it is awaited inside try/catch, so the
+  // sql importer's skip-this-trigger path printed a stack trace for an outcome
+  // it had already handled. Call prepareSchema first.
+  translateSync(sql, params) {
     const translated = translator.translate(sql, params, {
       resolveConflictTarget: (table, insertColumns) =>
         this.resolveConflictTarget(table, insertColumns),
@@ -491,7 +503,17 @@ class OxMySQLAdapter {
       sql: translated.sql,
       params: translated.params,
       extraStatements: translated.extraStatements || [],
+      // Passed through, or an ALTER needing a table rebuild would lose its
+      // descriptor here and the UNTRANSLATED original would be executed -
+      // which is exactly what happened: SQLite answered 'near "CHANGE":
+      // syntax error'.
+      rebuild: translated.rebuild,
     };
+  }
+
+  async translate(sql, params) {
+    await this.prepareSchema(sql);
+    return this.translateSync(sql, params);
   }
 
   async loadSchema(table) {
@@ -509,20 +531,23 @@ class OxMySQLAdapter {
   }
 
   /**
-   * Choose the SQLite ON CONFLICT target for a MySQL ON DUPLICATE KEY UPDATE.
-   *
-   * MySQL fires on whichever unique constraint the row violates; SQLite makes
-   * you name one. The only candidate that can behave like MySQL here is a key
-   * whose every column the statement actually supplies - a conflict target the
-   * INSERT never provides values for could never match, so the upsert would
-   * silently degrade into a plain insert and duplicate rows.
+   * MySQL fires ON DUPLICATE KEY on whichever unique constraint the row violates;
+   * SQLite makes you name one. Only a key whose every column the statement
+   * supplies can behave the same: a target the INSERT gives no values for can
+   * never match, and the upsert degrades into a plain insert with duplicate rows.
    */
+  // Returned when the insert cannot collide with any unique key, so the
+  // ON DUPLICATE KEY UPDATE clause is unreachable and a plain INSERT is the
+  // faithful translation. A string rather than a Symbol so it survives being
+  // passed through the translator's options object unchanged.
+  static NO_CONFLICT_POSSIBLE = "__tdb_no_conflict_possible";
+
   resolveConflictTarget(table, insertColumns) {
     const schema = this.schemaCache.get(table);
 
     if (!schema) {
       throw new Error(
-        `Cannot translate ON DUPLICATE KEY UPDATE on "${table}": the table's schema could not be read`,
+        `Cannot translate ON DUPLICATE KEY UPDATE on "${table}": the table's schema could not be read`
       );
     }
 
@@ -538,26 +563,42 @@ class OxMySQLAdapter {
       return null; // The translator reports this case in its own words.
     }
 
-    const supplied = new Set(
-      (insertColumns || []).map((c) => String(c).toLowerCase()),
-    );
+    const supplied = new Set((insertColumns || []).map((c) => String(c).toLowerCase()));
     const covered = candidates.find((candidate) =>
-      candidate.every((column) => supplied.has(String(column).toLowerCase())),
+      candidate.every((column) => supplied.has(String(column).toLowerCase()))
     );
 
     if (covered) return covered;
 
+    // The statement supplies NONE of the columns of ANY unique key: there is
+    // no collision for MySQL to detect either, so its UPDATE clause is
+    // unreachable and it simply inserts. A plain INSERT is therefore not an
+    // approximation, it is exactly what MySQL does.
+    //
+    // This is the habitual-idiom case: `INSERT INTO t (a, b) VALUES (?, ?)
+    // ON DUPLICATE KEY UPDATE ...` against a table whose only unique key is an
+    // autoincrement id. lb-phone's crypto app does it and threw on every boot
+    // until this was separated out.
+    //
+    // The PARTIAL case stays a refusal, deliberately: if the insert supplies
+    // some but not all of a composite unique key, MySQL may still collide
+    // while SQLite's upsert has no complete conflict target to name - and
+    // guessing there would insert duplicates instead of updating.
+    const overlapsAny = candidates.some((candidate) =>
+      candidate.some((column) => supplied.has(String(column).toLowerCase()))
+    );
+
+    if (!overlapsAny) return OxMySQLAdapter.NO_CONFLICT_POSSIBLE;
+
     throw new Error(
       `Cannot translate ON DUPLICATE KEY UPDATE on "${table}": the statement inserts ` +
-        `(${(insertColumns || []).join(", ") || "no named columns"}) but every unique key ` +
-        `(${candidates.map((c) => c.join("+")).join(", ")}) needs columns it does not supply, ` +
-        "so SQLite would insert duplicates instead of updating",
+        `(${(insertColumns || []).join(", ") || "no named columns"}) which covers part of a ` +
+        `unique key but not all of it (${candidates.map((c) => c.join("+")).join(", ")}), ` +
+        "so SQLite would insert duplicates instead of updating"
     );
   }
 
-  // ==========================================================================
   // Transport
-  // ==========================================================================
 
   async send(route, body) {
     try {
@@ -579,23 +620,18 @@ class OxMySQLAdapter {
     if (this.slowQueryThreshold > 0 && ms >= this.slowQueryThreshold) {
       const compact = String(sql).replace(/\s+/g, " ").trim();
       this.logger.warn(
-        `Slow query (${ms}ms): ${compact.length > 120 ? `${compact.slice(0, 120)}...` : compact}`,
+        `Slow query (${ms}ms): ${compact.length > 120 ? `${compact.slice(0, 120)}...` : compact}`
       );
     }
   }
 
-  // ==========================================================================
   // Argument handling
-  // ==========================================================================
 
   static baseName(exportName) {
     return exportName.replace(/_async$/, "").replace(/Sync$/, "");
   }
 
-  /**
-   * oxmysql accepts (sql), (sql, params), (sql, callback) and
-   * (sql, params, callback).
-   */
+  // oxmysql accepts (sql), (sql, params), (sql, callback), (sql, params, callback).
   static parseArguments(args) {
     const sql = args[0];
     let params;
@@ -611,9 +647,7 @@ class OxMySQLAdapter {
     return { sql, params, callback };
   }
 
-  /**
-   * Normalise prepare/rawExecute parameters into a list of parameter sets.
-   */
+  // Normalise prepare/rawExecute parameters into a list of parameter sets.
   static parameterSets(params) {
     if (params === undefined || params === null) return [undefined];
 
@@ -621,6 +655,34 @@ class OxMySQLAdapter {
       if (params.length && params.every((entry) => Array.isArray(entry))) {
         return params;
       }
+
+      // A batch row that arrives as a 1-INDEXED OBJECT rather than an array.
+      //
+      // This is not an exotic shape: a Lua row with a leading nil hole has an
+      // undefined `#`, so msgpack emits a map, not a sequence -
+      // `{ inventory, owner }` with an empty inventory marshals as
+      // `{"2": owner}`. oxmysql normalises exactly this case
+      // (src/utils/parseExecute.ts, the array-of-objects branch), and without
+      // it N rows collapsed into ONE set whose values were the row objects
+      // themselves.
+      //
+      // ox_inventory's periodic save is built this way: it fills
+      // `parameters[index][total[index]] = data` where `data` is
+      // `next(buffer) and json.encode(buffer) or nil`, then hands the batch to
+      // MySQL.prepare. So every empty inventory in a save batch silently wrote
+      // the wrong rows, or none.
+      //
+      // Guarded on EVERY entry being a plain object: a mixed array is a caller
+      // error, and spreading one shape across the other would invent rows.
+      if (
+        params.length &&
+        params.every(
+          (entry) => entry !== null && typeof entry === "object" && !Array.isArray(entry)
+        )
+      ) {
+        return params.map((entry) => OxMySQLAdapter.positionalFromKeys(entry));
+      }
+
       return [params];
     }
 
@@ -630,14 +692,38 @@ class OxMySQLAdapter {
   }
 
   /**
-   * A transaction accepts a list of query strings, [sql, params] pairs, or
-   * { query, values } objects, with optional parameters shared by all of them.
+   * A 1-indexed object to the positional array it stands for.
+   *
+   * Keys are read as integers and placed at `key - 1`, which is oxmysql's own
+   * rule, so a hole stays a hole and becomes a NULL bind rather than shifting
+   * every later value left.
    */
+  static positionalFromKeys(entry) {
+    const out = [];
+    let highest = 0;
+
+    for (const [key, value] of Object.entries(entry)) {
+      const index = Number.parseInt(key, 10);
+      // A non-numeric key cannot be placed positionally. Returning the object
+      // untouched lets the translator's named-parameter path read it, which is
+      // what a caller passing `{ name = ..., label = ... }` meant.
+      if (!Number.isInteger(index) || index < 1) return entry;
+      out[index - 1] = value;
+      if (index > highest) highest = index;
+    }
+
+    for (let i = 0; i < highest; i++) {
+      if (out[i] === undefined) out[i] = null;
+    }
+
+    return out;
+  }
+
+  // Accepts query strings, [sql, params] pairs or { query, values } objects,
+  // plus optional parameters shared by all of them.
   static parseTransaction(queries, params) {
     if (!Array.isArray(queries)) {
-      throw new Error(
-        `Transaction queries must be an array, received '${typeof queries}'`,
-      );
+      throw new Error(`Transaction queries must be an array, received '${typeof queries}'`);
     }
 
     const shared = params && typeof params === "object" ? params : undefined;
@@ -667,9 +753,7 @@ class OxMySQLAdapter {
     });
   }
 
-  /**
-   * The statement's opening keyword, ignoring leading whitespace and comments.
-   */
+  // The opening keyword, ignoring leading whitespace and comments.
   static leadingKeyword(sql) {
     let rest = String(sql);
 
@@ -696,14 +780,10 @@ class OxMySQLAdapter {
   }
 
   static statementKind(sql) {
-    return ROW_KEYWORDS.includes(OxMySQLAdapter.leadingKeyword(sql))
-      ? "rows"
-      : "exec";
+    return ROW_KEYWORDS.includes(OxMySQLAdapter.leadingKeyword(sql)) ? "rows" : "exec";
   }
 
-  /**
-   * The first column of the first row, which is what scalar returns.
-   */
+  // The first column of the first row, which is what scalar returns.
   static firstValue(rows) {
     if (!rows.length) return null;
 

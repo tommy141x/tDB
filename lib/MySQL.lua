@@ -1,35 +1,78 @@
 ---@diagnostic disable: duplicate-set-field
--- MySQL.lua - the MySQL.* API, for scripts that load oxmysql's library file
--- rather than calling its exports.
---
--- Usage: replace
+-- The MySQL.* API, for scripts that load oxmysql's library file rather than
+-- calling its exports. In the consuming fxmanifest, replace
 --     server_script '@oxmysql/lib/MySQL.lua'
 -- with
 --     server_script '@tDB/lib/MySQL.lua'
--- in the consuming resource's fxmanifest.
+-- Scripts calling exports.oxmysql:query(...) need no change either, but NOT
+-- because of `provide 'oxmysql'`. Measured on a live server: `provide` makes
+-- GetResourceState('oxmysql') report `started`, which is what satisfies a
+-- dependency check, and it does NOT route exports -- exports.oxmysql:scalar()
+-- answered "No such export scalar in resource oxmysql". What routes them is
+-- ExportRouter.registerAliases, which answers `__cfx_export_oxmysql_<method>`
+-- the way oxmysql itself publishes its mysql-async and ghmattimysql names.
 --
--- Scripts that call exports.oxmysql:query(...) need no change at all - tDB
--- declares `provide 'oxmysql'`, which routes that export name here.
---
--- THIS PATH IS FROZEN. lib/MySQL.lua mirrors oxmysql's own lib/MySQL.lua
--- character for character so that swapping one word in a manifest is the
--- entire migration. It is a compatibility contract with an external ecosystem,
--- not this repo's folder convention, so it deliberately sits outside the
--- client/server/shared layout the rest of tDB follows. Moving it under
--- server/ would cost tDB the drop-in property it leads with. Same reasoning
--- applies to pb_hooks/ (PocketBase's --hooksDir) and sql/ (the documented
--- folder users drop .sql files into).
+-- This path is frozen. It mirrors oxmysql's own lib/MySQL.lua so that swapping
+-- one word in a manifest is the entire migration, which is why it sits outside
+-- the client/server/shared layout the rest of tDB follows. Same for pb_hooks/
+-- (PocketBase's --hooksDir) and sql/ (where users drop .sql files).
 
--- The resource this file lives in. It cannot be discovered at runtime:
--- GetCurrentResourceName() returns the resource that *loaded* the file, not
--- the one that ships it. Renaming the folder means changing this and the
--- @tDB/ prefix above together.
+-- The resource that ships this file. Not discoverable at runtime:
+-- GetCurrentResourceName() returns whichever resource *loaded* it. Renaming the
+-- folder means changing this and the @tDB/ prefix above together.
 local resourceName = 'tDB'
+
+-- tDB registers its query exports only once PocketBase is up, a few seconds
+-- after the resource starts. oxmysql has them from its first frame, so a ported
+-- script queries straight away and would get "No such export query_async"
+-- instead of its rows. The readiness exports do exist from the start, so wait on
+-- those. A no-op once the database is up, which is every call but the first few.
+local function waitForDatabase()
+    if not exports[resourceName]:isReady() then
+        exports[resourceName]:awaitConnection()
+    end
+end
+
+-- oxmysql's MySQL.Sync.store returns an integer index into a local table, and
+-- its safeArgs turns a numeric first argument back into the stored string. The
+-- export named `store` is a different thing that hands back the query itself.
+local queryStore = {}
+
+local function addStore(query, cb)
+    assert(type(query) == 'string', 'The SQL Query must be a string')
+
+    local n = #queryStore + 1
+    queryStore[n] = query
+
+    return cb and cb(n) or n
+end
+
+local function resolveQuery(query)
+    if type(query) ~= 'number' then return query end
+
+    local stored = queryStore[query]
+    assert(stored, 'First argument received invalid query store reference')
+    return stored
+end
+
+-- The callback forms can be reached from outside a coroutine, where
+-- awaitConnection has nothing to yield to, so defer those to a thread rather
+-- than blocking the caller. Called while ready, it runs inline as before.
+local function whenReady(fn)
+    if exports[resourceName]:isReady() then
+        return fn()
+    end
+
+    CreateThread(function()
+        waitForDatabase()
+        fn()
+    end)
+end
 
 ---@class MySQL
 MySQL = {}
 
--- Initialize tables for methods that need both callable and .await properties
+-- Tables, not functions: each must be callable and also carry .await.
 MySQL.update = {}
 MySQL.insert = {}
 MySQL.query = {}
@@ -43,85 +86,88 @@ MySQL.rawExecute = {}
 MySQL.Sync = {}
 MySQL.Async = {}
 
--- ============================================================================
--- Promise-based API (.await syntax)
--- ============================================================================
-
----Execute a query and return affected rows
 ---@param query string SQL query
 ---@param parameters? table|array Query parameters
 ---@return number affectedRows Number of rows affected
 MySQL.update.await = function(query, parameters)
-    return exports[resourceName]:update_async(query, parameters or {})
+    waitForDatabase()
+    return exports[resourceName]:update_async(resolveQuery(query), parameters or {})
 end
 
 MySQL.Sync.execute = MySQL.update.await
 
----Execute an insert query and return the insert ID
 ---@param query string SQL INSERT query
 ---@param parameters? table|array Query parameters
 ---@return string|number insertId The ID of the inserted record
 MySQL.insert.await = function(query, parameters)
-    return exports[resourceName]:insert_async(query, parameters or {})
+    waitForDatabase()
+    return exports[resourceName]:insert_async(resolveQuery(query), parameters or {})
 end
 
 MySQL.Sync.insert = MySQL.insert.await
 
----Execute a SELECT query and return all rows
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@return table[] rows Array of result rows
 MySQL.query.await = function(query, parameters)
-    return exports[resourceName]:query_async(query, parameters or {})
+    waitForDatabase()
+    return exports[resourceName]:query_async(resolveQuery(query), parameters or {})
 end
 
 MySQL.Sync.fetchAll = MySQL.query.await
 
----Execute a query and return a single row
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@return table|nil row Single result row or nil
 MySQL.single.await = function(query, parameters)
-    return exports[resourceName]:single_async(query, parameters or {})
+    waitForDatabase()
+    return exports[resourceName]:single_async(resolveQuery(query), parameters or {})
 end
 
 MySQL.Sync.fetchSingle = MySQL.single.await
 
----Execute a query and return a single scalar value
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@return any value Single scalar value
 MySQL.scalar.await = function(query, parameters)
-    return exports[resourceName]:scalar_async(query, parameters or {})
+    waitForDatabase()
+    return exports[resourceName]:scalar_async(resolveQuery(query), parameters or {})
 end
 
 MySQL.Sync.fetchScalar = MySQL.scalar.await
 
----Execute a prepared statement
 ---@param query string SQL query
 ---@param parameters? table|array Query parameters
 ---@return any result Query result
 MySQL.prepare.await = function(query, parameters)
-    return exports[resourceName]:prepare_async(query, parameters or {})
+    waitForDatabase()
+    return exports[resourceName]:prepare_async(resolveQuery(query), parameters or {})
 end
 
----Execute multiple queries as a transaction
 ---@param queries table[] Array of queries {query, parameters} or {query = "", values = {}}
 ---@return table[] results Array of results from each query
-MySQL.transaction.await = function(queries)
-    return exports[resourceName]:transaction_async(queries)
+-- `parameters` is forwarded, as oxmysql's own `.await` does for every method
+-- including transaction. Dropping it was silent: oxmysql applies a shared
+-- parameter table to every bare-string query in the list, so
+--     MySQL.transaction.await({ 'DELETE FROM a WHERE id = ?' }, { 7 })
+-- deleted row 7 under oxmysql and ran with an unbound placeholder under tDB,
+-- then reported the transaction as successful.
+MySQL.transaction.await = function(queries, parameters)
+    waitForDatabase()
+    return exports[resourceName]:transaction_async(resolveQuery(queries), parameters)
 end
 
 MySQL.Sync.transaction = MySQL.transaction.await
 
----Alias of MySQL.query - returns rows, NOT an affected-row count.
----MySQL.Sync.execute and MySQL.Async.execute are the mysql-async names and do
----mean "update"; that difference is oxmysql's, and it is preserved here.
+---Alias of MySQL.query: returns rows, NOT an affected-row count. The
+---mysql-async names MySQL.Sync/Async.execute do mean "update". oxmysql's
+---inconsistency, preserved here.
 ---@param query string SQL query
 ---@param parameters? table|array Query parameters
 ---@return table[] rows
 MySQL.execute.await = function(query, parameters)
-    return exports[resourceName]:execute_async(query, parameters or {})
+    waitForDatabase()
+    return exports[resourceName]:execute_async(resolveQuery(query), parameters or {})
 end
 
 ---Alias of MySQL.query.
@@ -129,7 +175,8 @@ end
 ---@param parameters? table|array Query parameters
 ---@return table[] rows
 MySQL.fetch.await = function(query, parameters)
-    return exports[resourceName]:fetch_async(query, parameters or {})
+    waitForDatabase()
+    return exports[resourceName]:fetch_async(resolveQuery(query), parameters or {})
 end
 
 ---Run a statement without the result unpacking prepare applies
@@ -137,14 +184,11 @@ end
 ---@param parameters? table|array Query parameters
 ---@return any result
 MySQL.rawExecute.await = function(query, parameters)
-    return exports[resourceName]:rawExecute_async(query, parameters or {})
+    waitForDatabase()
+    return exports[resourceName]:rawExecute_async(resolveQuery(query), parameters or {})
 end
 
--- ============================================================================
--- Callback-based API (make tables callable with metatables)
--- ============================================================================
-
----Execute a query with callback (returns affected rows)
+---Returns affected rows.
 ---@param query string SQL query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(affectedRows)
@@ -156,16 +200,18 @@ setmetatable(MySQL.update, {
         end
 
         if callback then
-            exports[resourceName]:update(query, parameters or {}, callback)
+            whenReady(function()
+                exports[resourceName]:update(resolveQuery(query), parameters or {}, callback)
+            end)
         else
-            return exports[resourceName]:update(query, parameters or {})
+            waitForDatabase()
+            return exports[resourceName]:update(resolveQuery(query), parameters or {})
         end
     end
 })
 
 MySQL.Async.execute = MySQL.update
 
----Execute an insert query with callback
 ---@param query string SQL INSERT query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(insertId)
@@ -177,16 +223,18 @@ setmetatable(MySQL.insert, {
         end
 
         if callback then
-            exports[resourceName]:insert(query, parameters or {}, callback)
+            whenReady(function()
+                exports[resourceName]:insert(resolveQuery(query), parameters or {}, callback)
+            end)
         else
-            return exports[resourceName]:insert(query, parameters or {})
+            waitForDatabase()
+            return exports[resourceName]:insert(resolveQuery(query), parameters or {})
         end
     end
 })
 
 MySQL.Async.insert = MySQL.insert
 
----Execute a SELECT query with callback
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(rows)
@@ -198,16 +246,18 @@ setmetatable(MySQL.query, {
         end
 
         if callback then
-            exports[resourceName]:query(query, parameters or {}, callback)
+            whenReady(function()
+                exports[resourceName]:query(resolveQuery(query), parameters or {}, callback)
+            end)
         else
-            return exports[resourceName]:query(query, parameters or {})
+            waitForDatabase()
+            return exports[resourceName]:query(resolveQuery(query), parameters or {})
         end
     end
 })
 
 MySQL.Async.fetchAll = MySQL.query
 
----Execute a query and return single row with callback
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(row)
@@ -219,16 +269,18 @@ setmetatable(MySQL.single, {
         end
 
         if callback then
-            exports[resourceName]:single(query, parameters or {}, callback)
+            whenReady(function()
+                exports[resourceName]:single(resolveQuery(query), parameters or {}, callback)
+            end)
         else
-            return exports[resourceName]:single(query, parameters or {})
+            waitForDatabase()
+            return exports[resourceName]:single(resolveQuery(query), parameters or {})
         end
     end
 })
 
 MySQL.Async.fetchSingle = MySQL.single
 
----Execute a query and return scalar value with callback
 ---@param query string SQL SELECT query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(value)
@@ -240,16 +292,18 @@ setmetatable(MySQL.scalar, {
         end
 
         if callback then
-            exports[resourceName]:scalar(query, parameters or {}, callback)
+            whenReady(function()
+                exports[resourceName]:scalar(resolveQuery(query), parameters or {}, callback)
+            end)
         else
-            return exports[resourceName]:scalar(query, parameters or {})
+            waitForDatabase()
+            return exports[resourceName]:scalar(resolveQuery(query), parameters or {})
         end
     end
 })
 
 MySQL.Async.fetchScalar = MySQL.scalar
 
----Execute a prepared statement with callback
 ---@param query string SQL query
 ---@param parameters? table|array Query parameters
 ---@param callback? function Callback function(result)
@@ -261,22 +315,42 @@ setmetatable(MySQL.prepare, {
         end
 
         if callback then
-            exports[resourceName]:prepare(query, parameters or {}, callback)
+            whenReady(function()
+                exports[resourceName]:prepare(resolveQuery(query), parameters or {}, callback)
+            end)
         else
-            return exports[resourceName]:prepare(query, parameters or {})
+            waitForDatabase()
+            return exports[resourceName]:prepare(resolveQuery(query), parameters or {})
         end
     end
 })
 
----Execute a transaction with callback
 ---@param queries table[] Array of queries
+---@param parameters? table Shared parameters, applied to every bare-string query
 ---@param callback? function Callback function(results)
+--
+-- Three slots, matching oxmysql's uniform `function(self, query, parameters, cb)`
+-- metamethod. With only two, `MySQL.transaction(queries, { 7 }, cb)` bound the
+-- parameter table to `callback`: it is truthy, so the call took the
+-- fire-and-forget branch and the real callback was NEVER invoked. A caller
+-- awaiting it waited forever, with nothing logged anywhere.
+--
+-- `parameters` may still be the callback, because oxmysql's own setCallback
+-- accepts a function in either slot.
 setmetatable(MySQL.transaction, {
-    __call = function(_, queries, callback)
+    __call = function(_, queries, parameters, callback)
+        if type(parameters) == 'function' or (type(parameters) == 'table' and parameters.__cfx_functionReference) then
+            callback = parameters
+            parameters = nil
+        end
+
         if callback then
-            exports[resourceName]:transaction(queries, callback)
+            whenReady(function()
+                exports[resourceName]:transaction(resolveQuery(queries), parameters, callback)
+            end)
         else
-            return exports[resourceName]:transaction(queries)
+            waitForDatabase()
+            return exports[resourceName]:transaction(resolveQuery(queries), parameters)
         end
     end
 })
@@ -292,9 +366,12 @@ setmetatable(MySQL.execute, {
         end
 
         if callback then
-            exports[resourceName]:execute(query, parameters or {}, callback)
+            whenReady(function()
+                exports[resourceName]:execute(resolveQuery(query), parameters or {}, callback)
+            end)
         else
-            return exports[resourceName]:execute(query, parameters or {})
+            waitForDatabase()
+            return exports[resourceName]:execute(resolveQuery(query), parameters or {})
         end
     end
 })
@@ -308,9 +385,12 @@ setmetatable(MySQL.fetch, {
         end
 
         if callback then
-            exports[resourceName]:fetch(query, parameters or {}, callback)
+            whenReady(function()
+                exports[resourceName]:fetch(resolveQuery(query), parameters or {}, callback)
+            end)
         else
-            return exports[resourceName]:fetch(query, parameters or {})
+            waitForDatabase()
+            return exports[resourceName]:fetch(resolveQuery(query), parameters or {})
         end
     end
 })
@@ -324,55 +404,72 @@ setmetatable(MySQL.rawExecute, {
         end
 
         if callback then
-            exports[resourceName]:rawExecute(query, parameters or {}, callback)
+            whenReady(function()
+                exports[resourceName]:rawExecute(resolveQuery(query), parameters or {}, callback)
+            end)
         else
-            return exports[resourceName]:rawExecute(query, parameters or {})
+            waitForDatabase()
+            return exports[resourceName]:rawExecute(resolveQuery(query), parameters or {})
         end
     end
 })
 
--- ============================================================================
--- Additional helper to check if MySQL is ready
--- ============================================================================
-
----Check if the database connection is ready
----@param callback function Callback to execute when ready
-function MySQL.ready(callback)
-    if exports[resourceName]:isReady() then
-        callback()
-    else
-        exports[resourceName]:onReady(callback)
-    end
+-- A table with .await and __call, not a function. oxmysql's is
+-- `setmetatable({ await = onReady }, { __call = ... })`, so callers write both
+-- MySQL.ready(cb) and MySQL.ready.await(). A plain function breaks the second
+-- form, and lb-phone's database checker uses it.
+local function onReady(callback)
+    waitForDatabase()
+    return callback and callback() or true
 end
 
--- ============================================================================
--- Additional OxMySQL exports for compatibility
--- ============================================================================
+MySQL.ready = setmetatable({ await = onReady }, {
+    __call = function(_, callback)
+        Citizen.CreateThreadNow(function() onReady(callback) end)
+    end,
+})
 
----Check if connection is ready (OxMySQL compatibility)
 ---@return boolean ready True if ready
 function MySQL.isReady()
     return exports[resourceName]:isReady()
 end
 
----Wait for connection to be ready (OxMySQL compatibility)
 ---@return boolean connected True when connected
 MySQL.awaitConnection = function()
     return exports[resourceName]:awaitConnection()
 end
 
----Store a query (OxMySQL compatibility - returns query as-is)
+---oxmysql compatibility: returns the query as-is.
 ---@param query string SQL query
 ---@param callback function Callback function(query)
 function MySQL.store(query, callback)
     return exports[resourceName]:store(query, callback)
 end
 
--- ============================================================================
--- Legacy ghmattimysql compatibility
--- ============================================================================
+---Scoped transaction. tDB cannot provide this; see the export's error.
+MySQL.startTransaction = function(callback)
+    return exports[resourceName]:startTransaction(callback)
+end
 
--- ghmattimysql.execute is an alias for MySQL.Async.execute
--- ghmattimysql.executeSync is an alias for MySQL.Sync.execute
+-- ghmattimysql's execute/executeSync are MySQL.Async.execute / MySQL.Sync.execute.
+
+-- oxmysql's alias table covers prepare in both namespaces, and both carry
+-- `store`, which is addStore rather than the export of the same name.
+MySQL.Sync.prepare = MySQL.prepare.await
+MySQL.Async.prepare = MySQL.prepare
+MySQL.Sync.store = addStore
+MySQL.Async.store = addStore
+
+-- Last, so it cannot shadow anything defined above. oxmysql forwards any
+-- unknown MySQL.<name> straight to the export of that name, which is what keeps
+-- a script using a method this file never enumerated from dying on a nil call.
+setmetatable(MySQL, {
+    __index = function(_, index)
+        return function(...)
+            waitForDatabase()
+            return exports[resourceName][index](nil, ...)
+        end
+    end,
+})
 
 print('^2[tDB]^7 MySQL compatibility library loaded')

@@ -1,11 +1,4 @@
-/**
- * PocketBase Native Adapter - Modular Export System
- *
- * Each export is defined as a self-contained object with:
- * - name: export name
- * - canHandle: detection function to determine if this export should handle the call
- * - handle: the actual implementation
- */
+// PocketBase native adapter. Each export carries its own canHandle/handle pair.
 
 // Relative to this file: a required module resolves from its own directory,
 // unlike a manifest server_script, which resolves from the resource root.
@@ -18,22 +11,19 @@ class PocketBaseAdapter {
     this.wrapAsync = wrapAsync;
     this.logger = logger || console;
 
-    // Define all exports as self-contained modules
     this.exports = this.defineExports();
-
-    // Build list of supported export names for quick lookup
     this.supportedExports = this.exports.map((exp) => exp.name);
   }
 
-  /**
-   * Run a row-returning statement through the SQL route.
-   *
-   * The route discovers the result shape itself, which is why the sql*
-   * exports no longer ask the caller for a `columns` map and no longer try
-   * to guess one by regexing the SELECT list.
-   *
-   * @returns {Promise<{columns: string[], rows: object[]}>}
-   */
+  // Names only, so exports can be registered before a client exists. The
+  // handlers close over this.pb and are never invoked on this instance.
+  static exportNames() {
+    const quiet = { info() {}, warn() {}, error() {}, debug() {} };
+    return new PocketBaseAdapter(null, (fn) => fn, quiet).supportedExports;
+  }
+
+  // The route reports the result shape, so the sql* exports never need a
+  // caller-supplied `columns` map.
   async _tdbQuery(sql, params) {
     const result = await this._tdbSend("/api/tdb/query", {
       sql,
@@ -43,13 +33,9 @@ class PocketBaseAdapter {
     return { columns: result.columns || [], rows: result.rows || [] };
   }
 
-  /**
-   * POST to a tDB SQL route, surfacing the database's own error message.
-   *
-   * The SDK rejects on a 400 before the route's { success, error } body is
-   * ever inspected, and its own message for that is "Something went wrong."
-   * describeRouteError digs the real one out.
-   */
+  // The SDK rejects a 400 before the route's { success, error } body is read,
+  // and its own message for that is "Something went wrong." describeRouteError
+  // digs the real one out.
   async _tdbSend(route, body) {
     let result;
 
@@ -57,9 +43,7 @@ class PocketBaseAdapter {
       result = await this.pb.send(route, {
         method: "POST",
         body,
-        // Opt out of the SDK's auto-cancellation, which would otherwise abort
-        // one query as soon as another was issued.
-        requestKey: null,
+        requestKey: null, // Auto-cancellation would abort one query when the next was issued.
       });
     } catch (error) {
       throw new Error(describeRouteError(error));
@@ -72,14 +56,9 @@ class PocketBaseAdapter {
     return result;
   }
 
-  /**
-   * Define all exports with their detection and handling logic together
-   */
   defineExports() {
     return [
-      // ========================================================================
-      // CRUD Operations
-      // ========================================================================
+      // CRUD
       {
         name: "create",
         canHandle: (args) => {
@@ -113,9 +92,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collection, id, data, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb
-              .collection(collection)
-              .update(id, data, options);
+            return await this.pb.collection(collection).update(id, data, options);
           })();
         },
       },
@@ -143,9 +120,7 @@ class PocketBaseAdapter {
         canHandle: (args) => {
           // getOne(collection, id, options?)
           return (
-            typeof args[0] === "string" &&
-            !this.isSQLQuery(args[0]) &&
-            typeof args[1] === "string"
+            typeof args[0] === "string" && !this.isSQLQuery(args[0]) && typeof args[1] === "string"
           );
         },
         handle: (args) => {
@@ -170,9 +145,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collection, page = 1, perPage = 30, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb
-              .collection(collection)
-              .getList(page, perPage, options);
+            return await this.pb.collection(collection).getList(page, perPage, options);
           })();
         },
       },
@@ -196,24 +169,18 @@ class PocketBaseAdapter {
         canHandle: (args) => {
           // getFirstListItem(collection, filter, options?)
           return (
-            typeof args[0] === "string" &&
-            !this.isSQLQuery(args[0]) &&
-            typeof args[1] === "string"
+            typeof args[0] === "string" && !this.isSQLQuery(args[0]) && typeof args[1] === "string"
           );
         },
         handle: (args) => {
           const [collection, filter, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb
-              .collection(collection)
-              .getFirstListItem(filter, options);
+            return await this.pb.collection(collection).getFirstListItem(filter, options);
           })();
         },
       },
 
-      // ========================================================================
       // Realtime Subscriptions
-      // ========================================================================
       {
         name: "subscribe",
         canHandle: (args) => {
@@ -311,9 +278,7 @@ class PocketBaseAdapter {
         },
       },
 
-      // ========================================================================
       // File Operations
-      // ========================================================================
       {
         name: "getFileUrl",
         canHandle: (args) => {
@@ -337,9 +302,7 @@ class PocketBaseAdapter {
         },
       },
 
-      // ========================================================================
       // Filter Helper
-      // ========================================================================
       {
         name: "filter",
         canHandle: (args) => {
@@ -352,9 +315,7 @@ class PocketBaseAdapter {
         },
       },
 
-      // ========================================================================
       // Collection Management
-      // ========================================================================
       {
         name: "getCollections",
         canHandle: () => true,
@@ -426,10 +387,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collectionIdOrName, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb.collections.truncate(
-              collectionIdOrName,
-              options,
-            );
+            return await this.pb.collections.truncate(collectionIdOrName, options);
           })();
         },
       },
@@ -443,7 +401,6 @@ class PocketBaseAdapter {
         handle: (args) => {
           let [collections, deleteMissing = false, options = {}] = args;
 
-          // If collections is a JSON string, parse it
           if (typeof collections === "string") {
             try {
               collections = JSON.parse(collections);
@@ -453,11 +410,7 @@ class PocketBaseAdapter {
           }
 
           return this.wrapAsync(async () => {
-            return await this.pb.collections.import(
-              collections,
-              deleteMissing,
-              options,
-            );
+            return await this.pb.collections.import(collections, deleteMissing, options);
           })();
         },
       },
@@ -473,9 +426,7 @@ class PocketBaseAdapter {
         },
       },
 
-      // ========================================================================
       // Health and Status
-      // ========================================================================
       {
         name: "healthCheck",
         canHandle: () => true,
@@ -486,9 +437,7 @@ class PocketBaseAdapter {
         },
       },
 
-      // ========================================================================
       // Auth Methods
-      // ========================================================================
       {
         name: "listAuthMethods",
         canHandle: (args) => {
@@ -497,9 +446,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collection, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb
-              .collection(collection)
-              .listAuthMethods(options);
+            return await this.pb.collection(collection).listAuthMethods(options);
           })();
         },
       },
@@ -535,9 +482,7 @@ class PocketBaseAdapter {
         },
         handle: (args) => {
           // Alias for authCollectionWithPassword
-          const exp = this.exports.find(
-            (e) => e.name === "authCollectionWithPassword",
-          );
+          const exp = this.exports.find((e) => e.name === "authCollectionWithPassword");
           return exp.handle(args);
         },
       },
@@ -576,14 +521,7 @@ class PocketBaseAdapter {
           return this.wrapAsync(async () => {
             const result = await this.pb
               .collection(collection)
-              .authWithOAuth2Code(
-                provider,
-                code,
-                codeVerifier,
-                redirectURL,
-                createData,
-                options,
-              );
+              .authWithOAuth2Code(provider, code, codeVerifier, redirectURL, createData, options);
             return { token: result.token, record: result.record };
           })();
         },
@@ -597,9 +535,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collection, options = {}] = args;
           return this.wrapAsync(async () => {
-            const result = await this.pb
-              .collection(collection)
-              .authRefresh(options);
+            const result = await this.pb.collection(collection).authRefresh(options);
             return { token: result.token, record: result.record };
           })();
         },
@@ -612,9 +548,7 @@ class PocketBaseAdapter {
         },
         handle: (args) => {
           // Alias for authRefreshCollection
-          const exp = this.exports.find(
-            (e) => e.name === "authRefreshCollection",
-          );
+          const exp = this.exports.find((e) => e.name === "authRefreshCollection");
           return exp.handle(args);
         },
       },
@@ -627,9 +561,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collection, email, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb
-              .collection(collection)
-              .requestOTP(email, options);
+            return await this.pb.collection(collection).requestOTP(email, options);
           })();
         },
       },
@@ -642,9 +574,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collection, email, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb
-              .collection(collection)
-              .requestPasswordReset(email, options);
+            return await this.pb.collection(collection).requestPasswordReset(email, options);
           })();
         },
       },
@@ -655,8 +585,7 @@ class PocketBaseAdapter {
           return typeof args[0] === "string" && typeof args[1] === "string";
         },
         handle: (args) => {
-          const [collection, token, password, passwordConfirm, options = {}] =
-            args;
+          const [collection, token, password, passwordConfirm, options = {}] = args;
           return this.wrapAsync(async () => {
             return await this.pb
               .collection(collection)
@@ -673,9 +602,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collection, email, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb
-              .collection(collection)
-              .requestVerification(email, options);
+            return await this.pb.collection(collection).requestVerification(email, options);
           })();
         },
       },
@@ -688,9 +615,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collection, token, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb
-              .collection(collection)
-              .confirmVerification(token, options);
+            return await this.pb.collection(collection).confirmVerification(token, options);
           })();
         },
       },
@@ -703,9 +628,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collection, newEmail, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb
-              .collection(collection)
-              .requestEmailChange(newEmail, options);
+            return await this.pb.collection(collection).requestEmailChange(newEmail, options);
           })();
         },
       },
@@ -733,9 +656,7 @@ class PocketBaseAdapter {
         handle: (args) => {
           const [collection, recordId, options = {}] = args;
           return this.wrapAsync(async () => {
-            return await this.pb
-              .collection(collection)
-              .listExternalAuths(recordId, options);
+            return await this.pb.collection(collection).listExternalAuths(recordId, options);
           })();
         },
       },
@@ -759,17 +680,14 @@ class PocketBaseAdapter {
         },
       },
 
-      // ========================================================================
       // Batch Operations
-      // ========================================================================
       {
         name: "batch",
         canHandle: () => true,
+        // `_requests` is also the tag the batch* exports recognise the handle
+        // by, so the shape is load-bearing, not just storage.
         handle: () => {
-          return {
-            _batchId: Math.random().toString(36).substr(2, 9),
-            _requests: [],
-          };
+          return { _requests: [] };
         },
       },
 
@@ -850,9 +768,7 @@ class PocketBaseAdapter {
               if (req.type === "create") {
                 batch.collection(req.collection).create(req.data, req.options);
               } else if (req.type === "update") {
-                batch
-                  .collection(req.collection)
-                  .update(req.id, req.data, req.options);
+                batch.collection(req.collection).update(req.id, req.data, req.options);
               } else if (req.type === "delete") {
                 batch.collection(req.collection).delete(req.id, req.options);
               } else if (req.type === "upsert") {
@@ -864,9 +780,7 @@ class PocketBaseAdapter {
         },
       },
 
-      // ========================================================================
-      // SQL Operations (PocketBase native SQL API)
-      // ========================================================================
+      // SQL (PocketBase native SQL API)
       {
         name: "sqlQuery",
         canHandle: (args) => {
@@ -886,9 +800,7 @@ class PocketBaseAdapter {
           return typeof args[0] === "string";
         },
         handle: (args) => {
-          // columnName used to default to "value", which only ever worked if
-          // the caller had aliased their column that way. The first selected
-          // column is the sane default; an explicit name still wins.
+          // Defaults to the first selected column; an explicit name wins.
           const [sql, params = {}, columnName = null] = args;
           return this.wrapAsync(async () => {
             const { columns, rows } = await this._tdbQuery(sql, params);
@@ -949,9 +861,7 @@ class PocketBaseAdapter {
         },
       },
 
-      // ========================================================================
       // Helper Utilities
-      // ========================================================================
       {
         name: "findRecordsByIds",
         canHandle: (args) => {
@@ -1018,30 +928,22 @@ class PocketBaseAdapter {
         handle: () => {
           return {
             createCollection: (name, schema) => {
-              const exp = this.exports.find(
-                (e) => e.name === "createCollection",
-              );
+              const exp = this.exports.find((e) => e.name === "createCollection");
               return exp.handle([{ name, schema }]);
             },
             updateCollection: (idOrName, changes) => {
-              const exp = this.exports.find(
-                (e) => e.name === "updateCollection",
-              );
+              const exp = this.exports.find((e) => e.name === "updateCollection");
               return exp.handle([idOrName, changes]);
             },
             deleteCollection: (idOrName) => {
-              const exp = this.exports.find(
-                (e) => e.name === "deleteCollection",
-              );
+              const exp = this.exports.find((e) => e.name === "deleteCollection");
               return exp.handle([idOrName]);
             },
           };
         },
       },
 
-      // ========================================================================
       // Realtime Messaging
-      // ========================================================================
       {
         name: "sendRealtimeMessage",
         canHandle: (args) => {
@@ -1078,9 +980,7 @@ class PocketBaseAdapter {
         },
       },
 
-      // ========================================================================
       // Email
-      // ========================================================================
       {
         name: "sendEmail",
         canHandle: (args) => {
@@ -1103,9 +1003,6 @@ class PocketBaseAdapter {
     ];
   }
 
-  /**
-   * Check if a string looks like a SQL query
-   */
   isSQLQuery(str) {
     if (typeof str !== "string") return false;
     const upper = str.trim().toUpperCase();
@@ -1122,9 +1019,6 @@ class PocketBaseAdapter {
     return sqlKeywords.some((keyword) => upper.startsWith(keyword));
   }
 
-  /**
-   * Check if this adapter can handle the export call
-   */
   canHandle(exportName, args) {
     const exportDef = this.exports.find((exp) => exp.name === exportName);
     if (!exportDef) return false;
@@ -1137,15 +1031,10 @@ class PocketBaseAdapter {
     }
   }
 
-  /**
-   * Handle the export call
-   */
   handle(exportName, args) {
     const exportDef = this.exports.find((exp) => exp.name === exportName);
     if (!exportDef) {
-      throw new Error(
-        `PocketBase adapter does not support export: ${exportName}`,
-      );
+      throw new Error(`PocketBase adapter does not support export: ${exportName}`);
     }
 
     try {

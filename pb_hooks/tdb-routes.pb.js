@@ -1,29 +1,14 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-/**
- * SQL routes backing the oxmysql compatibility layer.
- *
- * Every route is superuser-gated. $apis.requireAuth() would not be enough: it
- * accepts any authenticated record from any auth collection, so on a server with
- * an open signup collection a player token could run arbitrary SQL here.
- *
- * Handlers run in a pooled runtime with no access to file scope, so the shared
- * helpers are require()d inside each handler rather than at the top of the file.
- */
+// SQL routes backing the oxmysql compatibility layer.
+//
+// Superuser-gated, not requireAuth(): that accepts any record from any auth
+// collection, so on a server with open signup a player token could run
+// arbitrary SQL here. Handlers run in a pooled runtime with no file scope,
+// hence the require() inside each one.
 
-// ============================================================================
-// Rows
-// ============================================================================
-
-/**
- * Run a row-returning statement.
- * POST /api/tdb/query
- * Body: { sql: string, params?: object }
- * -> { success, columns, rows, rowCount }
- *
- * Unlike the older /api/sql/query, the caller does not declare the result
- * shape - it is discovered per query and cached.
- */
+// Body: { sql, params? } -> { success, columns, rows, rowCount }
+// The caller does not declare the result shape; it is discovered and cached.
 routerAdd(
   "POST",
   "/api/tdb/query",
@@ -54,20 +39,9 @@ routerAdd(
   $apis.requireSuperuserAuth(),
 );
 
-// ============================================================================
-// Writes
-// ============================================================================
-
-/**
- * Run a statement for its effect.
- * POST /api/tdb/execute
- * Body: { sql: string, params?: object }
- * -> { success, affectedRows, insertId }
- *
- * The counters come from the driver's own result. The previous implementation
- * issued a separate `SELECT last_insert_rowid()` on a different connection and
- * always reported 0.
- */
+// Body: { sql, params? } -> { success, affectedRows, insertId }
+// Counters come from the driver's own result. A separate
+// `SELECT last_insert_rowid()` lands on a different connection and returns 0.
 routerAdd(
   "POST",
   "/api/tdb/execute",
@@ -97,22 +71,10 @@ routerAdd(
   $apis.requireSuperuserAuth(),
 );
 
-// ============================================================================
-// Batches
-// ============================================================================
-
-/**
- * Run several statements, optionally as one atomic transaction.
- * POST /api/tdb/batch
- * Body: { statements: [{ sql, params?, expect? }], transaction?: boolean }
- * -> { success, results: [...] }
- *
- * `expect` is "rows" or "result" and decides which path a statement takes;
- * it defaults to "result".
- *
- * With transaction:true, any failure rolls the whole batch back - which is what
- * makes oxmysql's transaction export honest rather than best-effort.
- */
+// Body: { statements: [{ sql, params?, expect? }], transaction?: boolean }
+// -> { success, results: [...] }
+// `expect` is "rows" or "result", default "result". Transactional unless
+// transaction:false, so oxmysql's transaction export is atomic, not best-effort.
 routerAdd(
   "POST",
   "/api/tdb/batch",
@@ -135,9 +97,8 @@ routerAdd(
             throw new BadRequestError(`Statement ${i} has no sql`);
           }
 
-          // Name the statement that failed. A caller running one query at a
-          // time knows which it was; one importing a 900-line dump does not,
-          // and "near FULLTEXT: syntax error" on its own is not actionable.
+          // Name the failing statement. Importing a 900-line dump, a bare
+          // "near FULLTEXT: syntax error" is not actionable.
           try {
             results.push(
               statement.expect === "rows"
@@ -174,19 +135,9 @@ routerAdd(
   $apis.requireSuperuserAuth(),
 );
 
-// ============================================================================
-// Schema
-// ============================================================================
-
-/**
- * Describe a table's columns and unique keys.
- * POST /api/tdb/schema
- * Body: { table: string }
- * -> { success, table, columns, primaryKey, uniqueIndexes }
- *
- * Used to resolve the conflict target that SQLite's ON CONFLICT requires but
- * MySQL's ON DUPLICATE KEY UPDATE never states.
- */
+// Body: { table } -> { success, table, columns, primaryKey, uniqueIndexes }
+// Resolves the conflict target SQLite's ON CONFLICT requires and MySQL's
+// ON DUPLICATE KEY UPDATE never states.
 routerAdd(
   "POST",
   "/api/tdb/schema",

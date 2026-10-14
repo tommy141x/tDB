@@ -1,39 +1,14 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-/**
- * PocketBase Server-Side Hooks - Extended API
- *
- * Provides server-side functionality for:
- * - Advanced record operations
- * - Transactions
- * - Custom realtime messaging
- * - Email sending
- */
-
-// ============================================================================
-// SQL Execution Routes
-// ============================================================================
+// Batch record reads, record transactions, custom realtime messages, email.
 //
-// The /api/sql/* routes that used to live here are gone. They required the
-// caller to declare the result shape up front (`columns: { id: "", name: "" }`)
-// because PocketBase's JSVM cannot scan into an undeclared model - which meant
-// a wrong or missing declaration silently changed the data, the scalar route
-// coerced anything numeric-looking into a number, and the execute route always
-// reported insertId 0.
-//
-// tdb-routes.pb.js replaces them with /api/tdb/{query,execute,batch,schema},
-// which discover the shape from SQLite itself. See tdb-sql.js for how, and for
-// the approaches that were measured and rejected first.
+// The old /api/sql/* routes are gone: they made the caller declare the result
+// shape up front, because PocketBase's JSVM cannot scan into an undeclared
+// model, so a wrong declaration silently changed the data. tdb-routes.pb.js
+// replaces them with /api/tdb/{query,execute,batch,schema}, which read the
+// shape from SQLite itself.
 
-// ============================================================================
-// Advanced Record Operations
-// ============================================================================
-
-/**
- * Find multiple records by IDs (batch fetch)
- * POST /api/records/findByIds
- * Body: { collection: string, ids: string[] }
- */
+// Body: { collection, ids[] }
 routerAdd(
   "POST",
   "/api/records/findByIds",
@@ -63,11 +38,7 @@ routerAdd(
   $apis.requireSuperuserAuth(),
 );
 
-/**
- * Count records with optional filter
- * POST /api/records/count
- * Body: { collection: string, filter: string, params: object }
- */
+// Body: { collection, filter?, params? }
 routerAdd(
   "POST",
   "/api/records/count",
@@ -83,7 +54,6 @@ routerAdd(
       let count = 0;
 
       if (filter) {
-        // Use findRecordsByFilter to count with filter
         const records = $app.findRecordsByFilter(
           collection,
           filter,
@@ -94,7 +64,6 @@ routerAdd(
         );
         count = records.length;
       } else {
-        // Count all records
         count = $app.countRecords(collection);
       }
 
@@ -113,15 +82,7 @@ routerAdd(
   $apis.requireSuperuserAuth(),
 );
 
-// ============================================================================
-// Transaction Operations
-// ============================================================================
-
-/**
- * Run multiple record operations in a transaction
- * POST /api/transactions/run
- * Body: { operations: [{type: 'create'|'update'|'delete', collection: string, id?: string, data?: object}] }
- */
+// Body: { operations: [{ type: create|update|delete, collection, id?, data? }] }
 routerAdd(
   "POST",
   "/api/transactions/run",
@@ -154,7 +115,7 @@ routerAdd(
             const record = new Record(coll);
 
             if (opData && typeof opData === "object") {
-              for (let key in opData) {
+              for (const key in opData) {
                 record.set(key, opData[key]);
               }
             }
@@ -171,7 +132,7 @@ routerAdd(
             const record = txApp.findRecordById(collection, id);
 
             if (opData && typeof opData === "object") {
-              for (let key in opData) {
+              for (const key in opData) {
                 record.set(key, opData[key]);
               }
             }
@@ -211,15 +172,8 @@ routerAdd(
   $apis.requireSuperuserAuth(),
 );
 
-// ============================================================================
-// Custom Realtime Messaging
-// ============================================================================
-
-/**
- * Send custom realtime message to subscribed clients
- * POST /api/realtime/send
- * Body: { topic: string, data: any }
- */
+// Fans a message out to every client subscribed to the topic.
+// Body: { topic, data }
 routerAdd(
   "POST",
   "/api/realtime/send",
@@ -240,7 +194,7 @@ routerAdd(
       const clients = $app.subscriptionsBroker().clients();
       let sentCount = 0;
 
-      for (let clientId in clients) {
+      for (const clientId in clients) {
         if (clients[clientId].hasSubscription(topic)) {
           clients[clientId].send(message);
           sentCount++;
@@ -262,10 +216,6 @@ routerAdd(
   $apis.requireSuperuserAuth(),
 );
 
-/**
- * Get connected clients info
- * GET /api/realtime/clients
- */
 routerAdd(
   "GET",
   "/api/realtime/clients",
@@ -274,7 +224,7 @@ routerAdd(
       const clients = $app.subscriptionsBroker().clients();
       const clientsInfo = [];
 
-      for (let clientId in clients) {
+      for (const clientId in clients) {
         const client = clients[clientId];
         const auth = client.get("auth");
 
@@ -301,15 +251,7 @@ routerAdd(
   $apis.requireSuperuserAuth(),
 );
 
-// ============================================================================
-// Email Operations
-// ============================================================================
-
-/**
- * Send custom email
- * POST /api/email/send
- * Body: { to: string|string[], subject: string, html: string, text?: string }
- */
+// Body: { to: string|string[], subject, html?, text? }
 routerAdd(
   "POST",
   "/api/email/send",
@@ -322,7 +264,6 @@ routerAdd(
         throw new BadRequestError("To, subject, and html/text are required");
       }
 
-      // Convert to array if single email
       const toArray = Array.isArray(to) ? to : [to];
 
       const message = new MailerMessage({
@@ -352,24 +293,8 @@ routerAdd(
   $apis.requireSuperuserAuth(),
 );
 
-// ============================================================================
-// Health Check
-// ============================================================================
-
+// Answering at all is the signal: it proves --hooksDir resolved and this file
+// was loaded. server.js reads `status` and nothing else.
 routerAdd("GET", "/api/extended/health", (e) => {
-  return e.json(200, {
-    status: "ok",
-    features: [
-      "sql_query",
-      "sql_scalar",
-      "sql_single",
-      "sql_execute",
-      "sql_transaction",
-      "find_by_ids",
-      "count_records",
-      "record_transactions",
-      "realtime_custom",
-      "email",
-    ],
-  });
+  return e.json(200, { status: "ok" });
 });
