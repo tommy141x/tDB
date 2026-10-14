@@ -26,6 +26,9 @@ const { DatabaseSync } = require("node:sqlite");
 const ROOT = require("./fivem-require.js");
 
 const translator = require(path.join(ROOT, "server/utils/sql-translator.js"));
+const conditionalDdl = require(path.join(ROOT, "server/utils/conditional-ddl.js"));
+const triggerRewrite = require(path.join(ROOT, "server/utils/trigger-rewrite.js"));
+const sqlImport = require(path.join(ROOT, "server/utils/sql-import.js"));
 
 // Two waves, harvested separately so the second could target constructs the
 // first did not reach: wave 1 is the big frameworks, wave 2 is 45 further
@@ -36,20 +39,43 @@ const CORPORA = [
   path.join(ROOT, "tests/dev/fixtures/oxmysql-corpus-2.json"),
 ];
 
-// Raise only when the real rate improves. A drop means a regression.
 // Raise only when the real rate improves; a drop means a regression.
 //
-// Measured over verbatim statements only. The remainder is not translator
-// failure: two corpus entries are invalid SQL as shipped (a double comma in an
-// ALTER, a bare WHERE fragment the harvester captured mid-statement), and the
-// rest are constructs SQLite genuinely lacks - ALTER TABLE MODIFY/CHANGE,
-// stored procedures, prepared statements, session variables, LOCK TABLES,
-// full-text MATCH ... AGAINST, multi-table DELETE - each refused by name.
-const MIN_TRANSLATED = 0.88;
+// Measured over verbatim statements only, and this harness sees the TRANSLATOR
+// alone. Three things the production pipeline also does are not counted here,
+// so the figure it reports is a floor, not the compatibility number:
+//
+//   * sql-import drops mysqldump's session preamble before translating.
+//   * conditional-ddl.js interprets the SET/PREPARE/EXECUTE and
+//     CREATE PROCEDURE/CALL dance by evaluating its conditions live.
+//   * trigger-rewrite.js is retried for a CREATE TRIGGER the ordinary path
+//     refuses.
+//
+// What remains at this threshold is not translator failure: the two entries
+// still refused are not valid MySQL either - an ALTER with a duplicated comma,
+// and a bare WHERE fragment the harvester captured mid-statement - and both are
+// now refused BY NAME rather than as a parse error pointing at a token.
+const MIN_TRANSLATED = 0.91;
+
+// The whole pipeline, which is what a real .sql file meets: the importer's
+// session-noise filter, then the translator, then conditional-ddl.js for the
+// SET/PREPARE and CREATE PROCEDURE dance, then trigger-rewrite.js retried for a
+// CREATE TRIGGER the ordinary path refuses.
+//
+// This is the compatibility figure. MIN_TRANSLATED above is kept as a separate
+// floor so a translator regression cannot hide behind a later stage absorbing
+// it.
+const MIN_PIPELINE = 0.99;
 
 // Failures that are the corpus's own, not the translator's. Any NEW one pushes
 // these over and fails the suite, which is the point.
-const MAX_UNNAMED = 3;
+//
+// Zero unnamed, deliberately. A refusal that names nothing tells an operator
+// which token upset the parser rather than what to change in the file, and the
+// last two - a duplicated comma and a bare WHERE - are now named in
+// MALFORMED_STATEMENTS. If this has to be raised again, name the construct
+// instead.
+const MAX_UNNAMED = 0;
 const MAX_INVALID = 3;
 
 let pass = 0;
@@ -205,11 +231,78 @@ async function main() {
   console.log(`\n=== Named placeholders: ${namedSwept} statement(s) bound bare, @ and :`);
 
   const viaRebuild = translated.filter((t) => t.rebuild);
+  console.log(`\n=== Table rebuilds: ${viaRebuild.length} ALTER(s) handed over as a descriptor`);
+
+  // The pipeline pass, over the same verbatim statements.
+  let pipelineHandled = 0;
+  let pipelineSeen = 0;
+  const pipelineRefused = new Map();
+
+  for (const entry of verbatim) {
+    // 1. The importer drops mysqldump's session preamble before translating.
+    //    A `/*!NNNNN ... */` conditional never even reaches isSessionNoise:
+    //    splitStatements strips it while splitting the file, because it is a
+    //    COMMENT to any engine that is not MySQL. The harness is handed
+    //    pre-split statements, so it has to drop them here instead.
+    if (/^\s*\/\*!\d+/.test(entry.sql)) continue;
+    if (sqlImport.isSessionNoise(entry.sql)) continue;
+    pipelineSeen++;
+
+    // 2. MySQL's conditional-DDL dance is interpreted, not translated: its
+    //    conditions are evaluated against the live database at import time.
+    if (conditionalDdl.claims(entry.sql)) {
+      pipelineHandled++;
+      continue;
+    }
+
+    try {
+      translator.translate(entry.sql, paramsFor(entry.sql), {
+        resolveConflictTarget: () => ["id"],
+        // At import time every table is one the dump itself created, so its
+        // live column order IS the order a positional INSERT means.
+        resolveColumnOrder: () => ["c1", "c2", "c3"],
+      });
+      pipelineHandled++;
+      continue;
+    } catch (error) {
+      // 3. A CREATE TRIGGER gets a second pass through the rewriter.
+      if (/CREATE\s+(?:OR\s+REPLACE\s+)?(?:DEFINER\s*=\s*\S+\s+)?TRIGGER\b/i.test(entry.sql)) {
+        try {
+          const rewritten = triggerRewrite.rewrite(
+            entry.sql,
+            (piece) => translator.translate(piece, {}, { resolveConflictTarget: () => ["id"] }).sql
+          );
+          if (rewritten.handled) {
+            pipelineHandled++;
+            continue;
+          }
+        } catch (_) {
+          // Fall through to the refusal below.
+        }
+      }
+
+      const construct = error.construct || "parse error";
+      pipelineRefused.set(construct, (pipelineRefused.get(construct) || 0) + 1);
+    }
+  }
+
+  const pipelineRate = pipelineHandled / pipelineSeen;
+
   console.log(
-    `\n=== Table rebuilds: ${viaRebuild.length} ALTER(s) handed over as a descriptor`
+    `\n=== Pipeline: ${pipelineHandled}/${pipelineSeen} (${(pipelineRate * 100).toFixed(1)}%), ` +
+      `refused ${pipelineSeen - pipelineHandled}`
   );
+  for (const [construct, count] of [...pipelineRefused].sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${String(count).padStart(3)}  ${construct}`);
+  }
 
   console.log("\n=== Assertions");
+
+  ok(
+    pipelineRate >= MIN_PIPELINE,
+    `at least ${(MIN_PIPELINE * 100).toFixed(0)}% of real-world SQL survives the whole pipeline`,
+    `rate was ${(pipelineRate * 100).toFixed(1)}%`
+  );
 
   // The untranslated original must never be mistaken for runnable SQL.
   ok(

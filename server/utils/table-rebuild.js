@@ -662,6 +662,10 @@ module.exports = (() => {
 
     if (action.kind === "autoIncrementStart") return false;
 
+    // A table-level constraint can only be added by writing the table out
+    // again: SQLite's ALTER TABLE has no ADD CONSTRAINT at all.
+    if (action.kind === "addForeignKey") return true;
+
     if (action.kind === "addColumn") {
       const existing = findColumn(columns, action.column);
       if (existing) return false;
@@ -848,6 +852,9 @@ module.exports = (() => {
     const sourceFor = new Map();
     const renames = [];
     const added = [];
+    // Table-level constraints to append, which are entries in the column list
+    // rather than columns.
+    const constraints = [];
 
     const entries = parsed.entries.map((entry) => ({ ...entry }));
     const consumed = new Set();
@@ -872,6 +879,16 @@ module.exports = (() => {
           after: action.after || def.after || null,
           first: def.first,
         });
+        continue;
+      }
+
+      if (action.kind === "addForeignKey") {
+        // Carried through verbatim. The clause is already valid SQLite -
+        // `FOREIGN KEY (a) REFERENCES t(b) ON DELETE CASCADE` is spelled the
+        // same in both dialects - so the only MySQL-ism to drop is a
+        // `CONSTRAINT <name>` prefix, which SQLite's table-level syntax does
+        // accept but which names an index MySQL creates and SQLite does not.
+        constraints.push(action.definition);
         continue;
       }
 
@@ -931,6 +948,12 @@ module.exports = (() => {
         : -1;
       if (at === -1) entries.push({ text, name: column.name });
       else entries.splice(at + 1, 0, { text, name: column.name });
+    }
+
+    // Constraints last in the column list, which is where SQLite expects a
+    // table-level one and where mysqldump writes it too.
+    for (const constraint of constraints) {
+      entries.push({ text: ` ${constraint}`, name: null });
     }
 
     // Every trigger off first. The final rename reparses the whole schema, so a

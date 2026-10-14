@@ -336,7 +336,33 @@ function describeTable(db, table) {
     }
   }
 
+  // The order the table had BEFORE adoption, recorded by pb-adopt.
+  //
+  // Adoption reorders columns - PocketBase sorts them - so a positional
+  // `INSERT INTO t VALUES (...)` written against the original schema would put
+  // every value in the wrong column. pragma_table_info reports the CURRENT
+  // order, which is no longer the one the caller means, so the source order has
+  // to come from the registry.
+  //
+  // Absent for a table that was never adopted, where the current order IS the
+  // source order, and absent on an install whose registry predates the column.
+  let sourceColumns = null;
+  try {
+    const recorded = selectRows(
+      db,
+      "SELECT source_columns FROM tdb_adopted WHERE table_name = " + quoteLiteral(table)
+    ).rows;
+    if (recorded.length && recorded[0].source_columns) {
+      const parsed = JSON.parse(recorded[0].source_columns);
+      if (Array.isArray(parsed) && parsed.length) sourceColumns = parsed;
+    }
+  } catch (_) {
+    // No registry yet, or no row for this table. Not an error: it means the
+    // table is not adopted and the live order is the right one.
+  }
+
   return {
+    sourceColumns,
     columns: columns.map((c) => ({
       name: c.name,
       type: c.type,

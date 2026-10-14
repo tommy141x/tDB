@@ -1015,8 +1015,6 @@ async function main() {
     ["LOCK TABLES users WRITE", [], /LOCK TABLES/],
     ["CALL my_proc(1)", [], /CALL/],
     ["SET @v := 1", [], /SET @variable/],
-    ["SELECT * FROM t WHERE MATCH (body) AGAINST (?)", ["x"], /MATCH/],
-    ["ALTER TABLE t ADD FOREIGN KEY (a) REFERENCES u(id)", [], /FOREIGN KEY/],
     ["ALTER TABLE t DROP FOREIGN KEY fk_a", [], /DROP FOREIGN KEY/],
   ];
 
@@ -1222,13 +1220,6 @@ async function main() {
   // Two refusals, both about silence rather than syntax.
   for (const [sql, supplied, pattern] of [
     [
-      // esx_core's. The ON clause would have to move past the SET list, and
-      // placeholders are paired by POSITION.
-      "UPDATE addon_account_data a JOIN ops p ON p.operation_id = ? SET a.money = ? WHERE a.account_name = ?",
-      ["x", "y", "z"],
-      /bound parameter in ON/,
-    ],
-    [
       // EXISTS cannot carry a value out of the joined table.
       "UPDATE a JOIN b ON a.id = b.id SET a.x = b.y",
       [],
@@ -1278,6 +1269,13 @@ async function main() {
       { table: "addon_account_data", kinds: ["modify", "autoIncrementStart"] },
     ],
     [
+      // qb-vehicleshop's. SQLite cannot add a constraint in place, so this
+      // needs the same rebuild MODIFY does; it used to fail the whole file.
+      "ALTER TABLE `player_vehicles` ADD CONSTRAINT FK_pv_players " +
+        "FOREIGN KEY (citizenid) REFERENCES `players` (citizenid) ON DELETE CASCADE",
+      { table: "player_vehicles", kinds: ["addForeignKey"] },
+    ],
+    [
       // qbx_core's: an ADD COLUMN alongside a MODIFY, which have to land
       // together because MySQL applied them in one statement.
       "ALTER TABLE `players` ADD COLUMN IF NOT EXISTS `last_logged_out` timestamp NULL " +
@@ -1317,6 +1315,147 @@ async function main() {
     const out = translator.translate(sql, [], { resolveConflictTarget });
     ok(!out.rebuild, `no rebuild for: ${sql}`, JSON.stringify(out.rebuild));
   }
+
+  section("A rewrite may reorder or duplicate placeholders, and says so");
+
+  // Placeholders are paired with the rewritten statement by POSITION, which is
+  // why two constructs used to be refused outright. That was never necessary:
+  // the translator OWNS the mapping, so a rewrite that moves or copies a
+  // placeholder only has to report the new order and the key list is rebuilt.
+  {
+    const { DatabaseSync } = require("node:sqlite");
+
+    // esx_core's: a parameter in ON, in SET and in WHERE. MySQL's text order is
+    // ON, SET, WHERE; the output's is SET, ON, WHERE.
+    const permuted = translator.translate(
+      "UPDATE addon_account_data a JOIN ops p ON p.operation_id = ? SET a.money = ? WHERE a.account_name = ?",
+      ["OP7", "999", "bank"],
+      { resolveConflictTarget }
+    );
+    ok(
+      permuted.params.p0 === "999" && permuted.params.p1 === "OP7" && permuted.params.p2 === "bank",
+      "the ON parameter follows the SET parameter, as the output text does",
+      JSON.stringify(permuted.params)
+    );
+
+    const db = new DatabaseSync(":memory:");
+    db.exec("CREATE TABLE addon_account_data (account_name TEXT, money INT)");
+    db.exec("CREATE TABLE ops (operation_id TEXT)");
+    db.exec("INSERT INTO addon_account_data VALUES ('bank',1),('black',1)");
+    db.exec("INSERT INTO ops VALUES ('OP7')");
+    const hit = db.prepare(permuted.sql.replace(/\{:(\w+)\}/g, ":$1")).run(permuted.params);
+    ok(hit.changes === 1, "and it updates exactly the joined row", `changes ${hit.changes}`);
+    ok(
+      db.prepare("SELECT money FROM addon_account_data WHERE account_name = ?").get("bank")
+        .money === 999,
+      "with the right value in it"
+    );
+
+    // A wrong operation id must match nothing - the proof that the ON parameter
+    // is really being used as the ON parameter.
+    const missed = translator.translate(
+      "UPDATE addon_account_data a JOIN ops p ON p.operation_id = ? SET a.money = ? WHERE a.account_name = ?",
+      ["NOPE", "5", "bank"],
+      { resolveConflictTarget }
+    );
+    ok(
+      db.prepare(missed.sql.replace(/\{:(\w+)\}/g, ":$1")).run(missed.params).changes === 0,
+      "a non-matching ON parameter matches nothing, so it is not being re-paired"
+    );
+  }
+
+  section("MATCH ... AGAINST becomes a substring search across the same columns");
+
+  // A stated approximation, like ADD PRIMARY KEY becoming a UNIQUE INDEX.
+  // SQLite's full-text search is FTS5, a virtual table needing a shadow copy
+  // and sync triggers - which a SELECT cannot create. Measured across the
+  // corpus: all 9 of these are ox_banking's and ox_mdt's, every one uses
+  // BOOLEAN MODE, and 7 of the 9 carry their own ORDER BY, so they do not read
+  // relevance even under MySQL. Refusing meant their search boxes returned an
+  // error instead of rows.
+  {
+    const { DatabaseSync } = require("node:sqlite");
+    const db = new DatabaseSync(":memory:");
+    db.exec("CREATE TABLE characters (stateId TEXT, firstName TEXT, lastName TEXT)");
+    db.exec(
+      "INSERT INTO characters VALUES ('AB1','John','Smith'),('CD2','Jane','Doe'),('smi9','Zed','Zed')"
+    );
+
+    const search = (term) => {
+      // ox_mdt's statement, verbatim in shape.
+      const out = translator.translate(
+        "SELECT stateId FROM characters WHERE MATCH (stateId, firstName, lastName) AGAINST (? IN BOOLEAN MODE)",
+        [term],
+        { resolveConflictTarget }
+      );
+      return {
+        sql: out.sql,
+        params: out.params,
+        rows: db
+          .prepare(out.sql.replace(/\{:(\w+)\}/g, ":$1"))
+          .all(out.params)
+          .map((r) => r.stateId),
+      };
+    };
+
+    const smi = search("smi");
+    // CONCAT, not `||`: this rewrite runs BEFORE the transpiler, and in MySQL's
+    // default sql_mode `||` is logical OR - emitting it produced
+    // `'%' OR ? OR '%'`, which is truthy for every row, so the search returned
+    // the whole table. Measured.
+    ok(
+      /LIKE '%' \|\| \{:p0\} \|\| '%'/.test(smi.sql),
+      "the term is concatenated, not OR-ed",
+      smi.sql
+    );
+    ok(
+      smi.params.p0 === "smi" && smi.params.p1 === "smi" && smi.params.p2 === "smi",
+      "one bound term becomes one copy per column",
+      JSON.stringify(smi.params)
+    );
+    ok(
+      smi.rows.length === 2 && smi.rows.includes("AB1") && smi.rows.includes("smi9"),
+      "it matches across every named column, and only the rows that contain the term",
+      JSON.stringify(smi.rows)
+    );
+    ok(JSON.stringify(search("doe").rows) === '["CD2"]', "a term in one column matches one row");
+    ok(search("zzz").rows.length === 0, "and a term in none matches nothing");
+  }
+
+  // Parameters before, between and after two MATCHes, which is ox_banking's
+  // transactions query - the shape where a miscounted expansion would shift
+  // every later parameter.
+  const twoMatches = translator.translate(
+    "SELECT x FROM t WHERE (fromId = ? OR toId = ?) AND (MATCH(c.fullName) AGAINST (? IN BOOLEAN MODE) " +
+      "OR MATCH(at.message) AGAINST (? IN BOOLEAN MODE)) AND (fromId = ?) LIMIT 6 OFFSET ?",
+    ["A", "B", "term1", "term2", "C", 30],
+    { resolveConflictTarget }
+  );
+  ok(
+    twoMatches.params.p0 === "A" &&
+      twoMatches.params.p1 === "B" &&
+      twoMatches.params.p2 === "term1" &&
+      twoMatches.params.p3 === "term2" &&
+      twoMatches.params.p4 === "C" &&
+      twoMatches.params.p5 === "30",
+    "every parameter around two MATCHes keeps its place",
+    JSON.stringify(twoMatches.params)
+  );
+
+  // And alongside the IN (?) array expansion, which also grows the list.
+  const withArray = translator.translate(
+    "SELECT a FROM t WHERE g IN (?) AND MATCH (c.stateId, c.firstName) AGAINST (? IN BOOLEAN MODE)",
+    [["police", "ems"], "jo"],
+    { resolveConflictTarget }
+  );
+  ok(
+    withArray.params.p0_0 === "police" &&
+      withArray.params.p0_1 === "ems" &&
+      withArray.params.p1 === "jo" &&
+      withArray.params.p2 === "jo",
+    "an array expansion and a MATCH expansion compose without colliding",
+    JSON.stringify(withArray.params)
+  );
 
   console.log(`\n==== ${pass} passed, ${fail} failed ====`);
   if (fail) {

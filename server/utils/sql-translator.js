@@ -555,6 +555,22 @@ module.exports = (function () {
         continue;
       }
 
+      // ADD [CONSTRAINT <name>] FOREIGN KEY (cols) REFERENCES t (cols) [actions]
+      //
+      // SQLite cannot add a constraint in place, so this needs the table
+      // rebuilt - the same machinery MODIFY uses. Previously refused by name,
+      // which failed the whole file: qb-vehicleshop's install.sql adds its
+      // player_vehicles -> players key this way.
+      const foreignKey =
+        /^ADD\s+(?:CONSTRAINT\s+[`"[]?[A-Za-z0-9_$]+[`"\]]?\s+)?(FOREIGN\s+KEY\b[\s\S]*)$/i.exec(
+          part
+        );
+      if (foreignKey) {
+        actions.push({ kind: "addForeignKey", definition: foreignKey[1].trim() });
+        needsRebuild = true;
+        continue;
+      }
+
       // AUTO_INCREMENT=<n>, which mysqldump emits alongside a MODIFY.
       const seq = /^AUTO_INCREMENT\s*=\s*(\d+)$/i.exec(part);
       if (seq) {
@@ -740,6 +756,168 @@ module.exports = (function () {
    *     statement.
    *   * A SET expression naming the joined table or its alias.
    */
+  /**
+   * `INSERT INTO t VALUES (...)` -> `INSERT INTO t (a, b, c) VALUES (...)`.
+   *
+   * A column-list-free INSERT is positional, and once PocketBase owns a table
+   * the column order is PocketBase's, not the dump's: measured on
+   * phone_message_messages, where `id,channel_id,sender,content,...` became
+   * `attachments,channel_id,content,id,...`. Every column survives, but values
+   * written positionally would land in the wrong ones, silently - so this was
+   * refused outright.
+   *
+   * Naming the columns removes the ambiguity, and the order to name them in is
+   * knowable: pb-adopt records the pre-adoption order, and for a table that was
+   * never adopted the live order IS the source order.
+   *
+   * Returns the statement unchanged when the order cannot be resolved, leaving
+   * the gate to refuse it in its own words - a wrong expansion is exactly the
+   * silent corruption the refusal existed to prevent.
+   */
+  function expandValuesInsert(sql, resolveColumnOrder) {
+    if (typeof resolveColumnOrder !== "function") return sql;
+
+    const head =
+      /^(\s*(?:INSERT(?:\s+(?:OR\s+)?IGNORE)?|REPLACE)\s+INTO\s+)([`"[]?)([A-Za-z0-9_$]+)([`"\]]?)(\s+)(VALUES\b)/i.exec(
+        sql
+      );
+    if (!head) return sql;
+
+    const order = resolveColumnOrder(head[3]);
+    if (!Array.isArray(order) || !order.length) return sql;
+
+    // The first tuple decides the arity. A mismatch means the statement does
+    // not describe this table, so it is left for the gate rather than padded.
+    const mask = codeMask(sql);
+    const open = mask.indexOf("(", head.index + head[0].length);
+    if (open === -1) return sql;
+    const close = matchingParen(sql, open);
+    if (close === -1) return sql;
+
+    let depth = 0;
+    let count = 1;
+    for (let i = open + 1; i < close; i++) {
+      if (mask[i] === "(") depth++;
+      else if (mask[i] === ")") depth--;
+      else if (mask[i] === "," && depth === 0) count++;
+    }
+
+    if (count !== order.length) return sql;
+
+    const list = order.map((name) => `\`${name}\``).join(", ");
+    // head[6] is the VALUES keyword, which has to be put back: head[0] spans it,
+    // so slicing past head[0] alone dropped it and produced
+    // `INSERT INTO t (a, b) ('x', 1)`.
+    return (
+      `${head[1]}${head[2]}${head[3]}${head[4]} (${list}) ${head[6]}` +
+      sql.slice(head.index + head[0].length)
+    );
+  }
+
+  // How many bound placeholders a fragment carries. Counted on the mask, so a
+  // `?` inside a string literal is not one.
+  function countPlaceholders(fragment) {
+    const mask = codeMask(String(fragment || ""));
+    return (mask.match(/\?/g) || []).length;
+  }
+
+  /**
+   * MySQL full-text search as a substring search across the same columns.
+   *
+   *   MATCH (a, b) AGAINST (? IN BOOLEAN MODE)
+   *   (a LIKE CONCAT('%', ?, '%') OR b LIKE CONCAT('%', ?, '%'))
+   *
+   * A STATED APPROXIMATION, in the same class as ADD PRIMARY KEY becoming a
+   * UNIQUE INDEX, and the reasoning is worth recording because the obvious
+   * objection - "that is not full-text search" - matters less here than it
+   * looks:
+   *
+   *   * SQLite's answer is FTS5, which is a virtual table. Using it would mean
+   *     creating a shadow table per searched table plus triggers to keep it in
+   *     sync, which a SELECT cannot do and which the caller never asked for.
+   *   * No relevance ranking. Measured across the corpus: all 9 of these
+   *     statements are ox_banking's and ox_mdt's, every one uses BOOLEAN MODE,
+   *     and 7 of the 9 carry their own ORDER BY (role, callSign, id) - so they
+   *     do not read relevance even under MySQL.
+   *   * MySQL applies a minimum token length (innodb_ft_min_token_size, 3 by
+   *     default), so a two-character search returns NOTHING there and does
+   *     return rows here. More permissive, not less, and worth knowing.
+   *   * BOOLEAN MODE's operators (+word, -word, word*) are taken LITERALLY.
+   *     A search for `+john` looks for the text "+john".
+   *
+   * Without this the whole statement is refused, which is not "less wrong" - it
+   * means the resource's search box returns an error instead of rows.
+   *
+   * Returns { sql, expansions } where each expansion records the original
+   * placeholder index that was duplicated and how many copies it now has, so
+   * buildShape can grow the key list to match.
+   */
+  function rewriteMatchAgainst(sql) {
+    const mask = codeMask(sql);
+    const pattern = /\bMATCH\s*\(([^)]*)\)\s*AGAINST\s*\(\s*([\s\S]*?)\s*\)/gi;
+
+    const found = [];
+    for (const match of mask.matchAll(pattern)) {
+      const start = match.index;
+      const end = start + match[0].length;
+
+      // Read the column list and the search term off `sql`, not the mask: a
+      // backticked column is blanked there, and a quoted search literal with
+      // it. Same trap as splitUpsert's table name.
+      const columnsText = sql.slice(start, end).replace(/^\s*MATCH\s*\(/i, "");
+      const closeColumns = columnsText.indexOf(")");
+      const columns = columnsText
+        .slice(0, closeColumns)
+        .split(",")
+        .map((column) => column.trim())
+        .filter(Boolean);
+
+      const againstRaw = sql.slice(start, end).replace(/[\s\S]*?AGAINST\s*\(/i, "");
+      // The mode keywords are MySQL-only and carry no meaning here.
+      const term = againstRaw
+        .replace(/\)\s*$/, "")
+        .replace(
+          /\s+IN\s+(?:BOOLEAN|NATURAL\s+LANGUAGE)\s+MODE(?:\s+WITH\s+QUERY\s+EXPANSION)?\s*$/i,
+          ""
+        )
+        .replace(/\s+WITH\s+QUERY\s+EXPANSION\s*$/i, "")
+        .trim();
+
+      if (!columns.length || !term) continue;
+
+      // Which original placeholder the term is, and how many it becomes. The
+      // column list holds identifiers, so every `?` before the construct
+      // belongs to an earlier clause.
+      const before = (mask.slice(0, start).match(/\?/g) || []).length;
+      const inTerm = (codeMask(term).match(/\?/g) || []).length;
+
+      // More than one placeholder in the term is not a shape this understands,
+      // and guessing how to duplicate it would re-pair parameters.
+      if (inTerm > 1) continue;
+
+      found.push({ start, end, columns, term, before, inTerm });
+    }
+
+    if (!found.length) return { sql, expansions: [] };
+
+    let out = sql;
+    // Right to left, so an earlier replacement cannot move a later offset.
+    for (let i = found.length - 1; i >= 0; i--) {
+      const item = found[i];
+      const clause = item.columns
+        .map((column) => `${column} LIKE CONCAT('%', ${item.term}, '%')`)
+        .join(" OR ");
+      out = out.slice(0, item.start) + `(${clause})` + out.slice(item.end);
+    }
+
+    return {
+      sql: out,
+      expansions: found
+        .filter((item) => item.inTerm === 1)
+        .map((item) => ({ index: item.before, copies: item.columns.length })),
+    };
+  }
+
   function rewriteUpdateJoin(sql) {
     const mask = codeMask(sql);
 
@@ -747,7 +925,7 @@ module.exports = (function () {
       /^\s*UPDATE\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+(?:INNER\s+|LEFT\s+(?:OUTER\s+)?|RIGHT\s+(?:OUTER\s+)?|CROSS\s+)?JOIN\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+ON\s+/i.exec(
         mask
       );
-    if (!head) return sql;
+    if (!head) return { sql, order: null };
 
     const target = head[1];
     const targetAlias = head[2];
@@ -757,7 +935,7 @@ module.exports = (function () {
     // SET and the optional WHERE, found on the mask so a literal cannot fool it.
     const afterOn = head[0].length;
     const setMatch = /\s+SET\s+/i.exec(mask.slice(afterOn));
-    if (!setMatch) return sql;
+    if (!setMatch) return { sql, order: null };
 
     const onClause = sql.slice(afterOn, afterOn + setMatch.index).trim();
     const afterSet = afterOn + setMatch.index + setMatch[0].length;
@@ -772,15 +950,6 @@ module.exports = (function () {
           .replace(/;\s*$/, "")
           .trim()
       : "";
-
-    if (/\?/.test(codeMask(onClause))) {
-      throw new SQLTranslationError(
-        "UPDATE ... JOIN with a bound parameter in the ON clause is not translated: " +
-          "the ON clause has to move past the SET list, which would re-pair every " +
-          "parameter. Rewrite it as an UPDATE with an EXISTS or IN subquery.",
-        { sql, construct: "UPDATE ... JOIN with a bound parameter in ON" }
-      );
-    }
 
     const joinedName = joined.replace(/[`"[\]]/g, "");
     const reads = new RegExp(
@@ -806,10 +975,32 @@ module.exports = (function () {
     const joinedRef = joinedAlias ? `${joined} AS ${joinedAlias}` : joined;
     const condition = whereClause ? `${onClause} AND (${whereClause})` : onClause;
 
-    return (
-      `UPDATE ${targetRef} SET ${unqualified} WHERE EXISTS ` +
-      `(SELECT 1 FROM ${joinedRef} WHERE ${condition})`
-    );
+    // MySQL's text order is ON, SET, WHERE; the EXISTS form's is SET, ON,
+    // WHERE. Placeholders are paired with the rewritten statement by POSITION,
+    // so moving the ON clause past the SET list would re-pair every one of
+    // them - which is why this used to be refused whenever the ON clause
+    // carried a parameter (esx_core has exactly such a statement).
+    //
+    // Refusing was never necessary: the translator OWNS that mapping. `keys`
+    // records which caller key each placeholder reads, in original order, so
+    // reordering the text only requires reordering `keys` to match. The
+    // permutation is returned here and applied in buildShape.
+    const onCount = countPlaceholders(onClause);
+    const setCount = countPlaceholders(unqualified);
+    const whereCount = countPlaceholders(whereClause);
+
+    const index = (start, length) => Array.from({ length }, (_, i) => start + i);
+    const onIndices = index(0, onCount);
+    const setIndices = index(onCount, setCount);
+    const whereIndices = index(onCount + setCount, whereCount);
+
+    return {
+      sql:
+        `UPDATE ${targetRef} SET ${unqualified} WHERE EXISTS ` +
+        `(SELECT 1 FROM ${joinedRef} WHERE ${condition})`,
+      // Output order: the SET list first, then the ON clause, then the WHERE.
+      order: setIndices.concat(onIndices, whereIndices),
+    };
   }
 
   /**
@@ -1921,13 +2112,19 @@ module.exports = (function () {
     [/^\s*SET\s+@/i, "SET @variable (session variable)"],
     [/^\s*(?:LOCK|UNLOCK)\s+TABLES\b/i, "LOCK TABLES"],
     [/\bSIGNAL\s+SQLSTATE\b/i, "SIGNAL SQLSTATE"],
-    // SQLite cannot add a foreign key to an existing table; the table has to
-    // be rebuilt, which is what adoption does but a translator cannot.
-    [/\bADD\s+(?:CONSTRAINT\s+\S+\s+)?FOREIGN\s+KEY\b/i, "ALTER TABLE ... ADD FOREIGN KEY"],
-    // MySQL full-text search. SQLite has FTS5, but it is a virtual table with
-    // its own syntax, not a MATCH ... AGAINST clause over ordinary columns, so
-    // there is no mechanical translation. ox_mdt searches characters this way.
-    [/\bMATCH\s*\([^)]*\)\s*AGAINST\b/i, "MATCH ... AGAINST (full-text search)"],
+    // SQLite cannot add a foreign key in place, so an ALTER that does is routed
+    // to the table rebuild instead - see parseRebuildActions. This entry stays
+    // for the shapes that are NOT an ALTER (a bare ADD FOREIGN KEY inside some
+    // other statement), anchored so it cannot shadow the supported path.
+    [
+      /^(?!\s*ALTER\s+TABLE)[\s\S]*\bADD\s+(?:CONSTRAINT\s+\S+\s+)?FOREIGN\s+KEY\b/i,
+      "ALTER TABLE ... ADD FOREIGN KEY",
+    ],
+    // No entry for MATCH ... AGAINST any more: rewriteMatchAgainst turns it into
+    // a substring search across the same columns, which is a stated
+    // approximation documented there and in the compatibility docs. The shapes
+    // it cannot take - more than one placeholder in the search term - are left
+    // for the transpiler to reject by position.
     // Multi-table DELETE, as in `DELETE a FROM a JOIN b ...`. SQLite deletes
     // from exactly one table and has no USING clause.
     [/^\s*DELETE\s+[A-Za-z_][A-Za-z0-9_]*\s+FROM\b/i, "multi-table DELETE"],
@@ -2133,7 +2330,66 @@ module.exports = (function () {
     [/\/\*![0-9]{5}/, "mysqldump conditional directive"],
   ];
 
+  // Not valid MySQL either - a server rejects these too. They are named here
+  // rather than left to the parser because the parser's complaint identifies a
+  // TOKEN (`Expected identifier, got "Comma"`, `Unexpected token: Where`),
+  // which tells an operator nothing about what to change. Checked against the
+  // ORIGINAL text, because a statement that cannot be parsed never reaches the
+  // output gate at all - which is where putting them first failed.
+  const MALFORMED_STATEMENTS = [
+    // A fragment beginning with WHERE: a piece of a statement rather than a
+    // statement, usually a builder that concatenated its clauses in the wrong
+    // order. qbx_core's handleSearchFilters returns a bare ' WHERE ' when it
+    // has no filters to add.
+    [/^\s*WHERE\b/i, "a statement beginning with WHERE (an incomplete fragment)"],
+  ];
+
+  /**
+   * Two commas with nothing between them, as in
+   * `ADD COLUMN x varchar(500) DEFAULT 'resimsiz',, AFTER y`.
+   *
+   * Not a regex over the code mask, which is what the first attempt was and
+   * what made it fire on 13 valid statements: codeMask blanks a literal's
+   * CONTENT, so `a, 'x', b` masks to `a,` + spaces + `,` and reads as a
+   * doubled comma. The mask still says which commas are code; whether the gap
+   * between two of them is really empty has to be read off the ORIGINAL, where
+   * a blanked literal is still `'x'` and not whitespace.
+   */
+  function hasEmptyListEntry(sql) {
+    const mask = codeMask(sql);
+    let previous = -1;
+
+    for (let i = 0; i < mask.length; i++) {
+      if (mask[i] !== ",") continue;
+      if (previous !== -1 && sql.slice(previous + 1, i).trim() === "") return true;
+      previous = i;
+    }
+
+    return false;
+  }
+
   function assertStatementSupported(sql) {
+    const mask = codeMask(sql);
+
+    if (/^\s*(?:CREATE|ALTER)\b/i.test(mask) && hasEmptyListEntry(sql)) {
+      const construct = "an empty entry in the column list (a duplicated comma)";
+      throw new SQLTranslationError(
+        `This is not a valid statement: ${construct}. MySQL would reject it too, ` +
+          `so it is reported here rather than as a parse error naming a token.`,
+        { sql, construct }
+      );
+    }
+
+    for (const [pattern, construct] of MALFORMED_STATEMENTS) {
+      if (pattern.test(mask)) {
+        throw new SQLTranslationError(
+          `This is not a valid statement: ${construct}. MySQL would reject it too, ` +
+            `so it is reported here rather than as a parse error naming a token.`,
+          { sql, construct }
+        );
+      }
+    }
+
     for (const [pattern, construct] of UNSUPPORTED_STATEMENTS) {
       if (pattern.test(sql)) {
         throw new SQLTranslationError(
@@ -2215,7 +2471,32 @@ module.exports = (function () {
     working = rewriteShowTables(working);
     working = rewriteInformationSchema(working);
     working = rewriteShowFamily(working);
-    working = rewriteUpdateJoin(working);
+    working = expandValuesInsert(working, options.resolveColumnOrder);
+    // A rewrite may REORDER or DUPLICATE placeholders. When it does it says how,
+    // and the key list is rebuilt to match - see rewriteUpdateJoin and
+    // rewriteMatchAgainst. Composed in the order the rewrites run.
+    let keyOrder = null;
+
+    const matched = rewriteMatchAgainst(working);
+    working = matched.sql;
+    if (matched.expansions.length) {
+      const total = (codeMask(normalized.sql).match(/\?/g) || []).length;
+      const grown = [];
+      for (let i = 0; i < total; i++) {
+        const expansion = matched.expansions.find((e) => e.index === i);
+        const copies = expansion ? expansion.copies : 1;
+        for (let c = 0; c < copies; c++) grown.push(i);
+      }
+      keyOrder = grown;
+    }
+
+    const updateJoined = rewriteUpdateJoin(working);
+    working = updateJoined.sql;
+    if (updateJoined.order) {
+      // Composed: the JOIN rewrite's order indexes the list as it stands now,
+      // which is already the expanded one when a MATCH ran first.
+      keyOrder = keyOrder ? updateJoined.order.map((at) => keyOrder[at]) : updateJoined.order;
+    }
     working = rewriteDeleteJoin(working);
     working = rewriteGroupConcat(working);
     working = rewriteFunctions(working);
@@ -2304,9 +2585,21 @@ module.exports = (function () {
       translated = applyTextCollation(translated);
     }
 
+    // The permutation is applied last, so it describes the ORIGINAL placeholder
+    // positions regardless of what else ran in between. A malformed order is
+    // ignored rather than trusted: silently re-pairing parameters is the exact
+    // failure this machinery exists to avoid.
+    // A permutation has the same length; an expansion is longer. Either is
+    // fine - what is not is an entry pointing outside the original list, which
+    // would bind the wrong value, so that is checked rather than trusted.
+    let keys = normalized.keys;
+    if (keyOrder && keyOrder.every((from) => from >= 0 && from < keys.length)) {
+      keys = keyOrder.map((from) => keys[from]);
+    }
+
     return {
       sql: translated,
-      keys: normalized.keys,
+      keys,
       extraStatements,
     };
   }
@@ -2324,6 +2617,7 @@ module.exports = (function () {
     // Exposed for tests.
     _internal: {
       expandListBind,
+      expandValuesInsert,
       normalizePlaceholders,
       parseRebuildActions,
       readNamedParam,

@@ -19,6 +19,7 @@ module.exports = (function () {
   const fs = require("fs");
   const path = require("path");
   const tableRebuild = require("./table-rebuild.js");
+  const conditionalDdl = require("./conditional-ddl.js");
 
   const LEDGER_TABLE = "tdb_sql_imports";
 
@@ -168,6 +169,18 @@ module.exports = (function () {
 
   function isSessionNoise(sql) {
     const trimmed = String(sql).trim();
+
+    // `SET @var` is NOT noise: it is half of MySQL's conditional-DDL idiom,
+    // where the variable holds a SQL string that PREPARE/EXECUTE then runs.
+    // The blanket /^SET\s/i below would swallow it before the interpreter
+    // could ever see it, which is why the whole idiom looked unsupported.
+    //
+    // Except when the value reads a SYSTEM variable. mysqldump opens with
+    // `SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT` to save session
+    // state and restores it at the end; those really are noise, and nothing
+    // ever consumes them as SQL. The `@@` is what separates the two.
+    if (/^SET\s+@[A-Za-z_]/i.test(trimmed) && !/@@/.test(trimmed)) return false;
+
     return SESSION_NOISE.some((pattern) => pattern.test(trimmed));
   }
 
@@ -230,6 +243,20 @@ module.exports = (function () {
       triggers,
       tableSql: created.length ? created[0].sql : null,
     });
+  }
+
+  /**
+   * A session variable's value as a SQL literal.
+   *
+   * Substituted as a literal rather than bound, because the statement's own
+   * placeholders are already paired with it by position and inserting a
+   * parameter would shift every one of them.
+   */
+  function quoteSqlLiteral(value) {
+    if (value === null || value === undefined) return "NULL";
+    if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL";
+    if (typeof value === "boolean") return value ? "1" : "0";
+    return `'${String(value).replace(/'/g, "''")}'`;
   }
 
   function isCreateTrigger(sql) {
@@ -368,8 +395,54 @@ module.exports = (function () {
     const rewrites = [];
     const statements = [];
     const origins = []; // parallel to `statements`, for locating a failure
+
+    // Which session variables this file sets, known before the loop because a
+    // statement that READS one has to be held back until the interpreter has
+    // evaluated it - and that happens during execution, not here.
+    //
+    // Scoped to names the FILE sets on purpose. `@name` in an ordinary query is
+    // a named PLACEHOLDER the caller binds, which is what 8 of the 9 corpus
+    // statements mentioning an `@` actually are; treating those as variables
+    // would replace a caller's parameter with a literal.
+    const fileVariables = new Set();
+    for (const entry of executable) {
+      const declared = /^\s*SET\s+@([A-Za-z_][A-Za-z0-9_]*)/i.exec(entry.sql);
+      if (declared) fileVariables.add(declared[1].toLowerCase());
+    }
+
+    const readsFileVariable = (sql) => {
+      if (!fileVariables.size) return false;
+      for (const match of String(sql).matchAll(/@([A-Za-z_][A-Za-z0-9_]*)/g)) {
+        if (fileVariables.has(match[1].toLowerCase())) return true;
+      }
+      return false;
+    };
+
     for (const entry of executable) {
       let translated;
+
+      // MySQL's conditional-DDL dance: SET @v := (SELECT IF(<cond>, '<ddl>',
+      // 'SELECT 1')) + PREPARE/EXECUTE, or a procedure holding
+      // IF NOT EXISTS (<cond>) THEN <ddl> END IF, called once and dropped.
+      // Resources use it only because MySQL has no
+      // `ALTER TABLE ... ADD INDEX IF NOT EXISTS`.
+      //
+      // Held as a marker, not translated: every condition is a real SELECT over
+      // information_schema, and the interpreter EVALUATES it against the live
+      // database rather than guessing what it means - which it can only do once
+      // the statements before it have run.
+      if (conditionalDdl.claims(entry.sql)) {
+        statements.push({ conditional: entry.sql });
+        origins.push(entry);
+        continue;
+      }
+
+      // Reads a variable this file set, so its text is not final yet.
+      if (readsFileVariable(entry.sql)) {
+        statements.push({ deferred: entry.sql, params: entry.params });
+        origins.push(entry);
+        continue;
+      }
 
       // Awaited separately, then translated synchronously: a trigger we are
       // about to skip must not produce a rejected promise, because FiveM
@@ -477,22 +550,61 @@ module.exports = (function () {
     // segment rather than per file - the same trade the chunked path already
     // makes, and the reason both say so out loud.
     const segments = [[]];
-    const rebuildsAt = [];
+    const breaksAt = [];
     for (const statement of statements) {
-      if (statement.rebuild) {
-        rebuildsAt.push(statement.rebuild);
+      if (statement.rebuild || statement.conditional || statement.deferred) {
+        breaksAt.push(statement);
         segments.push([]);
         continue;
       }
       segments[segments.length - 1].push(statement);
     }
 
-    if (rebuildsAt.length) {
+    if (breaksAt.length) {
+      const why = breaksAt.some((b) => b.rebuild) ? "a table rebuild or " : "";
       logger.warn(
-        `${filename}: ${rebuildsAt.length} ALTER(s) need a table rebuild, so the ` +
-          "file is applied in segments and a failure can leave earlier ones applied"
+        `${filename}: ${breaksAt.length} statement(s) need ${why}the live schema, ` +
+          "so the file is applied in segments and a failure can leave earlier ones applied"
       );
     }
+
+    // One interpreter per file, as MySQL scopes a session variable per
+    // connection and these files always set, use and drop within themselves.
+    const ddlSession = conditionalDdl.createSession();
+
+    // What the interpreter runs its evaluations and its chosen DDL through.
+    // `exec` has to repeat the rebuild handover, because a chosen branch is
+    // often `ALTER TABLE ... MODIFY COLUMN` - which translate() answers with a
+    // descriptor, not SQL.
+    const ddlDeps = {
+      scalar: async (sql) => {
+        const rows = await adapter.handle("query", [sql, []]);
+        if (!rows || !rows.length) return null;
+        const first = rows[0];
+        const keys = Object.keys(first);
+        return keys.length ? first[keys[0]] : null;
+      },
+      exec: async (sql) => {
+        await adapter.prepareSchema(sql);
+        const t = adapter.translateSync(sql, {});
+        if (t.rebuild) {
+          const planned = await planTableRebuild(adapter, t.rebuild);
+          if (planned.length) {
+            await adapter.send("/api/tdb/batch", {
+              statements: planned.map((one) => ({ sql: one })),
+              transaction: false,
+            });
+          }
+          return;
+        }
+        await adapter.send("/api/tdb/batch", {
+          statements: [{ sql: t.sql, params: t.params }].concat(
+            (t.extraStatements || []).map((extra) => ({ sql: extra }))
+          ),
+          transaction: true,
+        });
+      },
+    };
 
     try {
       for (let seg = 0; seg < segments.length; seg++) {
@@ -526,8 +638,39 @@ module.exports = (function () {
           }
         }
 
-        // The rebuild that ended this segment, now that its table is in place.
-        const rebuild = rebuildsAt[seg];
+        // The marker that ended this segment, now that everything before it is
+        // in the database.
+        const marker = breaksAt[seg];
+        if (!marker) continue;
+
+        if (marker.conditional) {
+          const outcome = await ddlSession.feed(marker.conditional, ddlDeps);
+          if (outcome.ran.length) {
+            rewrites.push(`conditional DDL (${outcome.ran.length} statement(s))`);
+            logger.info(
+              `${filename}: conditional DDL ran ${outcome.ran.length} statement(s)` +
+                (outcome.note ? ` - ${outcome.note}` : "")
+            );
+          }
+          continue;
+        }
+
+        if (marker.deferred) {
+          // Substituted here because the value only exists once the SET has
+          // been evaluated. MySQL does this for free; without it the `@name`
+          // reached the translator as a named placeholder and bound NULL -
+          // silently storing NULL over esx's job skins.
+          const values = ddlSession.variables();
+          const resolved = marker.deferred.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, (whole, name) => {
+            const key = name.toLowerCase();
+            if (!Object.prototype.hasOwnProperty.call(values, key)) return whole;
+            return quoteSqlLiteral(values[key]);
+          });
+          await ddlDeps.exec(resolved);
+          continue;
+        }
+
+        const rebuild = marker.rebuild;
         if (!rebuild) continue;
 
         const planned = await planTableRebuild(adapter, rebuild);

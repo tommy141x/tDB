@@ -23,7 +23,7 @@
 // the body still gets ordinary MySQL-to-SQLite treatment for functions.
 module.exports = (function () {
   const HEADER =
-    /^\s*CREATE\s+TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?([A-Za-z0-9_$]+)[`"]?\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+[`"]?([A-Za-z0-9_$]+)[`"]?\s+FOR\s+EACH\s+ROW\s+BEGIN\s+([\s\S]*?)\s*END\s*;?\s*$/i;
+    /^\s*CREATE\s+TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?([A-Za-z0-9_$]+)[`"]?\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+[`"]?([A-Za-z0-9_$]+)[`"]?\s+FOR\s+EACH\s+ROW\s+BEGIN\s+([\s\S]*?)\s*END\s*(?:\$\$|\/\/|;)?\s*$/i;
 
   function parse(sql) {
     const m = HEADER.exec(sql);
@@ -99,9 +99,20 @@ module.exports = (function () {
   }
 
   // Shape B. Collapses one DECLARE + SELECT ... INTO into a subquery.
-  function rewriteDeclare(statements) {
+  /**
+   * Collapse `DECLARE v; SELECT e INTO v;` into a subquery wherever v is read.
+   *
+   * `guard` is the trigger's WHEN condition, substituted alongside the body
+   * because a DECLARE frequently exists ONLY for the condition to read: the
+   * capacity-check triggers compute `cap` and then test
+   * `NEW.slot_index > cap`, with the body never mentioning it. Checking only
+   * the body for a use rejected the whole shape as "hiding a dead statement".
+   *
+   * Returns { statements, guard }, or null when the shape is not understood.
+   */
+  function rewriteDeclare(statements, guard) {
     const declares = statements.filter((s) => /^\s*DECLARE\b/i.test(s));
-    if (!declares.length) return statements;
+    if (!declares.length) return { statements, guard };
     // One variable only. More than one is not a shape we claim to understand.
     if (declares.length > 1) return null;
 
@@ -133,9 +144,36 @@ module.exports = (function () {
     const remaining = rest.filter((s) => s !== assignments[0]);
 
     // It has to actually be read, or the rewrite is hiding a dead statement.
-    if (!remaining.some((s) => uses.test(s))) return null;
+    // The guard counts as a reader; see the note above.
+    const readers = remaining.concat(guard ? [guard] : []);
+    if (!readers.some((s) => uses.test(s))) return null;
 
-    return remaining.map((s) => s.replace(new RegExp(`\\b${variable}\\b`, "gi"), subquery));
+    const substitute = (text) =>
+      String(text).replace(new RegExp(`\\b${variable}\\b`, "gi"), subquery);
+
+    return {
+      statements: remaining.map(substitute),
+      guard: guard ? substitute(guard) : guard,
+    };
+  }
+
+  /**
+   * `SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '<msg>'` -> SQLite's RAISE.
+   *
+   * A direct equivalent: inside a trigger SQLite has
+   * `SELECT RAISE(ABORT, '<msg>')`, which aborts the statement with that text
+   * exactly as MySQL's SIGNAL does. The SQLSTATE itself has no SQLite
+   * counterpart and is dropped - nothing can read it back here, and the message
+   * is the part an operator sees.
+   */
+  function rewriteSignal(statement) {
+    const m =
+      /^\s*SIGNAL\s+SQLSTATE\s+(?:VALUE\s+)?'[^']*'\s*SET\s+MESSAGE_TEXT\s*=\s*'((?:[^']|'')*)'\s*;?\s*$/i.exec(
+        statement
+      );
+    if (!m) return null;
+
+    return `SELECT RAISE(ABORT, '${m[1]}')`;
   }
 
   // Shape A. One trigger with IF/ELSE becomes two with WHEN.
@@ -152,6 +190,33 @@ module.exports = (function () {
     return [
       { suffix: "", when: condition.trim(), body: whenTrue },
       { suffix: "_else", when: `NOT (${condition.trim()})`, body: whenFalse },
+    ];
+  }
+
+  // Shape D. `IF c THEN a; END IF;` with no ELSE becomes ONE trigger with a
+  // WHEN guard. Any statements BEFORE the IF stay in the body text so
+  // rewriteDeclare can collapse them; it drops the DECLARE and its assignment
+  // itself, leaving only what the THEN branch actually runs.
+  function splitIfOnly(body) {
+    const m = /^([\s\S]*?)\bIF\s+([\s\S]+?)\s+THEN\s+([\s\S]+?)\s+END\s+IF\s*;?\s*$/i.exec(body);
+    if (!m) return null;
+
+    const [, prelude, condition, whenTrue] = m;
+
+    // A second IF anywhere means this is not the shape. Checked across all
+    // three parts, and before anything else, because an inner IF consumes the
+    // inner END IF and the outer block then looks unterminated instead.
+    if (/\bIF\b/i.test(`${condition} ${whenTrue}`) || /\bIF\b/i.test(prelude)) return null;
+    if (/\bELSE\b/i.test(whenTrue)) return null;
+
+    const head = prelude.trim().replace(/;\s*$/, "");
+
+    return [
+      {
+        suffix: "",
+        when: condition.trim(),
+        body: head ? `${head}; ${whenTrue}` : whenTrue,
+      },
     ];
   }
 
@@ -172,8 +237,14 @@ module.exports = (function () {
     const shapes = [];
 
     // Shape A first: it decides how many triggers come out.
-    const branches = splitIfElse(parsed.body) || [{ suffix: "", when: null, body: parsed.body }];
-    if (branches.length > 1) shapes.push("IF/ELSE");
+    let branches = splitIfElse(parsed.body);
+    if (branches) {
+      shapes.push("IF/ELSE");
+    } else {
+      branches = splitIfOnly(parsed.body);
+      if (branches) shapes.push("IF/THEN");
+    }
+    if (!branches) branches = [{ suffix: "", when: null, body: parsed.body }];
 
     const statements = [];
 
@@ -181,15 +252,24 @@ module.exports = (function () {
       let pieces = splitBody(branch.body);
       if (!pieces.length) return { handled: false };
 
-      const collapsed = rewriteDeclare(pieces);
+      let guard = branch.when;
+      const collapsed = rewriteDeclare(pieces, guard);
       if (collapsed === null) return { handled: false };
-      if (collapsed !== pieces) {
+      if (collapsed.statements !== pieces) {
         shapes.push("DECLARE");
-        pieces = collapsed;
+        pieces = collapsed.statements;
+        guard = collapsed.guard;
       }
 
       const translated = [];
       for (const piece of pieces) {
+        const raised = rewriteSignal(piece);
+        if (raised) {
+          shapes.push("SIGNAL");
+          // Already SQLite, and the MySQL parser has no RAISE.
+          translated.push(raised);
+          continue;
+        }
         const joined = rewriteUpdateJoin(piece);
         if (joined) {
           shapes.push("UPDATE/JOIN");
@@ -205,12 +285,12 @@ module.exports = (function () {
       }
 
       const name = `${parsed.name}${branch.suffix}`;
-      const guard = branch.when ? ` WHEN ${branch.when}` : "";
+      const when = guard ? ` WHEN ${guard}` : "";
 
       statements.push(
         `CREATE TRIGGER ${ifNotExists ? "IF NOT EXISTS " : ""}"${name}" ` +
           `${parsed.timing} ${parsed.event} ON "${parsed.table}" ` +
-          `FOR EACH ROW${guard} BEGIN ${translated.join("; ")}; END`
+          `FOR EACH ROW${when} BEGIN ${translated.join("; ")}; END`
       );
     }
 

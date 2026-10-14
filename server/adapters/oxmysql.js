@@ -482,10 +482,51 @@ class OxMySQLAdapter {
   // schema can supply, and translateSync below is synchronous, so the schema is
   // fetched up front and resolved from cache inside it.
   async prepareSchema(sql) {
-    if (!/\bON\s+DUPLICATE\s+KEY\b/i.test(sql)) return;
+    // Two shapes need the schema before the synchronous translate: an upsert,
+    // to pick a conflict target, and a column-list-free INSERT, to expand it
+    // into a named one.
+    const needsTarget = /\bON\s+DUPLICATE\s+KEY\b/i.test(sql);
+    const needsOrder = OxMySQLAdapter.COLUMN_LIST_FREE_INSERT.test(sql);
+    if (!needsTarget && !needsOrder) return;
 
-    const match = /\bINSERT\s+(?:IGNORE\s+)?INTO\s+[`"\[]?([A-Za-z0-9_$]+)/i.exec(sql);
+    const match =
+      /\b(?:INSERT|REPLACE)\s+(?:(?:OR\s+)?IGNORE\s+)?INTO\s+[`"\[]?([A-Za-z0-9_$]+)/i.exec(sql);
     if (match) await this.loadSchema(match[1]);
+  }
+
+  /**
+   * `INSERT INTO t VALUES (...)` with no column list, which is positional.
+   *
+   * The identifier is matched character by character rather than with a lazy
+   * `[^(]*?`: that form read "any run of non-paren characters", which a table
+   * name ending in `values` satisfies on its own, so a fully named INSERT into
+   * `fxsql_values` looked like it had no column list.
+   */
+  static COLUMN_LIST_FREE_INSERT =
+    /^\s*(?:INSERT(?:\s+(?:OR\s+)?IGNORE)?|REPLACE)\s+INTO\s+[`"\[]?[A-Za-z0-9_$.]*[`"\]]?\s+VALUES\b/i;
+
+  /**
+   * The column order a positional INSERT means, or null when it cannot be known.
+   *
+   * Adoption REORDERS columns - PocketBase sorts them - so the live order is not
+   * the one a statement written against the original schema meant. pb-adopt
+   * records the source order in its registry for exactly this, and the schema
+   * route hands it back as `sourceColumns`; the live order is correct only for a
+   * table that was never adopted.
+   */
+  resolveColumnOrder(table) {
+    const schema = this.schemaCache.get(table);
+    if (!schema) return null;
+
+    if (Array.isArray(schema.sourceColumns) && schema.sourceColumns.length) {
+      return schema.sourceColumns.slice();
+    }
+
+    if (Array.isArray(schema.columns) && schema.columns.length) {
+      return schema.columns.map((c) => (typeof c === "string" ? c : c.name));
+    }
+
+    return null;
   }
 
   // Throws synchronously. Split out of translate() so a caller that expects a
@@ -497,6 +538,7 @@ class OxMySQLAdapter {
     const translated = translator.translate(sql, params, {
       resolveConflictTarget: (table, insertColumns) =>
         this.resolveConflictTarget(table, insertColumns),
+      resolveColumnOrder: (table) => this.resolveColumnOrder(table),
     });
 
     return {

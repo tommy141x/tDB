@@ -313,6 +313,111 @@ async function main() {
     String(scalar(db, "SELECT like_count FROM ig_posts"))
   );
 
+  section("Shape D: IF with no ELSE, and SIGNAL as RAISE(ABORT)");
+
+  // A capacity-check trigger from a community resource, verbatim. It combines
+  // three things nothing else in this suite does together: a DECLARE read ONLY
+  // by the condition, an IF with no ELSE, and SIGNAL SQLSTATE as the body.
+  //
+  // SQLite's RAISE(ABORT, '<msg>') inside a trigger is a direct equivalent of
+  // SIGNAL: it aborts the statement with that text. The SQLSTATE has no
+  // counterpart and is dropped, because nothing here can read it back.
+  //
+  // Note the body ends `END$$` - a DELIMITER block's terminator. The header
+  // pattern accepted only `END;`, so this was rejected before any shape was
+  // tried.
+  const capacityTrigger = `CREATE TRIGGER \`trg_vslot_capacity_ins\`
+BEFORE INSERT ON \`cm_house_vehicle_slots\`
+FOR EACH ROW
+BEGIN
+    DECLARE cap INT DEFAULT 0;
+    SELECT IFNULL(g.capacity, 0) INTO cap
+    FROM cm_houses h
+    LEFT JOIN cm_house_garage_templates g ON g.id = h.garage_template_id
+    WHERE h.id = NEW.house_id;
+
+    IF NEW.slot_index < 1 OR NEW.slot_index > cap THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'slot_index exceeds the garage template capacity';
+    END IF;
+END$$`;
+
+  const capacity = triggerRewrite.rewrite(capacityTrigger, translateStatement);
+  ok(capacity.handled === true, "the trigger is rewritten", JSON.stringify(capacity.shapes));
+  ok(
+    capacity.handled &&
+      ["IF/THEN", "DECLARE", "SIGNAL"].every((shape) => capacity.shapes.includes(shape)),
+    "and it takes all three shapes at once",
+    JSON.stringify(capacity.shapes)
+  );
+  ok(
+    capacity.handled && capacity.statements.length === 1,
+    "one trigger out, because there is no ELSE branch to split",
+    capacity.handled ? String(capacity.statements.length) : ""
+  );
+  ok(
+    capacity.handled && /WHEN[\s\S]*\(SELECT IFNULL/i.test(capacity.statements[0]),
+    "the DECLARE became a subquery inside the WHEN guard, not a dropped statement",
+    capacity.handled ? capacity.statements[0] : ""
+  );
+  ok(
+    capacity.handled &&
+      /RAISE\(ABORT, 'slot_index exceeds the garage template capacity'\)/.test(
+        capacity.statements[0]
+      ),
+    "and SIGNAL became RAISE(ABORT) with the message verbatim",
+    capacity.handled ? capacity.statements[0] : ""
+  );
+
+  // Executed, because a guard that never fires would pass every check above.
+  {
+    const db = new DatabaseSync(":memory:");
+    db.exec("CREATE TABLE cm_house_garage_templates (id INTEGER PRIMARY KEY, capacity INT)");
+    db.exec("CREATE TABLE cm_houses (id INTEGER PRIMARY KEY, garage_template_id INT)");
+    db.exec(
+      "CREATE TABLE cm_house_vehicle_slots (id INTEGER PRIMARY KEY, house_id INT, slot_index INT)"
+    );
+    db.exec("INSERT INTO cm_house_garage_templates VALUES (1, 2)");
+    db.exec("INSERT INTO cm_houses VALUES (10, 1)");
+    for (const statement of capacity.statements) db.exec(statement);
+
+    const attempt = (slot) => {
+      try {
+        db.prepare("INSERT INTO cm_house_vehicle_slots (house_id, slot_index) VALUES (?, ?)").run(
+          10,
+          slot
+        );
+        return null;
+      } catch (error) {
+        return error.message;
+      }
+    };
+
+    ok(attempt(1) === null, "a slot within capacity is accepted");
+    ok(attempt(2) === null, "and so is the last one");
+    const over = attempt(3);
+    ok(
+      over !== null && /slot_index exceeds the garage template capacity/.test(over),
+      "a slot over capacity is rejected, with the resource's own message",
+      String(over)
+    );
+    ok(attempt(0) !== null, "and so is a slot below 1, which is the other half of the condition");
+    ok(
+      db.prepare("SELECT COUNT(*) AS c FROM cm_house_vehicle_slots").get().c === 2,
+      "only the accepted rows are stored"
+    );
+  }
+
+  // A nested IF is still refused: an inner IF consumes the inner END IF, so the
+  // outer block looks unterminated and guessing would mis-scope the guard.
+  const nested = triggerRewrite.rewrite(
+    `CREATE TRIGGER t AFTER INSERT ON a FOR EACH ROW BEGIN
+       IF NEW.x > 1 THEN IF NEW.y > 2 THEN UPDATE b SET c = 1; END IF; END IF;
+     END`,
+    translateStatement
+  );
+  ok(nested.handled === false, "a nested IF is refused rather than mis-scoped");
+
   console.log(`\n==== ${pass} passed, ${fail} failed ====`);
   if (failures.length) {
     console.log("\nFailures:");

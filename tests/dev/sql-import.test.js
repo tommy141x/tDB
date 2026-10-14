@@ -540,6 +540,234 @@ ALTER TABLE \`weed_plants\` MODIFY COLUMN \`stage\` int(11) DEFAULT 1;
       "and the table is untouched afterwards"
     );
 
+    console.log("\n=== MySQL's conditional-DDL idiom, end to end");
+
+    // Resources use the procedural dance only because MySQL has no
+    // `ALTER TABLE ... ADD INDEX IF NOT EXISTS`. Every condition is a real
+    // SELECT over information_schema, which tDB rewrites - so the interpreter
+    // EVALUATES each one against the live database rather than guessing what it
+    // means. Both spellings below are verbatim from shipped resources.
+    wipe();
+    write(
+      "50-conditional.sql",
+      `CREATE TABLE IF NOT EXISTS \`banking\` (
+  \`id\` int(11) NOT NULL AUTO_INCREMENT,
+  \`identifier\` varchar(46) NULL,
+  \`time\` int(11) NOT NULL DEFAULT 0,
+  PRIMARY KEY (\`id\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @banking_migration := (SELECT IF(
+  EXISTS(SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'banking' AND INDEX_NAME = 'idx_banking_time'),
+  'SELECT 1',
+  'ALTER TABLE \`banking\` ADD INDEX \`idx_banking_time\` (\`time\`)'));
+PREPARE s FROM @banking_migration;
+EXECUTE s;
+DEALLOCATE PREPARE s;
+
+SET @pincode_migration := (SELECT IF(
+  EXISTS(SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'banking' AND COLUMN_NAME = 'pincode'),
+  'SELECT 1',
+  'ALTER TABLE \`banking\` ADD COLUMN \`pincode\` INT NULL'));
+PREPARE s2 FROM @pincode_migration;
+EXECUTE s2;
+DEALLOCATE PREPARE s2;
+`
+    );
+
+    const conditional = await sqlImport.run(adapter, sqlDir, quiet, {});
+    ok(
+      conditional.applied.indexOf("50-conditional.sql") !== -1,
+      "a file using SET + PREPARE + EXECUTE applies",
+      JSON.stringify(conditional)
+    );
+
+    const bankIdx = await call(
+      "query",
+      "SELECT name FROM sqlite_master WHERE type = ? AND tbl_name = ?",
+      ["index", "banking"]
+    );
+    ok(
+      bankIdx.some((r) => /idx_banking_time$/.test(r.name)),
+      "the condition was FALSE, so the index branch ran",
+      JSON.stringify(bankIdx.map((r) => r.name))
+    );
+    const bankCols = (
+      await call("query", "SELECT name FROM pragma_table_info(?)", ["banking"])
+    ).map((r) => r.name);
+    ok(
+      bankCols.indexOf("pincode") !== -1,
+      "and the ADD COLUMN branch ran",
+      JSON.stringify(bankCols)
+    );
+
+    // Idempotency is the whole point of the idiom. The ledger keys by FILENAME,
+    // so the same statements under a new name run again - and this time both
+    // conditions are TRUE, so both must take the 'SELECT 1' branch. An
+    // ADD COLUMN twice is a hard SQLite error, so if the condition were not
+    // really being evaluated this would fail loudly rather than quietly.
+    const sameAgain = fs.readFileSync(path.join(sqlDir, "50-conditional.sql"), "utf8");
+    wipe();
+    write("51-again.sql", sameAgain);
+    const secondConditionalRun = await sqlImport.run(adapter, sqlDir, quiet, {});
+    ok(
+      secondConditionalRun.applied.indexOf("51-again.sql") !== -1,
+      "re-running the same conditional DDL applies rather than erroring",
+      JSON.stringify(secondConditionalRun)
+    );
+    const colsAfter = (
+      await call("query", "SELECT name FROM pragma_table_info(?)", ["banking"])
+    ).map((r) => r.name);
+    ok(
+      colsAfter.filter((n) => n === "pincode").length === 1,
+      "and pincode was not added twice",
+      JSON.stringify(colsAfter)
+    );
+
+    console.log("\n=== A stored procedure called once and dropped");
+
+    wipe();
+    write(
+      "52-procedure.sql",
+      `CREATE TABLE IF NOT EXISTS \`k9_certifications\` (
+  \`id\` int(11) NOT NULL AUTO_INCREMENT,
+  \`citizenid\` varchar(50) NOT NULL,
+  \`job\` varchar(50) NOT NULL,
+  \`active\` tinyint(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (\`id\`)
+) ENGINE=InnoDB;
+
+DROP PROCEDURE IF EXISTS \`k9_add_idx\`;
+
+DELIMITER $$
+CREATE PROCEDURE \`k9_add_idx\`()
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'k9_certifications' AND INDEX_NAME = 'idx_citizen_job_active'
+  ) THEN
+    ALTER TABLE \`k9_certifications\` ADD KEY \`idx_citizen_job_active\` (\`citizenid\`, \`job\`, \`active\`);
+  END IF;
+END$$
+DELIMITER ;
+
+CALL \`k9_add_idx\`();
+DROP PROCEDURE \`k9_add_idx\`;
+`
+    );
+
+    const procedural = await sqlImport.run(adapter, sqlDir, quiet, {});
+    if (procedural.failed.length) {
+      const why = await sqlImport.readLedger(adapter);
+      console.log("        LEDGER:", JSON.stringify(why.get("52-procedure.sql")));
+    }
+    ok(
+      procedural.applied.indexOf("52-procedure.sql") !== -1,
+      "a file using CREATE PROCEDURE + CALL + DROP applies",
+      JSON.stringify(procedural)
+    );
+    const k9Idx = await call(
+      "query",
+      "SELECT name FROM sqlite_master WHERE type = ? AND tbl_name = ?",
+      ["index", "k9_certifications"]
+    );
+    ok(
+      k9Idx.some((r) => /idx_citizen_job_active$/.test(r.name)),
+      "the procedure's IF NOT EXISTS branch ran",
+      JSON.stringify(k9Idx.map((r) => r.name))
+    );
+
+    console.log("\n=== A session variable read by an ordinary statement");
+
+    // esx's addons set a JSON literal and then read it in an UPDATE. Without
+    // substitution the `@name` reached the translator as a named PLACEHOLDER
+    // and bound NULL, silently storing NULL over the job's skin.
+    wipe();
+    write(
+      "53-variable.sql",
+      `CREATE TABLE IF NOT EXISTS \`job_grades\` (
+  \`job_name\` varchar(50) NOT NULL,
+  \`skin_male\` longtext NULL
+) ENGINE=InnoDB;
+
+INSERT INTO \`job_grades\` (\`job_name\`, \`skin_male\`) VALUES ('mechanic', NULL);
+
+SET @mechanic_skin_male = '{"tshirt_1":15,"torso_1":243}';
+
+UPDATE \`job_grades\` SET \`skin_male\` = @mechanic_skin_male WHERE \`job_name\` = 'mechanic';
+`
+    );
+
+    const varFile = await sqlImport.run(adapter, sqlDir, quiet, {});
+    ok(
+      varFile.applied.indexOf("53-variable.sql") !== -1,
+      "a file setting and then reading a session variable applies",
+      JSON.stringify(varFile)
+    );
+    const skin = await call("scalar", "SELECT skin_male FROM job_grades WHERE job_name = ?", [
+      "mechanic",
+    ]);
+    ok(
+      skin === '{"tshirt_1":15,"torso_1":243}',
+      "the variable's value was substituted, not bound as NULL",
+      JSON.stringify(skin)
+    );
+
+    console.log("\n=== ALTER TABLE ... ADD FOREIGN KEY");
+
+    // SQLite has no ADD CONSTRAINT, so this was refused by name - and unlike an
+    // untranslatable trigger, which is skipped, a refused ALTER fails the WHOLE
+    // file. qb-vehicleshop adds its player_vehicles -> players key this way.
+    wipe();
+    write(
+      "60-foreignkey.sql",
+      `CREATE TABLE IF NOT EXISTS \`fk_players\` (
+  \`citizenid\` varchar(50) NOT NULL,
+  PRIMARY KEY (\`citizenid\`)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS \`fk_vehicles\` (
+  \`id\` int(11) NOT NULL AUTO_INCREMENT,
+  \`citizenid\` varchar(50) NOT NULL,
+  \`plate\` varchar(8) NOT NULL,
+  PRIMARY KEY (\`id\`)
+) ENGINE=InnoDB;
+
+INSERT INTO \`fk_players\` (\`citizenid\`) VALUES ('C1');
+INSERT INTO \`fk_vehicles\` (\`citizenid\`, \`plate\`) VALUES ('C1', 'AAA');
+
+ALTER TABLE \`fk_vehicles\` ADD CONSTRAINT \`FK_fkvehicles_fkplayers\`
+  FOREIGN KEY (\`citizenid\`) REFERENCES \`fk_players\` (\`citizenid\`) ON DELETE CASCADE;
+`
+    );
+
+    const fkRun = await sqlImport.run(adapter, sqlDir, quiet, {});
+    if (fkRun.failed.length) {
+      const why = await sqlImport.readLedger(adapter);
+      console.log("        LEDGER:", JSON.stringify(why.get("60-foreignkey.sql")));
+    }
+    ok(
+      fkRun.applied.indexOf("60-foreignkey.sql") !== -1,
+      "a file adding a foreign key applies instead of failing whole",
+      JSON.stringify(fkRun)
+    );
+    ok(
+      (await call("scalar", "SELECT COUNT(*) FROM fk_vehicles", [])) === 1,
+      "the row survived the rebuild the constraint needed"
+    );
+    const fkList = await call(
+      "query",
+      "SELECT `table`, `from`, on_delete FROM pragma_foreign_key_list(?)",
+      ["fk_vehicles"]
+    );
+    ok(
+      fkList.length === 1 && fkList[0].table === "fk_players" && fkList[0].on_delete === "CASCADE",
+      "and the constraint is really registered, with its referential action",
+      JSON.stringify(fkList)
+    );
+
     console.log("\n=== The resource wires it in");
 
     const clientSource = fs.readFileSync(path.join(ROOT, "server/utils/client.js"), "utf8");
