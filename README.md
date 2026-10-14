@@ -1,3 +1,5 @@
+![tDB](docs/public/banner.jpg)
+
 # tDB
 
 A database resource for FiveM, and a drop-in replacement for oxmysql: the same
@@ -22,13 +24,14 @@ local row = exports.oxmysql:single_async('SELECT * FROM players WHERE citizenid 
    calls resolve to it with no script edits.
 5. Start the server.
 
-On first start tDB creates `config.lua` from the committed `config.example.lua`,
-then provisions PocketBase itself: it creates the superuser, writes the
-credentials into `config.lua`, and authenticates. The PocketBase web installer
-never appears. The generated password is printed once, on that run only.
+On first start tDB provisions PocketBase itself: it creates the superuser,
+writes the credentials into `config.local.lua`, and authenticates. The
+PocketBase web installer never appears. The generated password is printed once,
+on that run only.
 
-`config.lua` is gitignored — it holds that password in plain text. Edit it;
-`config.example.lua` is the template and is overwritten by updates.
+`config.lua` is the file you edit, and it ships with every credential blank. A
+real credential comes from a server convar — `set tdb_superuser_password "…"` —
+or from the gitignored `config.local.lua` beside it. The convar wins.
 
 Full instructions, including the one case `provide` cannot cover, are in
 [Installation](https://timmygstudios.com/docs/tDB/installation).
