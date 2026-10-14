@@ -1,49 +1,23 @@
-/**
- * Reconciling PocketBase's SMTP/S3 settings with config.lua.
- *
- * One direction only: config.lua -> PocketBase. Nothing here ever writes
- * config.lua back.
- *
- * That is forced by the platform, not chosen for tidiness. PocketBase omits
- * `smtp.password` and `s3.secret` from GET /api/settings entirely - they come
- * back undefined, not masked. Measured against a real instance; re-prove it
- * with `node .dev/probe-settings-roundtrip.js`:
- *
- *     smtp: {"enabled":true,"port":587,"host":"smtp.example.com",...}
- *     smtp.password returned : undefined
- *     s3.secret returned     : undefined
- *
- * So a sync in the other direction cannot round-trip the only two fields that
- * really matter. It reads undefined, concludes that differs from what
- * config.lua holds, and writes an empty string over a working credential -
- * which the next start then pushes back to the instance, clearing it there
- * too. tDB did exactly that, on every shutdown, for any operator who had SMTP
- * or S3 enabled.
- *
- * Hence three states per block, rather than the two `Enabled` can express:
- *
- *   Manage = false                  tDB does not touch this block. The admin
- *                                   UI owns it and nothing can drift, because
- *                                   nothing is asserted. The default.
- *   Manage = true, Enabled = true   config.lua is the truth; every field is
- *                                   asserted on every boot, secrets included.
- *   Manage = true, Enabled = false  config.lua is still the truth, and the
- *                                   truth is "off". The old code could only
- *                                   ever turn these on - it wrote
- *                                   `enabled: true` or nothing at all, so
- *                                   disabling in config.lua left the instance
- *                                   happily sending mail.
- *
- * When managing, a difference the admin UI introduced is reported before being
- * overwritten. A silent revert is how config.lua ends up describing an
- * instance it does not describe.
- */
+// S3 storage settings, config.lua -> PocketBase and never back.
+//
+// One direction because PocketBase omits `s3.secret` from GET /api/settings
+// entirely; it comes back undefined, not masked (re-prove with
+// `node tests/dev/probe-settings-roundtrip.js`). A reverse sync reads undefined,
+// calls it drift, and blanks a working credential on both sides.
+//
+// So the block has three states, not the two `Enabled` can express: Manage =
+// false leaves it alone and the admin UI owns it (default); Manage = true
+// asserts config.lua wholesale on every boot, `Enabled = false` included.
+// Drift the admin UI introduced is reported before it is overwritten.
+//
+// SMTP IS NOT HERE. Mail settings are the admin UI's alone - tDB shipped them
+// in config.lua with Manage defaulting to false, which is a second copy of
+// eight fields that it then declined to apply.
 module.exports = (function () {
   // Fields PocketBase actually returns, so they can be compared. The secrets
   // are deliberately absent: they are asserted blind because they cannot be
   // read back.
   const COMPARABLE_FIELDS = {
-    smtp: ["enabled", "host", "port", "username", "tls", "localName"],
     s3: [
       "enabled",
       "bucket",
@@ -56,23 +30,8 @@ module.exports = (function () {
 
   // Non-empty string fields that suggest an operator filled the block in.
   const CONFIGURED_HINTS = {
-    smtp: ["Host", "Username", "Password"],
     s3: ["Bucket", "Region", "Endpoint", "AccessKey"],
   };
-
-  function desiredSmtp(smtp) {
-    if (!smtp.Enabled) return { enabled: false };
-    return {
-      enabled: true,
-      host: smtp.Host,
-      port: smtp.Port,
-      username: smtp.Username,
-      password: smtp.Password,
-      authMethod: "PLAIN",
-      tls: smtp.TLS,
-      localName: smtp.LocalName || "localhost",
-    };
-  }
 
   function desiredS3(s3) {
     if (!s3.Enabled) return { enabled: false };
@@ -87,12 +46,8 @@ module.exports = (function () {
     };
   }
 
-  /**
-   * Fields the instance disagrees with config.lua about, as readable strings.
-   * Only fields PocketBase returns can be checked, so this never reports a
-   * secret - it is for telling the operator what is about to be overwritten,
-   * not for deciding whether to overwrite.
-   */
+  // Readable strings for the operator, not an input to the overwrite decision:
+  // only fields PocketBase returns can be compared, so secrets never appear.
   function describeDrift(key, current, desired) {
     const drifted = [];
     for (const field of COMPARABLE_FIELDS[key] || []) {
@@ -108,41 +63,42 @@ module.exports = (function () {
     return drifted;
   }
 
-  /** Does this block hold anything the operator plausibly typed? */
+  // Has the operator asked for something this block is not delivering?
+  //
+  // ⚠️ `Enabled` first. Filled-in fields alone used to be enough, so a block
+  // that is switched OFF still warned it was "not applied" - true and
+  // meaningless, since desiredS3 reduces it to `{enabled: false}` either way.
+  // It fired on stock installs still carrying a template value, putting a
+  // permanent yellow `Running with warnings` on a healthy server.
   function looksConfigured(block, key) {
+    if (!block.Enabled) return false;
     return (CONFIGURED_HINTS[key] || []).some((f) => {
       const v = block[f];
       return typeof v === "string" && v !== "";
     });
   }
 
-  /**
-   * Apply config.lua's SMTP/S3 to the instance.
-   *
-   * Never throws: a settings problem is worth reporting, not worth failing a
-   * database resource over.
-   *
-   * @param {object} api `{ getSettings(), updateSettings(patch) }`
-   * @param {object} advanced `config.Advanced`
-   * @param {object} logger
-   * @returns {Promise<{managed: string[], drift: string[], warnings: string[], ignored: string[]}>}
-   */
+  // Apply config.lua's S3 block to the instance. `api` is
+  // `{ getSettings(), updateSettings(patch) }`. Never throws; a settings problem
+  // is not worth failing a database resource over.
   async function reconcile(api, advanced, logger) {
     const result = { managed: [], drift: [], warnings: [], ignored: [] };
-    const blocks = [
-      ["smtp", advanced.SMTP, desiredSmtp],
-      ["s3", advanced.S3, desiredS3],
-    ];
+    const blocks = [["s3", advanced.S3, desiredS3]];
 
-    // Say so when a filled-in block is not being applied, rather than letting
-    // the operator believe config.lua describes the instance.
+    // Say so when a filled-in block is not applied, so an operator does not
+    // keep believing config.lua describes the instance.
+    //
+    // A warning ROW, not a loose `logger.info` line above the banner in the
+    // green that means "normal" - this is a config file disagreeing with the
+    // running instance. reconcileSettings() drains `result.warnings` into the
+    // banner.
     for (const [key, block] of blocks) {
       if (!block.Manage && looksConfigured(block, key)) {
-        const message =
-          `${key.toUpperCase()} settings in config.lua are not applied ` +
-          `(Manage = false) - the admin UI owns them`;
         result.ignored.push(key);
-        logger.info(message);
+        result.warnings.push(
+          `${key.toUpperCase()} settings in config.lua are not applied ` +
+            `(Manage = false) - the admin UI owns them`,
+        );
       }
     }
 
@@ -163,14 +119,14 @@ module.exports = (function () {
             `being overwritten (config.lua wins while Manage = true): ` +
             drifted.join(", ");
           result.drift.push(message);
+          // Banner row only. Pushing to `warnings` AND calling logger.warn
+          // printed the same sentence twice: once loose above the box and once
+          // inside it.
           result.warnings.push(message);
-          logger.warn(message);
         }
 
-        // Asserted whole and unconditionally. A field-by-field comparison
-        // cannot see the secrets, so it would skip a rotated password - which
-        // is how the old code kept using a credential the operator had already
-        // replaced in config.lua.
+        // Whole and unconditional: a field-by-field diff cannot see the secrets,
+        // so it would skip a rotated password.
         updates[key] = desired;
         result.managed.push(key);
       }
@@ -180,20 +136,16 @@ module.exports = (function () {
         `PocketBase settings asserted from config.lua: ${Object.keys(updates).join(", ")}`,
       );
     } catch (err) {
-      const message = `Failed to apply settings from config.lua: ${err.message}`;
-      result.warnings.push(message);
-      logger.warn(message);
+      // Banner row only, as above.
+      result.warnings.push(`Failed to apply settings from config.lua: ${err.message}`);
     }
 
     return result;
   }
 
   return {
-    COMPARABLE_FIELDS,
-    desiredSmtp,
     desiredS3,
     describeDrift,
-    looksConfigured,
     reconcile,
   };
 })();

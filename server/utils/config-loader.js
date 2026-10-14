@@ -1,304 +1,661 @@
-// Wrap in module.exports function to avoid global scope pollution
+// Regex-parses config.lua into a plain object. Singleton, cached after load().
+//
+// config.lua is NOT in git. It is the operator's copy, created on first run by
+// copying config.example.lua (see ensureConfigFile), and it is the file the
+// generated superuser password gets written into - which is exactly why it must
+// never be tracked. config.example.lua is the committed template and carries no
+// real values.
+//
+// buildDefaults() below is the single source of truth for every default. The
+// example file documents those values and must agree with them;
+// tests/dev/config-defaults.test.js parses the example through this loader and
+// fails if the two ever drift apart.
 module.exports = (function () {
   const fs = require("fs");
   const path = require("path");
 
+  const CONFIG_FILE = "config.lua";
+  const EXAMPLE_FILE = "config.example.lua";
+
   /**
-   * Shared configuration loader for PocketBase
-   * Prevents duplication of config parsing logic between server.js and client.js
+   * THE defaults. Every one of these is what tDB does when the key is missing
+   * from config.lua, and config.example.lua ships these same values.
+   *
+   * Returns a fresh object each call: the loader mutates what it is given, and
+   * a shared literal would leak one load's parse into the next.
    */
+  function buildDefaults() {
+    return {
+      // Publish the admin UI through tLib's router. True because that is the
+      // resource's headline feature, it is what the docs have always promised,
+      // and the panel is password-gated behind a generated random superuser
+      // password. `false` keeps the database reachable only from the machine.
+      ExposeAdmin: true,
+
+      // Whether the mount appears in tLib's hub index. Not a security control -
+      // an unlisted mount still answers.
+      ShowInHub: true,
+
+      // Print the `debug` log level. FALSE, matching tLib's own logger, whose
+      // minimum level is INFO until a resource raises it. tDB's JS logger had
+      // no level filter at all, so every debug line - the pid-file sweep, the
+      // route probe, each backup, "Admin UI published at", which the banner's
+      // Admin row already carries - printed on every boot of every install.
+      Debug: false,
+
+      // Preferred loopback port, not a setting. Overwritten at startup with
+      // the port PocketBase actually got - see resolveInternalPort(). It is
+      // deliberately absent from config.example.lua.
+      Port: 8090,
+
+      // Run `pocketbase update` on start. FALSE deliberately, against what the
+      // docs said before: scripts/fetch-runtime.ts pins a version AND verifies
+      // it against the published checksum, and `update` replaces that vetted
+      // binary with an unverified newer one, under a live database, without
+      // asking. Safe-by-default beats convenience here.
+      AutoUpdate: false,
+
+      Superuser: {
+        Email: "",
+        Password: "",
+      },
+      Migrations: {
+        AutoApply: true,
+        // Beside pb_data rather than at the resource root. PocketBase derives
+        // `<dataDir>/../pb_migrations` when --migrationsDir is omitted, so this
+        // is the path it would have picked anyway, and it keeps everything
+        // PocketBase writes under the one gitignored .runtime/ tree.
+        Dir: ".runtime/pb_migrations",
+      },
+      Sql: {
+        Enabled: true,
+        Dir: "sql",
+        OnChanged: "warn",
+      },
+      Backup: {
+        Enabled: false,
+        OnStartup: true,
+        // Renamed from `Schedule` - the unit belongs in the name.
+        // The old key is still read, with a deprecation warning.
+        ScheduleSeconds: 0,
+        KeepLast: 7,
+        BackupPrefix: "auto_",
+      },
+      Advanced: {
+        RemoteHost: "",
+        RemotePort: "",
+        Dev: false,
+        AutoMigrate: true,
+        PublicDir: "pb_public",
+        DataDir: ".runtime/pb_data",
+        // THERE IS NO SMTP BLOCK, and there is not meant to be one. Mail
+        // settings live in the PocketBase admin UI and nowhere else: tDB's
+        // default was `Manage = false`, i.e. the admin UI owns them, so
+        // config.lua held a second copy of eight fields that it then declined
+        // to apply - including an SMTP password sitting in a file next to a
+        // comment explaining it was being ignored.
+        //
+        // Manage false means tDB never touches S3 on the instance, so the
+        // admin UI owns it. See reconcileSettings() in server.js.
+        S3: {
+          Manage: false,
+          Enabled: false,
+          Bucket: "",
+          Region: "",
+          Endpoint: "",
+          AccessKey: "",
+          SecretKey: "",
+          ForcePathStyle: false,
+        },
+      },
+    };
+  }
+
+  // A Lua string literal, either quote style. The old parser accepted only
+  // double quotes, so a perfectly legal `Dir = 'sql'` parsed as nothing and
+  // silently fell back to the default.
+  const LUA_STRING = /^(?:"([^"]*)"|'([^']*)')/;
+
+  /**
+   * Every name this loader will look for, by the block it lives in.
+   *
+   * This exists for the one failure `read()` cannot see. read() is handed a key
+   * NAME and reports the value it found under it, so it covers "the value is
+   * wrong" completely - but a MISSPELLED key is a name it is never handed. Its
+   * regex simply does not match, it returns null, the default stands, and the
+   * operator's setting does nothing at all with nothing said. That is the
+   * config bug this whole file's header calls the most expensive kind, and it
+   * was the only shape of it left uncovered here.
+   *
+   * Kept beside the read() calls in load() on purpose: the two lists have to
+   * agree, and tests/dev/config-defaults.test.js parses config.example.lua
+   * through this loader, so a name added to one and not the other shows up as
+   * the example file warning about its own key.
+   */
+  const KNOWN_KEYS = {
+    // `Config.<Name>` at the top level. The five table names are here because
+    // they are assignments too - `Config.Backup = {` - and leaving them out
+    // would report every block in the file as a stray key.
+    root: [
+      "ExposeAdmin",
+      "ShowInHub",
+      "Debug",
+      "AutoUpdate",
+      "Superuser",
+      "Migrations",
+      "Sql",
+      "Backup",
+      "Advanced",
+    ],
+    Superuser: ["Email", "Password"],
+    Migrations: ["AutoApply", "Dir"],
+    Sql: ["Enabled", "Dir", "OnChanged"],
+    // Schedule is the retired name. It is read, with a deprecation warning of
+    // its own further down, so it must not also be reported as unknown.
+    Backup: [
+      "Enabled",
+      "OnStartup",
+      "ScheduleSeconds",
+      "Schedule",
+      "KeepLast",
+      "BackupPrefix",
+    ],
+    Advanced: [
+      "RemoteHost",
+      "RemotePort",
+      "Dev",
+      "AutoMigrate",
+      "PublicDir",
+      "DataDir",
+      "S3",
+    ],
+    S3: [
+      "Manage",
+      "Enabled",
+      "Bucket",
+      "Region",
+      "Endpoint",
+      "AccessKey",
+      "SecretKey",
+      "ForcePathStyle",
+    ],
+  };
+
+  /**
+   * Keys that parse, are spelled correctly, and still do nothing. Reported in
+   * their own words rather than as a typo, because "did you mean" advice on a
+   * key the operator spelled perfectly is worse than silence.
+   */
+  const INERT_KEYS = {
+    Port:
+      "Config.Port is not a setting. The PocketBase port is loopback-internal " +
+      "and is resolved at startup (preferred 8090, otherwise any free port), " +
+      "so whatever is written here is overwritten before anything reads it. " +
+      "Fix: delete the line. To reach a PocketBase you run yourself, use " +
+      "Config.Advanced.RemoteHost and RemotePort instead.",
+  };
+
+  /**
+   * Levenshtein distance, capped in effect by the caller's budget. Only used to
+   * decide whether two key names are CLOSE.
+   */
+  function editDistance(a, b) {
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+
+    let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+    let cur = new Array(b.length + 1);
+
+    for (let i = 1; i <= a.length; i++) {
+      cur[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      }
+      [prev, cur] = [cur, prev];
+    }
+    return prev[b.length];
+  }
+
+  /**
+   * The known name an unknown one was probably meant to be, or null.
+   *
+   * Case-insensitive, and the budget scales with length: `ExposeAdmn` and
+   * `exposeadmin` are both near-misses worth naming, while a wrong suggestion
+   * is worse than none - so it stays conservative and a long key gets no more
+   * slack in proportion than a short one.
+   */
+  function suggest(unknown, known) {
+    const budget = Math.max(2, Math.floor(unknown.length / 4));
+    let best = null;
+    let bestDistance = Infinity;
+    for (const name of known) {
+      const distance = editDistance(unknown.toLowerCase(), name.toLowerCase());
+      if (distance <= budget && distance < bestDistance) {
+        best = name;
+        bestDistance = distance;
+      }
+    }
+    return best;
+  }
 
   class ConfigLoader {
     constructor() {
       this.config = null;
       this.configContent = "";
       this.configPath = "";
+      // Collected during load() and drained by server.js into the startup box.
+      // A parse problem the operator never sees is the same as no validation.
+      this.warnings = [];
     }
 
     /**
-     * Load configuration from config.lua
-     * @param {string} resourcePath - Path to the resource
-     * @returns {object} Parsed configuration
+     * Make sure config.lua exists, copying config.example.lua over it on a
+     * first run. Never overwrites an existing file.
+     *
+     * @returns {{created: boolean, error: string|null}}
      */
-    load(resourcePath) {
-      if (this.config) {
-        return this.config; // Return cached config
+    ensureConfigFile(resourcePath) {
+      const target = path.join(resourcePath, CONFIG_FILE);
+      const example = path.join(resourcePath, EXAMPLE_FILE);
+
+      if (fs.existsSync(target)) return { created: false, error: null };
+
+      if (!fs.existsSync(example)) {
+        return {
+          created: false,
+          error:
+            `Neither ${CONFIG_FILE} nor ${EXAMPLE_FILE} is present in the tDB ` +
+            `resource folder. Re-download the release; ${EXAMPLE_FILE} ships with it.`,
+        };
       }
 
-      this.config = {
-        ExposeAdmin: false,
-        // Whether the mount appears in tLib's hub index. Defaults to TRUE,
-        // unlike ExposeAdmin beside it, and deliberately: this key is newer
-        // than the resource, so an install whose config.lua predates it must
-        // keep behaving exactly as it does today. Defaulting to false would
-        // silently drop every existing server out of the hub on update.
-        //
-        // Not a security control. See the note on `listed` in server.js:
-        // an unlisted mount is still registered and still answers.
-        ShowInHub: true,
-        // Preferred loopback port, not a setting — see the note in the parser
-        // below and resolveInternalPort() in server/utils/server.js. Overwritten at
-        // startup with the port PocketBase was actually given.
-        Port: 8090,
-        AutoUpdate: false,
-        Superuser: {
-          Email: "",
-          Password: "",
-        },
-        Migrations: {
-          AutoApply: true,
-          Dir: "pb_migrations",
-        },
-        Sql: {
-          Enabled: true,
-          Dir: "sql",
-          OnChanged: "warn",
-        },
-        Backup: {
-          Enabled: false,
-          OnStartup: true,
-          Schedule: 0,
-          KeepLast: 7,
-          BackupPrefix: "auto_",
-        },
-        Advanced: {
-          RemoteHost: "",
-          RemotePort: "",
-          Dev: false,
-          AutoMigrate: true,
-          PublicDir: "pb_public",
-          DataDir: "pb_data",
-          // Manage defaults to false: unless asked, tDB does not touch these
-          // settings on the instance at all, so the admin UI owns them and
-          // nothing can drift. See reconcileSettings() in server/utils/server.js.
-          SMTP: {
-            Manage: false,
-            Enabled: false,
-            Host: "",
-            Port: 587,
-            Username: "",
-            Password: "",
-            LocalName: "",
-            TLS: true,
-          },
-          S3: {
-            Manage: false,
-            Enabled: false,
-            Bucket: "",
-            Region: "",
-            Endpoint: "",
-            AccessKey: "",
-            SecretKey: "",
-            ForcePathStyle: false,
-          },
-        },
-      };
+      try {
+        // copyFileSync with COPYFILE_EXCL so two resources racing to boot
+        // cannot have one truncate the other's fresh copy.
+        fs.copyFileSync(example, target, fs.constants.COPYFILE_EXCL);
+        return { created: true, error: null };
+      } catch (err) {
+        if (err.code === "EEXIST") return { created: false, error: null };
+        return {
+          created: false,
+          error: `Could not create ${CONFIG_FILE} from ${EXAMPLE_FILE}: ${err.message}`,
+        };
+      }
+    }
 
-      this.configPath = path.join(resourcePath, "config.lua");
+    /**
+     * Read one key out of a chunk of config.lua.
+     *
+     * `kind` is "bool", "number", "string", or an array of allowed strings
+     * (an enum). `label` is what the operator is told the key is called, so it
+     * reads as `Config.Backup.KeepLast` rather than `KeepLast`.
+     *
+     * Absent key -> null, and the default stands. Key PRESENT but unparseable
+     * -> a warning naming file, key, expected and found, then null. Silently
+     * ignoring it is the anti-pattern: the operator's setting
+     * does nothing and nothing says so.
+     */
+    read(chunk, key, kind, label) {
+      // Skip Lua-commented lines, and capture the whole right-hand side so the
+      // warning can quote what was actually there.
+      const line = chunk.match(
+        new RegExp(`^(?!\\s*--).*?\\b${key}\\s*=\\s*(.*)$`, "m"),
+      );
+      if (!line) return null;
+
+      const raw = line[1].replace(/\s*--.*$/, "").replace(/,\s*$/, "").trim();
+      const name = label || key;
+
+      if (kind === "bool") {
+        if (raw === "true") return true;
+        if (raw === "false") return false;
+        return this.reject(name, "true or false (no quotes)", raw);
+      }
+
+      if (kind === "number") {
+        const m = raw.match(/^-?\d+$/);
+        if (m) return parseInt(raw, 10);
+        return this.reject(name, "a whole number, unquoted", raw);
+      }
+
+      const str = raw.match(LUA_STRING);
+
+      if (kind === "string") {
+        if (str) return str[1] !== undefined ? str[1] : str[2];
+        return this.reject(name, 'a quoted string, e.g. "value"', raw);
+      }
+
+      if (Array.isArray(kind)) {
+        const value = str ? (str[1] !== undefined ? str[1] : str[2]) : null;
+        if (value !== null && kind.includes(value)) return value;
+        return this.reject(
+          name,
+          `one of ${kind.map((v) => `"${v}"`).join(", ")}`,
+          raw,
+        );
+      }
+
+      return null;
+    }
+
+    /** Record an unparseable key and leave the default in place. */
+    reject(name, expected, found) {
+      this.warnings.push(
+        `${CONFIG_FILE}: ${name} could not be read. Expected ${expected}, ` +
+          `found \`${found || "(nothing)"}\`. The built-in default is being used ` +
+          `instead - fix the value and restart tDB.`,
+      );
+      return null;
+    }
+
+    /**
+     * Report every assignment in `chunk` whose name this loader never looks
+     * for. `prefix` is what the operator is told the block is called
+     * ("Config.Backup"), `known` the names that belong in it.
+     *
+     * Lua-commented lines are skipped, so the example values carried in
+     * comments - `-- Endpoint = "s3.example.com"` - are not reported as keys.
+     *
+     * `re` is how a key is spelled at this level: bare inside a table, and
+     * `Config.<Name>` at the top of the file.
+     */
+    unknownKeys(chunk, prefix, known, re = /^\s*([A-Za-z_]\w*)\s*=/) {
+      if (!chunk) return;
+
+      const seen = new Set();
+      for (const line of chunk.split("\n")) {
+        if (/^\s*--/.test(line)) continue;
+        const m = line.match(re);
+        if (!m) continue;
+
+        const key = m[1];
+        if (known.includes(key) || seen.has(key)) continue;
+        seen.add(key);
+
+        const label = `${prefix}.${key}`;
+
+        if (INERT_KEYS[key]) {
+          this.warnings.push(`${CONFIG_FILE}: ${INERT_KEYS[key]}`);
+          continue;
+        }
+
+        const guess = suggest(key, known);
+        this.warnings.push(
+          `${CONFIG_FILE}: ${label} is not a setting tDB reads, so it is doing ` +
+            `nothing. ` +
+            (guess
+              ? `Fix: did you mean ${prefix}.${guess}?`
+              : `Fix: check it against ${EXAMPLE_FILE}, or delete it.`),
+        );
+      }
+    }
+
+    /** Slice a flat `Config.<Name> = { ... }` table out of the file. */
+    section(name) {
+      const m = this.configContent.match(
+        new RegExp(`Config\\.${name}\\s*=\\s*\\{([^}]+)\\}`, "s"),
+      );
+      return m ? m[1] : null;
+    }
+
+    /**
+     * Slice a nested `<Name> = { ... }` sub-table (S3).
+     *
+     * Anchored to the start of a line so prose - `Backup and S3 are ignored`
+     * in the Advanced header comment - cannot be mistaken for the table
+     * itself.
+     */
+    subSection(name) {
+      const m = this.configContent.match(
+        new RegExp(`^[^\\S\\n]*${name}\\s*=\\s*\\{([^}]+)\\}`, "m"),
+      );
+      return m ? m[1] : null;
+    }
+
+    load(resourcePath) {
+      if (this.config) {
+        return this.config;
+      }
+
+      this.config = buildDefaults();
+      this.warnings = [];
+
+      this.configPath = path.join(resourcePath, CONFIG_FILE);
+
+      const bootstrap = this.ensureConfigFile(resourcePath);
+      if (bootstrap.error) {
+        this.warnings.push(bootstrap.error);
+      } else if (bootstrap.created) {
+        console.log(
+          `^2[Config Loader]^7 First run: created ${CONFIG_FILE} from ${EXAMPLE_FILE}. ` +
+            `Edit ${CONFIG_FILE}, not ${EXAMPLE_FILE} - updates overwrite the example.`,
+        );
+      }
 
       try {
-        if (fs.existsSync(this.configPath)) {
-          this.configContent = fs.readFileSync(this.configPath, "utf8");
-
-          // Simple regex patterns for top-level config
-          const simpleMatch = (pattern) => {
-            const match = this.configContent.match(pattern);
-            return match ? match[1] : null;
-          };
-
-          // Parse top-level config
-          const exposeAdmin = simpleMatch(
-            /Config\.ExposeAdmin\s*=\s*(true|false)/,
-          );
-          if (exposeAdmin) this.config.ExposeAdmin = exposeAdmin === "true";
-
-          // Absent from config.lua leaves the default (true) in place, which
-          // is what keeps an install that predates this key listed.
-          const showInHub = simpleMatch(/Config\.ShowInHub\s*=\s*(true|false)/);
-          if (showInHub) this.config.ShowInHub = showInHub === "true";
-
-          // Config.Port is deliberately NOT parsed. It is no longer an
-          // operator setting: PocketBase's port is loopback-internal, so
-          // startPocketBase() resolves it at runtime (preferring 8090, falling
-          // back to any free port) and writes it onto this.config.Port. A
-          // Config.Port left in an older config.lua is ignored rather than
-          // honoured, because honouring it could reintroduce the collision the
-          // runtime resolution exists to avoid.
-
-          const autoUpdate = simpleMatch(
-            /Config\.AutoUpdate\s*=\s*(true|false)/,
-          );
-          if (autoUpdate) this.config.AutoUpdate = autoUpdate === "true";
-
-          // Parse Superuser config
-          const email = simpleMatch(/Email\s*=\s*"([^"]*)"/);
-          if (email) this.config.Superuser.Email = email;
-
-          const password = simpleMatch(/Password\s*=\s*"([^"]*)"/);
-          if (password) this.config.Superuser.Password = password;
-
-          // Parse Backup config - extract the entire Backup table
-          const backupSection = this.configContent.match(
-            /Config\.Backup\s*=\s*\{([^}]+)\}/s,
-          );
-          if (backupSection) {
-            const backupContent = backupSection[1];
-            const backupEnabled = backupContent.match(
-              /Enabled\s*=\s*(true|false)/,
-            );
-            if (backupEnabled)
-              this.config.Backup.Enabled = backupEnabled[1] === "true";
-
-            const onStartup = backupContent.match(
-              /OnStartup\s*=\s*(true|false)/,
-            );
-            if (onStartup)
-              this.config.Backup.OnStartup = onStartup[1] === "true";
-
-            const schedule = backupContent.match(/Schedule\s*=\s*(\d+)/);
-            if (schedule) this.config.Backup.Schedule = parseInt(schedule[1]);
-
-            const keepLast = backupContent.match(/KeepLast\s*=\s*(\d+)/);
-            if (keepLast) this.config.Backup.KeepLast = parseInt(keepLast[1]);
-
-            const prefix = backupContent.match(/BackupPrefix\s*=\s*"([^"]*)"/);
-            if (prefix) this.config.Backup.BackupPrefix = prefix[1];
-          }
-
-          // Parse Migrations config
-          const migrationsSection = this.configContent.match(
-            /Config\.Migrations\s*=\s*\{([^}]+)\}/s,
-          );
-          if (migrationsSection) {
-            const migrationsContent = migrationsSection[1];
-            const autoApply = migrationsContent.match(
-              /AutoApply\s*=\s*(true|false)/,
-            );
-            if (autoApply)
-              this.config.Migrations.AutoApply = autoApply[1] === "true";
-
-            const dir = migrationsContent.match(/Dir\s*=\s*"([^"]*)"/);
-            if (dir) this.config.Migrations.Dir = dir[1];
-          }
-
-          // Parse Sql import config
-          const sqlSection = this.configContent.match(
-            /Config\.Sql\s*=\s*\{([^}]+)\}/s,
-          );
-          if (sqlSection) {
-            const sqlContent = sqlSection[1];
-
-            const enabled = sqlContent.match(/Enabled\s*=\s*(true|false)/);
-            if (enabled) this.config.Sql.Enabled = enabled[1] === "true";
-
-            const sqlDir = sqlContent.match(/Dir\s*=\s*"([^"]*)"/);
-            if (sqlDir) this.config.Sql.Dir = sqlDir[1];
-
-            const onChanged = sqlContent.match(
-              /OnChanged\s*=\s*"(warn|error|apply)"/,
-            );
-            if (onChanged) this.config.Sql.OnChanged = onChanged[1];
-          }
-
-          // Parse Advanced config
-          // Match only non-commented lines (not starting with --)
-          // Use negative lookbehind to ensure line doesn't start with --
-          const remoteHostMatch = this.configContent.match(
-            /^(?!\s*--).*RemoteHost\s*=\s*"([^"]*)"/m,
-          );
-          const remoteHost = remoteHostMatch ? remoteHostMatch[1] : null;
-          if (remoteHost !== null && remoteHost !== "")
-            this.config.Advanced.RemoteHost = remoteHost;
-
-          const remotePortMatch = this.configContent.match(
-            /^(?!\s*--).*RemotePort\s*=\s*"([^"]*)"/m,
-          );
-          const remotePort = remotePortMatch ? remotePortMatch[1] : null;
-          if (remotePort !== null && remotePort !== "")
-            this.config.Advanced.RemotePort = remotePort;
-
-          const dev = simpleMatch(/Dev\s*=\s*(true|false)/);
-          if (dev) this.config.Advanced.Dev = dev === "true";
-
-          const autoMigrate = simpleMatch(/AutoMigrate\s*=\s*(true|false)/);
-          if (autoMigrate)
-            this.config.Advanced.AutoMigrate = autoMigrate === "true";
-
-          // Parse SMTP config - extract SMTP table
-          const smtpSection = this.configContent.match(
-            /SMTP\s*=\s*\{([^}]+)\}/s,
-          );
-          if (smtpSection) {
-            const smtpContent = smtpSection[1];
-            const manage = smtpContent.match(/Manage\s*=\s*(true|false)/);
-            if (manage) this.config.Advanced.SMTP.Manage = manage[1] === "true";
-
-            const enabled = smtpContent.match(/Enabled\s*=\s*(true|false)/);
-            if (enabled)
-              this.config.Advanced.SMTP.Enabled = enabled[1] === "true";
-
-            const smtpHost = smtpContent.match(/Host\s*=\s*"([^"]*)"/);
-            if (smtpHost) this.config.Advanced.SMTP.Host = smtpHost[1];
-
-            const smtpPort = smtpContent.match(/Port\s*=\s*(\d+)/);
-            if (smtpPort)
-              this.config.Advanced.SMTP.Port = parseInt(smtpPort[1]);
-
-            const username = smtpContent.match(/Username\s*=\s*"([^"]*)"/);
-            if (username) this.config.Advanced.SMTP.Username = username[1];
-
-            const smtpPassword = smtpContent.match(/Password\s*=\s*"([^"]*)"/);
-            if (smtpPassword)
-              this.config.Advanced.SMTP.Password = smtpPassword[1];
-
-            const localName = smtpContent.match(/LocalName\s*=\s*"([^"]*)"/);
-            if (localName) this.config.Advanced.SMTP.LocalName = localName[1];
-
-            const tls = smtpContent.match(/TLS\s*=\s*(true|false)/);
-            if (tls) this.config.Advanced.SMTP.TLS = tls[1] === "true";
-          }
-
-          // Parse S3 config - extract S3 table
-          const s3Section = this.configContent.match(/S3\s*=\s*\{([^}]+)\}/s);
-          if (s3Section) {
-            const s3Content = s3Section[1];
-            const manage = s3Content.match(/Manage\s*=\s*(true|false)/);
-            if (manage) this.config.Advanced.S3.Manage = manage[1] === "true";
-
-            const enabled = s3Content.match(/Enabled\s*=\s*(true|false)/);
-            if (enabled)
-              this.config.Advanced.S3.Enabled = enabled[1] === "true";
-
-            const bucket = s3Content.match(/Bucket\s*=\s*"([^"]*)"/);
-            if (bucket) this.config.Advanced.S3.Bucket = bucket[1];
-
-            const region = s3Content.match(/Region\s*=\s*"([^"]*)"/);
-            if (region) this.config.Advanced.S3.Region = region[1];
-
-            const endpoint = s3Content.match(/Endpoint\s*=\s*"([^"]*)"/);
-            if (endpoint) this.config.Advanced.S3.Endpoint = endpoint[1];
-
-            const accessKey = s3Content.match(/AccessKey\s*=\s*"([^"]*)"/);
-            if (accessKey) this.config.Advanced.S3.AccessKey = accessKey[1];
-
-            const secretKey = s3Content.match(/SecretKey\s*=\s*"([^"]*)"/);
-            if (secretKey) this.config.Advanced.S3.SecretKey = secretKey[1];
-
-            const forcePathStyle = s3Content.match(
-              /ForcePathStyle\s*=\s*(true|false)/,
-            );
-            if (forcePathStyle)
-              this.config.Advanced.S3.ForcePathStyle =
-                forcePathStyle[1] === "true";
-          }
-
-          return this.config;
-        } else {
+        if (!fs.existsSync(this.configPath)) {
           console.log(
-            "^3[Config Loader]^7 config.lua not found, using defaults",
+            `^3[Config Loader]^7 ${CONFIG_FILE} not found, using defaults`,
           );
           return this.config;
         }
+
+        this.configContent = fs.readFileSync(this.configPath, "utf8");
+
+        const set = (target, prop, value) => {
+          if (value !== null) target[prop] = value;
+        };
+        const whole = this.configContent;
+
+        // ---- Parse top-level config ----
+        set(
+          this.config,
+          "ExposeAdmin",
+          this.read(whole, "Config\\.ExposeAdmin", "bool", "Config.ExposeAdmin"),
+        );
+        set(
+          this.config,
+          "ShowInHub",
+          this.read(whole, "Config\\.ShowInHub", "bool", "Config.ShowInHub"),
+        );
+        set(this.config, "Debug", this.read(whole, "Config\\.Debug", "bool", "Config.Debug"));
+
+        // Config.Port is deliberately NOT parsed. The port is
+        // loopback-internal and startPocketBase() resolves it at runtime
+        // (prefer 8090, else any free port). Honouring a stale Config.Port
+        // would reintroduce the collision that resolution exists to avoid.
+
+        set(
+          this.config,
+          "AutoUpdate",
+          this.read(whole, "Config\\.AutoUpdate", "bool", "Config.AutoUpdate"),
+        );
+
+        // ---- Superuser ----
+        // Scoped to its own table rather than matched across the whole file.
+        // Advanced.S3 has a `SecretKey`, and a whole-file match for a password
+        // would hand the admin login whichever one is written first.
+        const superuser = this.section("Superuser");
+        if (superuser) {
+          set(
+            this.config.Superuser,
+            "Email",
+            this.read(superuser, "Email", "string", "Config.Superuser.Email"),
+          );
+          set(
+            this.config.Superuser,
+            "Password",
+            this.read(
+              superuser,
+              "Password",
+              "string",
+              "Config.Superuser.Password",
+            ),
+          );
+        }
+
+        // ---- Backup ----
+        const backup = this.section("Backup");
+        if (backup) {
+          const b = this.config.Backup;
+          set(b, "Enabled", this.read(backup, "Enabled", "bool", "Config.Backup.Enabled"));
+          set(
+            b,
+            "OnStartup",
+            this.read(backup, "OnStartup", "bool", "Config.Backup.OnStartup"),
+          );
+
+          // Renamed key. Read the new name first; fall back to the old one with
+          // a deprecation warning rather than silently dropping the operator's
+          // setting.
+          const scheduleSeconds = this.read(
+            backup,
+            "ScheduleSeconds",
+            "number",
+            "Config.Backup.ScheduleSeconds",
+          );
+          if (scheduleSeconds !== null) {
+            b.ScheduleSeconds = scheduleSeconds;
+          } else if (/^(?!\s*--).*\bScheduleSeconds\s*=/m.test(backup) === false) {
+            const legacy = this.read(
+              backup,
+              "Schedule",
+              "number",
+              "Config.Backup.Schedule",
+            );
+            if (legacy !== null) {
+              b.ScheduleSeconds = legacy;
+              this.warnings.push(
+                `${CONFIG_FILE}: Config.Backup.Schedule is deprecated and will be ` +
+                  `removed in tDB 2.0. It has been read as ` +
+                  `Config.Backup.ScheduleSeconds = ${legacy}. Rename the key to ` +
+                  `ScheduleSeconds to silence this.`,
+              );
+            }
+          }
+
+          set(b, "KeepLast", this.read(backup, "KeepLast", "number", "Config.Backup.KeepLast"));
+          set(
+            b,
+            "BackupPrefix",
+            this.read(backup, "BackupPrefix", "string", "Config.Backup.BackupPrefix"),
+          );
+        }
+
+        // ---- Migrations ----
+        const migrations = this.section("Migrations");
+        if (migrations) {
+          set(
+            this.config.Migrations,
+            "AutoApply",
+            this.read(migrations, "AutoApply", "bool", "Config.Migrations.AutoApply"),
+          );
+          set(
+            this.config.Migrations,
+            "Dir",
+            this.read(migrations, "Dir", "string", "Config.Migrations.Dir"),
+          );
+        }
+
+        // ---- Sql ----
+        const sql = this.section("Sql");
+        if (sql) {
+          set(this.config.Sql, "Enabled", this.read(sql, "Enabled", "bool", "Config.Sql.Enabled"));
+          set(this.config.Sql, "Dir", this.read(sql, "Dir", "string", "Config.Sql.Dir"));
+          set(
+            this.config.Sql,
+            "OnChanged",
+            this.read(sql, "OnChanged", ["warn", "error", "apply"], "Config.Sql.OnChanged"),
+          );
+        }
+
+        // ---- Advanced ----
+        // The flat keys only. Slicing stops before the S3 sub-table so a flat
+        // key here cannot pick up one of S3's.
+        const advancedStart = whole.indexOf("Config.Advanced");
+        let advanced = advancedStart === -1 ? "" : whole.slice(advancedStart);
+        // Cut at the S3 sub-table's own LINE, not at the first mention of the
+        // name: the Advanced header comment says "Migrations, Backup and S3
+        // are ignored", and that sits above every flat key here.
+        const s3At = advanced.search(/^[^\S\n]*S3\s*=\s*\{/m);
+        if (s3At !== -1) advanced = advanced.slice(0, s3At);
+
+        // An empty RemoteHost/RemotePort means "local", not "unset": both must
+        // be non-empty for remote mode, so an empty string keeps the default.
+        const remoteHost = this.read(
+          advanced,
+          "RemoteHost",
+          "string",
+          "Config.Advanced.RemoteHost",
+        );
+        if (remoteHost) this.config.Advanced.RemoteHost = remoteHost;
+
+        const remotePort = this.read(
+          advanced,
+          "RemotePort",
+          "string",
+          "Config.Advanced.RemotePort",
+        );
+        if (remotePort) this.config.Advanced.RemotePort = remotePort;
+
+        set(this.config.Advanced, "Dev", this.read(advanced, "Dev", "bool", "Config.Advanced.Dev"));
+        set(
+          this.config.Advanced,
+          "AutoMigrate",
+          this.read(advanced, "AutoMigrate", "bool", "Config.Advanced.AutoMigrate"),
+        );
+        set(
+          this.config.Advanced,
+          "PublicDir",
+          this.read(advanced, "PublicDir", "string", "Config.Advanced.PublicDir"),
+        );
+        set(
+          this.config.Advanced,
+          "DataDir",
+          this.read(advanced, "DataDir", "string", "Config.Advanced.DataDir"),
+        );
+
+        // ---- Advanced.S3 ----
+        const s3 = this.subSection("S3");
+        if (s3) {
+          const t = this.config.Advanced.S3;
+          const at = (k) => `Config.Advanced.S3.${k}`;
+          set(t, "Manage", this.read(s3, "Manage", "bool", at("Manage")));
+          set(t, "Enabled", this.read(s3, "Enabled", "bool", at("Enabled")));
+          set(t, "Bucket", this.read(s3, "Bucket", "string", at("Bucket")));
+          set(t, "Region", this.read(s3, "Region", "string", at("Region")));
+          set(t, "Endpoint", this.read(s3, "Endpoint", "string", at("Endpoint")));
+          set(t, "AccessKey", this.read(s3, "AccessKey", "string", at("AccessKey")));
+          set(t, "SecretKey", this.read(s3, "SecretKey", "string", at("SecretKey")));
+          set(
+            t,
+            "ForcePathStyle",
+            this.read(s3, "ForcePathStyle", "bool", at("ForcePathStyle")),
+          );
+        }
+
+        // ---- Keys tDB never looks for ----
+        //
+        // Last, so a typo is reported after the values that WERE read - the
+        // operator reads the box top-down and a "did you mean" line above the
+        // settings it applies reads as though nothing was applied.
+        //
+        // One known blind spot, stated rather than papered over: the Advanced
+        // slice stops at the S3 sub-table, so a stray key written BELOW it is
+        // not seen. Extending the slice past a nested table with a regex is how
+        // this parser starts matching braces it cannot count, and the shipped
+        // file has nothing there.
+        this.unknownKeys(whole, "Config", KNOWN_KEYS.root, /^\s*Config\.([A-Za-z_]\w*)\s*=/);
+        this.unknownKeys(superuser, "Config.Superuser", KNOWN_KEYS.Superuser);
+        this.unknownKeys(backup, "Config.Backup", KNOWN_KEYS.Backup);
+        this.unknownKeys(migrations, "Config.Migrations", KNOWN_KEYS.Migrations);
+        this.unknownKeys(sql, "Config.Sql", KNOWN_KEYS.Sql);
+        this.unknownKeys(advanced, "Config.Advanced", KNOWN_KEYS.Advanced);
+        this.unknownKeys(s3, "Config.Advanced.S3", KNOWN_KEYS.S3);
+
+        return this.config;
       } catch (err) {
         console.log(
           `^1[Config Loader]^7 Failed to load config: ${err.message}`,
@@ -307,12 +664,6 @@ module.exports = (function () {
       }
     }
 
-    /**
-     * Update config file with new superuser credentials
-     * @param {string} email - New email
-     * @param {string} password - New password
-     * @returns {boolean} Success status
-     */
     updateSuperuserCredentials(email, password) {
       try {
         if (!this.configPath || !fs.existsSync(this.configPath)) {
@@ -322,22 +673,35 @@ module.exports = (function () {
           return false;
         }
 
-        // Re-read rather than editing the copy taken at load(). This can run
-        // long after startup (the superuser repair path), and writing the boot
-        // snapshot back would silently revert anything edited by hand since.
-        let updatedContent = fs.readFileSync(this.configPath, "utf8");
-        updatedContent = updatedContent.replace(
-          /(Email\s*=\s*)"([^"]*)"/,
-          `$1"${email}"`,
-        );
-        updatedContent = updatedContent.replace(
-          /(Password\s*=\s*)"([^"]*)"/,
-          `$1"${password}"`,
-        );
+        // Re-read rather than editing the copy taken at load(): this runs long
+        // after startup on the superuser repair path, and writing the boot
+        // snapshot back would revert anything edited by hand since.
+        const original = fs.readFileSync(this.configPath, "utf8");
+
+        // Scoped to the Config.Superuser table. A whole-file replace rewrites
+        // the FIRST `Password = "..."`, which is the superuser's only by luck
+        // of ordering.
+        const block = original.match(/(Config\.Superuser\s*=\s*\{)([^}]*)(\})/s);
+        if (!block) {
+          console.log(
+            "^1[Config Loader]^7 Cannot update config - no Config.Superuser block in config.lua",
+          );
+          return false;
+        }
+
+        const patched = block[2]
+          .replace(/(Email\s*=\s*)(?:"[^"]*"|'[^']*')/, `$1"${email}"`)
+          .replace(/(Password\s*=\s*)(?:"[^"]*"|'[^']*')/, `$1"${password}"`);
+
+        const updatedContent =
+          original.slice(0, block.index) +
+          block[1] +
+          patched +
+          block[3] +
+          original.slice(block.index + block[0].length);
 
         fs.writeFileSync(this.configPath, updatedContent, "utf8");
 
-        // Update cached config
         this.config.Superuser.Email = email;
         this.config.Superuser.Password = password;
         this.configContent = updatedContent;
@@ -351,15 +715,22 @@ module.exports = (function () {
       }
     }
 
-    /**
-     * Get the loaded config (cached)
-     * @returns {object} Configuration object
-     */
     get() {
       return this.config;
     }
+
+    /** Warnings collected by the last load(), for the startup box. */
+    getWarnings() {
+      return this.warnings;
+    }
   }
 
-  // Return singleton instance
-  return new ConfigLoader();
+  const instance = new ConfigLoader();
+  // Exposed for tests/dev/config-defaults.test.js, which needs a fresh loader
+  // and the untouched default tree to compare config.example.lua against.
+  instance.ConfigLoader = ConfigLoader;
+  instance.buildDefaults = buildDefaults;
+  instance.CONFIG_FILE = CONFIG_FILE;
+  instance.EXAMPLE_FILE = EXAMPLE_FILE;
+  return instance;
 })();

@@ -8,8 +8,12 @@
     git, because tDB writes the generated superuser password into it.
 
     HOW TO EDIT: change values to the RIGHT of the = sign only. Keep the
-    commas — a trailing comma on the last entry is legal Lua and is there on
-    purpose. Do not remove the quotes around text.
+    commas — a trailing comma on the last entry is legal Lua. Do not remove
+    the quotes around text.
+
+    NOTHING HERE IS REQUIRED. tDB runs correctly with this file unedited:
+    the superuser login is generated on first start and written into
+    config.lua for you. Every setting below is optional.
 
     APPLYING CHANGES: restart the resource. `ensure tDB` in the server
     console, or txAdmin > Resources > tDB > Restart. Nothing here is read
@@ -23,19 +27,13 @@
     the superuser password in plain text. `tdb status` prints a redacted
     version that is safe to share.
 
-    Docs: https://docs.timmygstudios.com/docs/tDB/configuration
+    Docs: https://timmygstudios.com/docs/tDB/configuration
 ------------------------------------------------------------------------]]
 
 Config = {}
 
 -- ==========================================================================
---  1. REQUIRED — nothing. tDB runs correctly with this file unedited.
---     The superuser login is generated on first start and written into
---     config.lua for you. Everything below is optional.
--- ==========================================================================
-
--- ==========================================================================
---  2. COMMON SETTINGS
+--  1. COMMON SETTINGS
 -- ==========================================================================
 
 -- Publish the PocketBase admin panel at /db/_/ on tLib's public URL and port.
@@ -48,12 +46,18 @@ Config.ExposeAdmin = true
 -- unreachability use ExposeAdmin = false. Default: true
 Config.ShowInHub = true
 
+-- Print tDB's debug lines: the pid-file sweep, route probes, each backup, the
+-- settings asserted from this file. Off, a normal boot prints the startup box
+-- and nothing else. Turn it on to see a start-up problem step by step.
+-- Default: false
+Config.Debug = false
+
 -- Run `pocketbase update` on every start.
 --
--- FALSE on purpose. tDB ships a specific PocketBase build, fetched against a
--- published checksum. Turning this on replaces that verified binary with an
--- unverified newer one, under a live database, without asking. Leave it off
--- and take PocketBase updates with tDB updates. Default: false
+-- tDB ships a specific PocketBase build, fetched against a published checksum.
+-- Turning this on replaces that verified binary with an unverified newer one,
+-- under a live database, without asking. Left off, PocketBase updates arrive
+-- with tDB updates. Default: false
 Config.AutoUpdate = false
 
 -- The PocketBase admin login.
@@ -70,7 +74,7 @@ Config.Superuser = {
 }
 
 -- ==========================================================================
---  3. SQL IMPORTS
+--  2. SQL IMPORTS
 --
 --  Scripts normally ship a .sql file you load into MySQL by hand. Drop it in
 --  Dir instead and it is applied on startup, before any other resource can
@@ -95,7 +99,7 @@ Config.Sql = {
 }
 
 -- ==========================================================================
---  4. BACKUPS
+--  3. BACKUPS
 --
 --  Backups land inside the PocketBase data directory, under `backups`.
 --  That is the same disk as the database: it protects against a bad
@@ -125,7 +129,7 @@ Config.Backup = {
 }
 
 -- ==========================================================================
---  5. MIGRATIONS
+--  4. MIGRATIONS
 --
 --  PocketBase's own collection migrations, not the .sql drop folder above.
 --  PocketBase writes a migration file whenever you change a collection in the
@@ -137,22 +141,22 @@ Config.Migrations = {
     -- Apply pending migrations on start. Default: true
     AutoApply = true,
 
-    -- Relative to the resource folder. Sits beside pb_data on purpose: it is
-    -- the path PocketBase derives anyway, and it keeps everything PocketBase
-    -- writes under one gitignored tree. Default: ".runtime/pb_migrations"
+    -- Relative to the resource folder. `.runtime/` is gitignored, so moving
+    -- this out of it puts PocketBase's generated migration files into your
+    -- version control. Default: ".runtime/pb_migrations"
     Dir = ".runtime/pb_migrations",
 }
 
 -- ==========================================================================
---  6. ADVANCED — most servers change nothing here
+--  5. ADVANCED — most servers change nothing here
 -- ==========================================================================
 
 Config.Advanced = {
     -- Use a PocketBase instance you already run instead of starting one. BOTH
     -- must be set, or tDB stays local. No local process is started, and
-    -- Migrations, Backup, SMTP and S3 are ignored: the instance is somebody
-    -- else's to configure. Remote mode DOES require Superuser.Email and
-    -- Superuser.Password above — tDB cannot generate a login on a database it
+    -- Migrations, Backup and S3 above are ignored — configure those on the
+    -- instance itself. Remote mode DOES require Superuser.Email and
+    -- Superuser.Password above: tDB cannot generate a login on a database it
     -- does not own.
     -- Example: RemoteHost = "db.example.com", RemotePort = "8090"
     RemoteHost = "",
@@ -176,45 +180,26 @@ Config.Advanced = {
     DataDir = ".runtime/pb_data",
 
     -- ----------------------------------------------------------------------
-    --  Manage decides who owns the two blocks below.
+    --  S3 storage for PocketBase's files and backups.
+    --
+    --  Manage decides who owns this block:
     --
     --    false  tDB never touches the setting. Set it in the admin UI and it
-    --           stays. Everything else in the block is ignored, and tDB says
-    --           so on startup if you filled it in.
+    --           stays. Everything else in the block is ignored.
     --    true   config.lua wins. Every field is applied on every start, and an
     --           admin-UI edit is reported and then overwritten. Enabled =
     --           false genuinely turns the feature off.
     --
     --  Settings only travel config.lua -> PocketBase, never back: PocketBase
-    --  will not hand out the SMTP password or the S3 secret once set, so
-    --  syncing the other way would overwrite real credentials with empty ones.
+    --  will not hand out the S3 secret once set, so syncing the other way
+    --  would overwrite a real credential with an empty one.
     --
-    --  These are credentials. They live in config.lua, which is gitignored and
-    --  server-side only — never in a shared_script.
+    --  AccessKey and SecretKey are credentials. They are read server-side
+    --  only, and config.lua is gitignored — keep it that way.
+    --
+    --  Mail is not here. Set it in the PocketBase admin UI, under
+    --  Settings > Mail.
     -- ----------------------------------------------------------------------
-
-    SMTP = {
-        Manage = false,
-        Enabled = false,
-
-        -- Mail server hostname. NO default on purpose: a prefilled host would
-        -- mean flipping Enabled = true silently aimed your mail somewhere you
-        -- never chose. Example: Host = "smtp.gmail.com"
-        Host = "",
-
-        -- 587 for STARTTLS, 465 for implicit TLS, 25 unencrypted.
-        -- Default: 587
-        Port = 587,
-
-        Username = "",
-        Password = "",
-
-        -- HELO/EHLO name. Empty lets PocketBase pick. Default: ""
-        LocalName = "",
-
-        -- Default: true
-        TLS = true,
-    },
 
     S3 = {
         Manage = false,
