@@ -1,4 +1,4 @@
-![tDB](https://timmygstudios.com/assets/tDB/banner.jpg)
+![tDB](docs/public/banner.jpg)
 
 # tDB
 
