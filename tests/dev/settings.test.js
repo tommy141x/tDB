@@ -374,12 +374,16 @@ async function main() {
       !/reconcileSettings\(\)[\s\S]{0,40}\}, \d+\);/.test(serverLf),
     "it is awaited inline, not left in a timer whose warnings land after the box",
   );
+  const writerSrc = loaderSrc.slice(loaderSrc.indexOf("updateSuperuserCredentials"));
   ok(
     /Re-read rather than editing the copy taken at load\(\)/.test(loaderSrc) &&
-      /readFileSync\(this\.configPath, "utf8"\)/.test(
-        loaderSrc.slice(loaderSrc.indexOf("updateSuperuserCredentials")),
-      ),
-    "the remaining config.lua writer re-reads from disk",
+      /readFileSync\(this\.localPath, "utf8"\)/.test(writerSrc),
+    "the one remaining config writer re-reads from disk",
+  );
+  ok(
+    /writeFileSync\(this\.localPath,/.test(writerSrc) &&
+      !/writeFileSync\(this\.configPath/.test(loaderSrc),
+    "and it writes the gitignored sidecar, never the tracked config.lua",
   );
 
   console.log(`\n==== ${pass} passed, ${fail} failed ====`);

@@ -1,19 +1,24 @@
 --[[----------------------------------------------------------------------
     TIMMYG Studios — tDB 1.0.0
-    config.example.lua — the committed template. Never edited in place.
-
-    HOW IT IS USED: tDB copies this file to `config.lua` the first time it
-    starts, if `config.lua` is not already there. Edit `config.lua`. This
-    file is overwritten by updates; `config.lua` is yours and is kept out of
-    git, because tDB writes the generated superuser password into it.
+    config.lua — the file you edit. It is the only one.
 
     HOW TO EDIT: change values to the RIGHT of the = sign only. Keep the
     commas — a trailing comma on the last entry is legal Lua. Do not remove
     the quotes around text.
 
     NOTHING HERE IS REQUIRED. tDB runs correctly with this file unedited:
-    the superuser login is generated on first start and written into
-    config.lua for you. Every setting below is optional.
+    the superuser login is generated on first start. Every setting below is
+    optional.
+
+    CREDENTIALS DO NOT GO IN THIS FILE. Every credential-shaped key here
+    ships blank and stays blank, so this file is safe to commit and safe to
+    paste. A real value comes from one of two places instead, and the first
+    one that is set wins:
+
+        1. a server convar, e.g. `set tdb_superuser_password "…"`
+        2. `config.local.lua` beside this file — same grammar, only the keys
+           you are overriding. tDB writes the generated superuser password
+           there, and it is gitignored.
 
     APPLYING CHANGES: restart the resource. `ensure tDB` in the server
     console, or txAdmin > Resources > tDB > Restart. Nothing here is read
@@ -22,10 +27,6 @@
     IF IT WON'T START: Lua reports the line BELOW the real mistake, so look
     one line up from whatever the console names. Fix the FIRST error only,
     then restart — everything after it is usually just fallout from that one.
-
-    NEVER paste your real config.lua in a public support channel: it holds
-    the superuser password in plain text. `tdb status` prints a redacted
-    version that is safe to share.
 
     Docs: https://timmygstudios.com/docs/tDB/configuration
 ------------------------------------------------------------------------]]
@@ -60,14 +61,18 @@ Config.Debug = false
 -- with tDB updates. Default: false
 Config.AutoUpdate = false
 
--- The PocketBase admin login.
+-- The PocketBase admin login. Blank here, always.
 --
--- Leave both empty and tDB generates them on first start and writes them back
--- into config.lua — that write is why config.lua must stay out of version
--- control. The generated password is printed in the server console ONCE, on
--- the run that creates it, and never again.
+-- To pin a login you already have, set it in server.cfg:
 --
--- Fill them in yourself to pin a known login. To rotate: blank both, restart.
+--     set tdb_superuser_email "admin@example.com"
+--     set tdb_superuser_password "…"
+--
+-- With neither convar set, tDB generates both on first start and writes them
+-- into config.local.lua. The generated password is printed in the server
+-- console ONCE, on the run that creates it, and never again.
+--
+-- To rotate: delete the pair from config.local.lua, unset the convars, restart.
 Config.Superuser = {
     Email = "",
     Password = "",
@@ -194,8 +199,9 @@ Config.Advanced = {
     --  will not hand out the S3 secret once set, so syncing the other way
     --  would overwrite a real credential with an empty one.
     --
-    --  AccessKey and SecretKey are credentials. They are read server-side
-    --  only, and config.lua is gitignored — keep it that way.
+    --  AccessKey and SecretKey are credentials, so they stay blank here. Set
+    --  `tdb_advanced_s3_accesskey` / `tdb_advanced_s3_secretkey` in
+    --  server.cfg, or put them in config.local.lua.
     --
     --  Mail is not here. Set it in the PocketBase admin UI, under
     --  Settings > Mail.

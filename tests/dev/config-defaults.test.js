@@ -1,5 +1,6 @@
 /**
- * config.example.lua and the loader's defaults are one setting each, not two.
+ * The shipped config.lua and the loader's defaults are one setting each, not
+ * two.
  *
  * They used to be two, and they disagreed: ExposeAdmin was false in the loader
  * and true in the file, AutoUpdate false and true, Migrations.Dir
@@ -9,11 +10,11 @@
  * one out - who then silently got a different product.
  *
  * buildDefaults() is now the source of truth and this suite is what stops the
- * example drifting away from it again: it parses config.example.lua through the
+ * shipped file drifting away from it again: it parses config.lua through the
  * real loader and requires the result to equal the defaults exactly.
  *
  * Also covers the parser itself - quote styles, unreadable values, the renamed
- * Backup key - and the first-run bootstrap copy.
+ * Backup key - and the credential tiers: convar > config.local.lua > config.lua.
  */
 const fs = require("fs");
 const os = require("os");
@@ -44,12 +45,28 @@ function section(name) {
   console.log(`\n=== ${name}`);
 }
 
-/** Parse an arbitrary config.lua body through the real loader. */
-function parse(body) {
+/**
+ * Parse an arbitrary config.lua body through the real loader, optionally with a
+ * config.local.lua sidecar beside it and a set of convars in scope.
+ *
+ * GetConvar is a FiveM global the loader reads through `typeof`, so standing one
+ * up here is how the top tier gets exercised at all outside the game.
+ */
+function parse(body, { sidecar, convars } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tdb-config-"));
   fs.writeFileSync(path.join(dir, "config.lua"), body, "utf8");
+  if (sidecar !== undefined) {
+    fs.writeFileSync(path.join(dir, "config.local.lua"), sidecar, "utf8");
+  }
+  if (convars) {
+    global.GetConvar = (name, fallback) =>
+      Object.hasOwn(convars, name) ? convars[name] : fallback;
+  }
+
   const loader = new ConfigLoader();
   const config = loader.load(dir);
+
+  if (convars) delete global.GetConvar;
   fs.rmSync(dir, { recursive: true, force: true });
   return { config, warnings: loader.getWarnings() };
 }
@@ -68,27 +85,27 @@ function diff(actual, expected, prefix = "") {
   return out;
 }
 
-const EXAMPLE_PATH = path.join(ROOT, "config.example.lua");
-const EXAMPLE = fs.readFileSync(EXAMPLE_PATH, "utf8");
+const SHIPPED_PATH = path.join(ROOT, "config.lua");
+const SHIPPED = fs.readFileSync(SHIPPED_PATH, "utf8");
 
-section("config.example.lua ships exactly the loader's defaults");
+section("config.lua ships exactly the loader's defaults");
 
-const { config: fromExample, warnings: exampleWarnings } = parse(EXAMPLE);
-const drift = diff(fromExample, buildDefaults());
+const { config: fromShipped, warnings: shippedWarnings } = parse(SHIPPED);
+const drift = diff(fromShipped, buildDefaults());
 
 ok(
   drift.length === 0,
-  "every value in config.example.lua matches buildDefaults()",
+  "every value in config.lua matches buildDefaults()",
   drift.join("\n      "),
 );
 
 ok(
-  exampleWarnings.length === 0,
-  "and the shipped example parses without a single warning",
-  exampleWarnings.join("\n      "),
+  shippedWarnings.length === 0,
+  "and the shipped file parses without a single warning",
+  shippedWarnings.join("\n      "),
 );
 
-// A key that is absent from the example still parses to its default, so the
+// A key that is absent from the file still parses to its default, so the
 // deep-compare above cannot catch an option nobody documented. Check the names
 // are actually in the file.
 const UNDOCUMENTED_ON_PURPOSE = new Set([
@@ -106,7 +123,7 @@ const missing = [];
     }
     if (UNDOCUMENTED_ON_PURPOSE.has(key) && trail === "") continue;
     // Top-level keys are written `Config.X =`; nested ones are bare.
-    if (!new RegExp(`^[^\\S\\n]*(?:Config\\.)?${key}\\s*=`, "m").test(EXAMPLE)) {
+    if (!new RegExp(`^[^\\S\\n]*(?:Config\\.)?${key}\\s*=`, "m").test(SHIPPED)) {
       missing.push(`${trail}${key}`);
     }
   }
@@ -114,7 +131,7 @@ const missing = [];
 
 ok(
   missing.length === 0,
-  "every option the loader knows about is written out in the example",
+  "every option the loader knows about is written out in config.lua",
   missing.join(", "),
 );
 
@@ -298,59 +315,180 @@ ok(
 );
 ok(commented.warnings.length === 0, "and none of it warns", commented.warnings.join("; "));
 
-section("First run creates config.lua from the example");
+section("config.local.lua overlays config.lua");
 
-const fresh = fs.mkdtempSync(path.join(os.tmpdir(), "tdb-bootstrap-"));
-fs.copyFileSync(EXAMPLE_PATH, path.join(fresh, "config.example.lua"));
+const overlaid = parse(
+  `
+Config = {}
+Config.ExposeAdmin = false
+Config.Superuser = {
+    Email = "",
+    Password = "",
+}
+`,
+  {
+    sidecar: `
+Config = Config or {}
+Config.Superuser = {
+    Email = "sidecar@example.com",
+    Password = "from-the-sidecar",
+}
+`,
+  },
+);
+ok(
+  overlaid.config.Superuser.Password === "from-the-sidecar",
+  "a credential in the sidecar replaces the blank in config.lua",
+  JSON.stringify(overlaid.config.Superuser),
+);
+ok(
+  overlaid.config.ExposeAdmin === false,
+  "and a key the sidecar never mentions keeps config.lua's value",
+);
+ok(
+  overlaid.warnings.length === 0,
+  "a partial sidecar is not a file full of missing keys",
+  overlaid.warnings.join("\n      "),
+);
+
+const noSidecar = parse(SHIPPED);
+ok(
+  noSidecar.warnings.length === 0,
+  "and having no sidecar at all is the normal case, so it says nothing",
+  noSidecar.warnings.join("\n      "),
+);
+
+section("A convar outranks both files");
+
+const convarWins = parse(SHIPPED, {
+  sidecar: `Config.Superuser = {\n    Password = "from-the-sidecar",\n}\n`,
+  convars: { tdb_superuser_password: "from-the-convar" },
+});
+ok(
+  convarWins.config.Superuser.Password === "from-the-convar",
+  "an operator's convar beats a password tDB generated into the sidecar",
+  JSON.stringify(convarWins.config.Superuser.Password),
+);
+
+const emptyConvar = parse(SHIPPED, {
+  sidecar: `Config.Superuser = {\n    Password = "from-the-sidecar",\n}\n`,
+  convars: { tdb_superuser_password: "" },
+});
+ok(
+  emptyConvar.config.Superuser.Password === "from-the-sidecar",
+  "an unset convar is not an override that blanks the value",
+  JSON.stringify(emptyConvar.config.Superuser.Password),
+);
+
+// The pattern list the secret gate derives its key set from, in the terms this
+// file can check: a credential-shaped default with no convar is a key an
+// operator can only set by writing it into a file.
+const SECRET_WORDS = ["password", "secret", "accesskey", "token"];
+const names = new Set(configLoader.CONVAR_KEYS.map(configLoader.convarName));
+const uncovered = [];
+(function walk(node, trail) {
+  for (const [key, value] of Object.entries(node)) {
+    if (value && typeof value === "object") {
+      walk(value, [...trail, key]);
+      continue;
+    }
+    const lower = key.toLowerCase();
+    if (!SECRET_WORDS.some((word) => lower.includes(word))) continue;
+    if (!names.has(configLoader.convarName([...trail, key]))) {
+      uncovered.push([...trail, key].join("."));
+    }
+  }
+})(buildDefaults(), []);
+
+ok(
+  uncovered.length === 0,
+  "every credential-shaped default can be set by convar",
+  uncovered.join(", "),
+);
+ok(
+  names.has("tdb_superuser_password") && names.has("tdb_advanced_s3_secretkey"),
+  "and the names follow tLib's rule: tdb_ plus the dotted path, underscored",
+  [...names].join(", "),
+);
+
+section("A generated password is written to the sidecar, never to config.lua");
+
+const fresh = fs.mkdtempSync(path.join(os.tmpdir(), "tdb-firstrun-"));
+fs.copyFileSync(SHIPPED_PATH, path.join(fresh, "config.lua"));
 
 const bootLoader = new ConfigLoader();
 const booted = bootLoader.load(fresh);
-
-ok(
-  fs.existsSync(path.join(fresh, "config.lua")),
-  "config.lua is created when it is missing",
-);
-ok(
-  fs.readFileSync(path.join(fresh, "config.lua"), "utf8") === EXAMPLE,
-  "byte-for-byte from config.example.lua, comments and all",
-);
 ok(
   diff(booted, buildDefaults()).length === 0,
-  "and the fresh install runs on the documented defaults",
+  "a fresh install with no sidecar runs on the documented defaults",
+);
+ok(
+  booted.Superuser.Password === "",
+  "with no superuser yet, which is what makes tDB generate one",
 );
 
-// Second load must not clobber an edited file.
-fs.writeFileSync(
-  path.join(fresh, "config.lua"),
-  "Config = {}\nConfig.ExposeAdmin = false\n",
-  "utf8",
+const saved = bootLoader.updateSuperuserCredentials(
+  "admin@localhost.local",
+  "GENERATED-PASSWORD",
 );
-const second = new ConfigLoader().load(fresh);
+const sidecarPath = path.join(fresh, "config.local.lua");
+
+ok(saved === true, "the write reports success");
+ok(fs.existsSync(sidecarPath), "config.local.lua is created for it");
 ok(
-  second.ExposeAdmin === false,
-  "a later start reads the operator's edits instead of overwriting them",
+  /GENERATED-PASSWORD/.test(fs.readFileSync(sidecarPath, "utf8")),
+  "and holds the generated password",
+);
+ok(
+  fs.readFileSync(path.join(fresh, "config.lua"), "utf8") === SHIPPED,
+  "while config.lua is byte-for-byte what shipped - this is the whole point",
+);
+
+const restarted = new ConfigLoader().load(fresh);
+ok(
+  restarted.Superuser.Password === "GENERATED-PASSWORD",
+  "the next start reads it back, so the admin login survives a restart",
+  JSON.stringify(restarted.Superuser.Password),
+);
+
+// A second generation (the superuser repair path) rewrites the block rather
+// than appending a second one.
+bootLoader.updateSuperuserCredentials("admin@localhost.local", "ROTATED");
+const rewritten = fs.readFileSync(sidecarPath, "utf8");
+ok(
+  rewritten.match(/Config\.Superuser\s*=/g).length === 1,
+  "a later write replaces the Config.Superuser block instead of adding one",
+  rewritten,
+);
+ok(
+  new ConfigLoader().load(fresh).Superuser.Password === "ROTATED",
+  "and the rotated password is what loads",
 );
 
 fs.rmSync(fresh, { recursive: true, force: true });
 
-section("config.lua is not in the manifest and not in git");
+section("config.lua is tracked and blank; config.local.lua is neither");
 
 const manifest = fs.readFileSync(path.join(ROOT, "fxmanifest.lua"), "utf8");
 ok(
   !/^\s*'config\.lua',/m.test(manifest),
-  "fxmanifest does not list config.lua - it may not exist yet on a fresh install",
+  "fxmanifest does not list config.lua - nothing in tDB's Lua reads it",
 );
 
 const gitignore = fs.readFileSync(path.join(ROOT, ".gitignore"), "utf8");
 ok(
-  /^config\.lua$/m.test(gitignore),
-  "config.lua is gitignored; tDB writes the superuser password into it",
+  !/^config\.lua$/m.test(gitignore),
+  "config.lua is NOT gitignored - it ships blank, so it is tracked",
+);
+ok(
+  /^config\.local\.lua$/m.test(gitignore),
+  "config.local.lua is gitignored; the generated password goes there",
 );
 
 const prodSrc = fs.readFileSync(path.join(ROOT, "scripts/prod.ts"), "utf8");
 ok(
-  /"config\.example\.lua"/.test(prodSrc) && !/"config\.lua"/.test(prodSrc),
-  "the release ships the template, never this machine's config.lua",
+  /"config\.lua"/.test(prodSrc) && !/"config\.local\.lua"/.test(prodSrc),
+  "the release ships config.lua and never the sidecar",
 );
 
 console.log(`\n==== ${pass} passed, ${fail} failed ====`);

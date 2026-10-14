@@ -22,13 +22,12 @@ node_version '22'
 tlib_min_version '1.0'
 
 
--- config.lua is deliberately NOT listed here.
+-- config.lua is deliberately NOT listed here, and neither is config.local.lua.
 --
--- It is gitignored and created from config.example.lua on first start, so on a
--- fresh install it does not exist yet when FiveM builds this list - and a
--- server_script that is missing at load time stops the whole resource. Nothing
--- in tDB's Lua reads the Config table anyway; server/utils/config-loader.js
--- parses the file directly, and it is the only reader.
+-- Nothing in tDB's Lua reads the Config table; server/utils/config-loader.js
+-- parses both files directly and is their only reader. Listing them would also
+-- make an operator who deleted one stop the whole resource, since a
+-- server_script missing at load time is fatal.
 server_scripts {
     '@tLib/imports.lua',
     'server/utils/version.lua',

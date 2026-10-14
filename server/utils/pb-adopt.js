@@ -48,8 +48,15 @@ module.exports = (function () {
     table_name TEXT NOT NULL,
     id_strategy TEXT NOT NULL,
     adopted_at TEXT NOT NULL,
+    source_columns TEXT,
     PRIMARY KEY (table_name)
   )`;
+
+  // Added after the registry shipped, so an existing install has the table
+  // without it. SQLite has no ADD COLUMN IF NOT EXISTS, and the error for a
+  // duplicate column is not distinguishable from a real failure by anything
+  // except its text, so the caller swallows only that one.
+  const REGISTRY_MIGRATIONS = [`ALTER TABLE ${REGISTRY} ADD COLUMN source_columns TEXT`];
 
   // Measured: text -> TEXT, number -> NUMERIC, bool -> BOOLEAN, json -> JSON.
   // Dates stay text because PocketBase's date field is strict ISO-8601 and a
@@ -584,6 +591,23 @@ module.exports = (function () {
 
     await exec(REGISTRY_DDL);
 
+    // Why the order is recorded at all: adoption REORDERS columns - PocketBase
+    // sorts them - so `INSERT INTO t VALUES (...)` with no column list, which is
+    // positional, would land every value in the wrong column afterwards.
+    // Measured on phone_message_messages, where `id,channel_id,sender,content`
+    // became `attachments,channel_id,content,id`. Keeping the source order lets
+    // the translator expand such an INSERT into a named one instead of refusing
+    // it.
+    for (const migration of REGISTRY_MIGRATIONS) {
+      try {
+        await exec(migration);
+      } catch (error) {
+        if (!/duplicate column/i.test(error.message || "")) {
+          logger.warn(`Could not migrate the adoption registry: ${error.message}`);
+        }
+      }
+    }
+
     // Every existing trigger comes off first and goes back on at the end.
     // A trigger lives in the schema, not in the table it writes to, so
     // dropping a table leaves triggers on OTHER tables referencing something
@@ -687,9 +711,16 @@ module.exports = (function () {
         }
 
         await exec(
-          `INSERT INTO ${quote(REGISTRY)} (table_name, id_strategy, adopted_at) ` +
-            `VALUES (?, ?, ?)`,
-          [table, idStrategy, new Date().toISOString()]
+          `INSERT INTO ${quote(REGISTRY)} ` +
+            `(table_name, id_strategy, adopted_at, source_columns) VALUES (?, ?, ?, ?)`,
+          [
+            table,
+            idStrategy,
+            new Date().toISOString(),
+            // The order the table had BEFORE adoption, which is the order a
+            // positional INSERT written against the original schema means.
+            JSON.stringify(columns.map((c) => c.name)),
+          ]
         );
 
         summary.adopted.push(table);

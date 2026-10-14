@@ -1,25 +1,59 @@
 // Regex-parses config.lua into a plain object. Singleton, cached after load().
 //
-// config.lua is NOT in git. It is the operator's copy, created on first run by
-// copying config.example.lua (see ensureConfigFile), and it is the file the
-// generated superuser password gets written into - which is exactly why it must
-// never be tracked. config.example.lua is the committed template and carries no
-// real values.
+// config.lua IS tracked, and every credential-shaped key in it ships blank
+// forever - tLib's secret gate fails the commit otherwise. A real credential
+// comes from one of the two tiers above it, which is the estate's contract:
 //
-// buildDefaults() below is the single source of truth for every default. The
-// example file documents those values and must agree with them;
-// tests/dev/config-defaults.test.js parses the example through this loader and
-// fails if the two ever drift apart.
+//     convar  >  config.local.lua  >  config.lua
+//
+// The sidecar is parsed by this same loader, in the same grammar, so there is
+// one set of regexes and one set of warnings for both files. tDB is a Node
+// resource and cannot use the Lua `tlib.secrets` module that does this for the
+// other resources, so the overlay lives here instead.
+//
+// buildDefaults() below is the single source of truth for every default.
+// config.lua documents those values and must agree with them;
+// tests/dev/config-defaults.test.js parses it through this loader and fails if
+// the two ever drift apart.
 module.exports = (function () {
   const fs = require("fs");
   const path = require("path");
 
   const CONFIG_FILE = "config.lua";
-  const EXAMPLE_FILE = "config.example.lua";
+  const LOCAL_FILE = "config.local.lua";
+
+  /**
+   * Credential-shaped settings an operator may supply as a server convar
+   * instead of putting a value in a file, and the only tier that outranks the
+   * sidecar. The name is tLib's: the resource, lowercased, then the dotted
+   * path with the dots as underscores - `tdb_superuser_password`.
+   *
+   * Email is here despite not being a secret: half a login is no login, so
+   * pinning a password by convar has to be able to pin the address with it.
+   */
+  const CONVAR_KEYS = [
+    ["Superuser", "Email"],
+    ["Superuser", "Password"],
+    ["Advanced", "S3", "AccessKey"],
+    ["Advanced", "S3", "SecretKey"],
+  ];
+
+  const convarName = (trail) => `tdb_${trail.join("_").toLowerCase()}`;
+
+  /** The header written when tDB creates the sidecar itself. */
+  const LOCAL_HEADER = [
+    "-- tDB credentials for this machine. Gitignored: never committed, never",
+    "-- packaged. Same grammar as config.lua, and only the keys you override.",
+    "-- A `tdb_*` server convar outranks anything in here.",
+    "",
+    "Config = Config or {}",
+    "",
+    "",
+  ].join("\n");
 
   /**
    * THE defaults. Every one of these is what tDB does when the key is missing
-   * from config.lua, and config.example.lua ships these same values.
+   * from config.lua, and the shipped config.lua carries these same values.
    *
    * Returns a fresh object each call: the loader mutates what it is given, and
    * a shared literal would leak one load's parse into the next.
@@ -45,7 +79,7 @@ module.exports = (function () {
 
       // Preferred loopback port, not a setting. Overwritten at startup with
       // the port PocketBase actually got - see resolveInternalPort(). It is
-      // deliberately absent from config.example.lua.
+      // deliberately absent from config.lua.
       Port: 8090,
 
       // Run `pocketbase update` on start. FALSE deliberately, against what the
@@ -127,10 +161,10 @@ module.exports = (function () {
    * config bug this whole file's header calls the most expensive kind, and it
    * was the only shape of it left uncovered here.
    *
-   * Kept beside the read() calls in load() on purpose: the two lists have to
-   * agree, and tests/dev/config-defaults.test.js parses config.example.lua
+   * Kept beside the read() calls in parse() on purpose: the two lists have to
+   * agree, and tests/dev/config-defaults.test.js parses the shipped config.lua
    * through this loader, so a name added to one and not the other shows up as
-   * the example file warning about its own key.
+   * the shipped file warning about its own key.
    */
   const KNOWN_KEYS = {
     // `Config.<Name>` at the top level. The five table names are here because
@@ -245,48 +279,17 @@ module.exports = (function () {
       this.config = null;
       this.configContent = "";
       this.configPath = "";
+      this.localPath = "";
+      // Which of the two files is being parsed, so a warning names the one the
+      // operator has to go and edit.
+      this.currentFile = CONFIG_FILE;
       // Collected during load() and drained by server.js into the startup box.
       // A parse problem the operator never sees is the same as no validation.
       this.warnings = [];
     }
 
     /**
-     * Make sure config.lua exists, copying config.example.lua over it on a
-     * first run. Never overwrites an existing file.
-     *
-     * @returns {{created: boolean, error: string|null}}
-     */
-    ensureConfigFile(resourcePath) {
-      const target = path.join(resourcePath, CONFIG_FILE);
-      const example = path.join(resourcePath, EXAMPLE_FILE);
-
-      if (fs.existsSync(target)) return { created: false, error: null };
-
-      if (!fs.existsSync(example)) {
-        return {
-          created: false,
-          error:
-            `Neither ${CONFIG_FILE} nor ${EXAMPLE_FILE} is present in the tDB ` +
-            `resource folder. Re-download the release; ${EXAMPLE_FILE} ships with it.`,
-        };
-      }
-
-      try {
-        // copyFileSync with COPYFILE_EXCL so two resources racing to boot
-        // cannot have one truncate the other's fresh copy.
-        fs.copyFileSync(example, target, fs.constants.COPYFILE_EXCL);
-        return { created: true, error: null };
-      } catch (err) {
-        if (err.code === "EEXIST") return { created: false, error: null };
-        return {
-          created: false,
-          error: `Could not create ${CONFIG_FILE} from ${EXAMPLE_FILE}: ${err.message}`,
-        };
-      }
-    }
-
-    /**
-     * Read one key out of a chunk of config.lua.
+     * Read one key out of a chunk of a config file.
      *
      * `kind` is "bool", "number", "string", or an array of allowed strings
      * (an enum). `label` is what the operator is told the key is called, so it
@@ -343,7 +346,7 @@ module.exports = (function () {
     /** Record an unparseable key and leave the default in place. */
     reject(name, expected, found) {
       this.warnings.push(
-        `${CONFIG_FILE}: ${name} could not be read. Expected ${expected}, ` +
+        `${this.currentFile}: ${name} could not be read. Expected ${expected}, ` +
           `found \`${found || "(nothing)"}\`. The built-in default is being used ` +
           `instead - fix the value and restart tDB.`,
       );
@@ -377,17 +380,17 @@ module.exports = (function () {
         const label = `${prefix}.${key}`;
 
         if (INERT_KEYS[key]) {
-          this.warnings.push(`${CONFIG_FILE}: ${INERT_KEYS[key]}`);
+          this.warnings.push(`${this.currentFile}: ${INERT_KEYS[key]}`);
           continue;
         }
 
         const guess = suggest(key, known);
         this.warnings.push(
-          `${CONFIG_FILE}: ${label} is not a setting tDB reads, so it is doing ` +
+          `${this.currentFile}: ${label} is not a setting tDB reads, so it is doing ` +
             `nothing. ` +
             (guess
               ? `Fix: did you mean ${prefix}.${guess}?`
-              : `Fix: check it against ${EXAMPLE_FILE}, or delete it.`),
+              : `Fix: check it against https://timmygstudios.com/docs/tDB/configuration, or delete it.`),
         );
       }
     }
@@ -414,35 +417,18 @@ module.exports = (function () {
       return m ? m[1] : null;
     }
 
-    load(resourcePath) {
-      if (this.config) {
-        return this.config;
-      }
-
-      this.config = buildDefaults();
-      this.warnings = [];
-
-      this.configPath = path.join(resourcePath, CONFIG_FILE);
-
-      const bootstrap = this.ensureConfigFile(resourcePath);
-      if (bootstrap.error) {
-        this.warnings.push(bootstrap.error);
-      } else if (bootstrap.created) {
-        console.log(
-          `^2[Config Loader]^7 First run: created ${CONFIG_FILE} from ${EXAMPLE_FILE}. ` +
-            `Edit ${CONFIG_FILE}, not ${EXAMPLE_FILE} - updates overwrite the example.`,
-        );
-      }
+    /**
+     * Overlay one config file's values onto `this.config`, in place.
+     *
+     * Called once per file tier, lowest first, so a higher tier's value simply
+     * wins: a key the file does not mention reads as null and leaves whatever
+     * the tier below it set.
+     */
+    parse(file, filePath) {
+      this.currentFile = file;
 
       try {
-        if (!fs.existsSync(this.configPath)) {
-          console.log(
-            `^3[Config Loader]^7 ${CONFIG_FILE} not found, using defaults`,
-          );
-          return this.config;
-        }
-
-        this.configContent = fs.readFileSync(this.configPath, "utf8");
+        this.configContent = fs.readFileSync(filePath, "utf8");
 
         const set = (target, prop, value) => {
           if (value !== null) target[prop] = value;
@@ -654,62 +640,118 @@ module.exports = (function () {
         this.unknownKeys(sql, "Config.Sql", KNOWN_KEYS.Sql);
         this.unknownKeys(advanced, "Config.Advanced", KNOWN_KEYS.Advanced);
         this.unknownKeys(s3, "Config.Advanced.S3", KNOWN_KEYS.S3);
-
-        return this.config;
       } catch (err) {
         console.log(
-          `^1[Config Loader]^7 Failed to load config: ${err.message}`,
+          `^1[Config Loader]^7 Failed to load ${file}: ${err.message}`,
         );
-        return this.config;
       }
     }
 
+    /**
+     * Apply the `tdb_*` convar overrides. The top tier: a non-empty convar
+     * beats both files, including a password tDB generated into the sidecar
+     * itself, so an operator can take over a login without editing anything.
+     *
+     * GetConvar does not exist outside FiveM - the test harnesses run in plain
+     * Node - and that is not a failure. It means there are no convars.
+     */
+    applyConvars() {
+      if (typeof GetConvar !== "function") return;
+
+      for (const trail of CONVAR_KEYS) {
+        const value = GetConvar(convarName(trail), "");
+        if (typeof value !== "string" || value === "") continue;
+
+        let node = this.config;
+        for (const part of trail.slice(0, -1)) node = node[part];
+        node[trail[trail.length - 1]] = value;
+      }
+    }
+
+    load(resourcePath) {
+      if (this.config) {
+        return this.config;
+      }
+
+      this.config = buildDefaults();
+      this.warnings = [];
+      this.configPath = path.join(resourcePath, CONFIG_FILE);
+      this.localPath = path.join(resourcePath, LOCAL_FILE);
+
+      if (fs.existsSync(this.configPath)) {
+        this.parse(CONFIG_FILE, this.configPath);
+      } else {
+        console.log(
+          `^3[Config Loader]^7 ${CONFIG_FILE} not found, using defaults`,
+        );
+      }
+
+      // Having no sidecar is the normal case: an install whose credentials are
+      // convars, or one that has not generated a superuser yet. Say nothing.
+      if (fs.existsSync(this.localPath)) {
+        this.parse(LOCAL_FILE, this.localPath);
+      }
+
+      this.applyConvars();
+
+      return this.config;
+    }
+
+    /**
+     * Persist generated superuser credentials to config.local.lua, creating it
+     * if it is not there.
+     *
+     * NEVER config.lua. That file is tracked and ships blank, and this is the
+     * write that would put a password into it. The sidecar is gitignored, so a
+     * generated password survives a restart while staying uncommittable - and
+     * a `tdb_superuser_*` convar still outranks what lands here, because
+     * applyConvars() runs after both files.
+     *
+     * The whole Config.Superuser block is rewritten rather than patched
+     * key-by-key: both of its keys are being set, and a per-key replace
+     * silently drops the email when the operator's sidecar names only the
+     * password.
+     */
     updateSuperuserCredentials(email, password) {
       try {
-        if (!this.configPath || !fs.existsSync(this.configPath)) {
+        if (!this.localPath) {
           console.log(
-            "^1[Config Loader]^7 Cannot update config - config file not loaded",
+            "^1[Config Loader]^7 Cannot save credentials - config never loaded",
           );
           return false;
         }
 
-        // Re-read rather than editing the copy taken at load(): this runs long
-        // after startup on the superuser repair path, and writing the boot
-        // snapshot back would revert anything edited by hand since.
-        const original = fs.readFileSync(this.configPath, "utf8");
+        const block =
+          `Config.Superuser = {\n` +
+          `    Email = "${email}",\n` +
+          `    Password = "${password}",\n` +
+          `}\n`;
 
-        // Scoped to the Config.Superuser table. A whole-file replace rewrites
-        // the FIRST `Password = "..."`, which is the superuser's only by luck
-        // of ordering.
-        const block = original.match(/(Config\.Superuser\s*=\s*\{)([^}]*)(\})/s);
-        if (!block) {
-          console.log(
-            "^1[Config Loader]^7 Cannot update config - no Config.Superuser block in config.lua",
-          );
-          return false;
+        let updatedContent;
+        if (!fs.existsSync(this.localPath)) {
+          updatedContent = LOCAL_HEADER + block;
+        } else {
+          // Re-read rather than editing the copy taken at load(): this runs
+          // long after startup on the superuser repair path, and writing the
+          // boot snapshot back would revert anything edited by hand since.
+          const original = fs.readFileSync(this.localPath, "utf8");
+          const existing = original.match(/Config\.Superuser\s*=\s*\{[^}]*\}\n?/s);
+          updatedContent = existing
+            ? original.slice(0, existing.index) +
+              block +
+              original.slice(existing.index + existing[0].length)
+            : `${original.replace(/\s*$/, "")}\n\n${block}`;
         }
 
-        const patched = block[2]
-          .replace(/(Email\s*=\s*)(?:"[^"]*"|'[^']*')/, `$1"${email}"`)
-          .replace(/(Password\s*=\s*)(?:"[^"]*"|'[^']*')/, `$1"${password}"`);
-
-        const updatedContent =
-          original.slice(0, block.index) +
-          block[1] +
-          patched +
-          block[3] +
-          original.slice(block.index + block[0].length);
-
-        fs.writeFileSync(this.configPath, updatedContent, "utf8");
+        fs.writeFileSync(this.localPath, updatedContent, "utf8");
 
         this.config.Superuser.Email = email;
         this.config.Superuser.Password = password;
-        this.configContent = updatedContent;
 
         return true;
       } catch (err) {
         console.log(
-          `^1[Config Loader]^7 Failed to update config file: ${err.message}`,
+          `^1[Config Loader]^7 Failed to write ${LOCAL_FILE}: ${err.message}`,
         );
         return false;
       }
@@ -727,10 +769,12 @@ module.exports = (function () {
 
   const instance = new ConfigLoader();
   // Exposed for tests/dev/config-defaults.test.js, which needs a fresh loader
-  // and the untouched default tree to compare config.example.lua against.
+  // and the untouched default tree to compare the shipped config.lua against.
   instance.ConfigLoader = ConfigLoader;
   instance.buildDefaults = buildDefaults;
   instance.CONFIG_FILE = CONFIG_FILE;
-  instance.EXAMPLE_FILE = EXAMPLE_FILE;
+  instance.LOCAL_FILE = LOCAL_FILE;
+  instance.CONVAR_KEYS = CONVAR_KEYS;
+  instance.convarName = convarName;
   return instance;
 })();

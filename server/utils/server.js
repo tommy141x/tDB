@@ -403,7 +403,7 @@ function displayStartupStatus() {
     row(
       "Save it",
       "This is the only time these are shown. They are stored in " +
-        "config.lua, which must stay out of version control.",
+        "config.local.lua, which is gitignored and never packaged.",
       YELLOW
     );
   }
@@ -925,8 +925,9 @@ async function createSuperuser(publicIP) {
       // The only copy of a freshly generated password is the one about to be
       // printed, so say that rather than "failed to save".
       startupStatus.warnings.push(
-        "Could not write the generated credentials to config.lua. Copy the " +
-          "password below into Config.Superuser now - it cannot be recovered later."
+        "Could not write the generated credentials to config.local.lua. Copy the " +
+          "password below into `set tdb_superuser_password` now - it cannot be " +
+          "recovered later."
       );
     }
     // Printed once, here, and redacted on every boot after this one.

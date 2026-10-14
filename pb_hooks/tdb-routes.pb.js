@@ -36,7 +36,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireSuperuserAuth(),
+  $apis.requireSuperuserAuth()
 );
 
 // Body: { sql, params? } -> { success, affectedRows, insertId }
@@ -68,7 +68,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireSuperuserAuth(),
+  $apis.requireSuperuserAuth()
 );
 
 // Body: { statements: [{ sql, params?, expect? }], transaction?: boolean }
@@ -103,12 +103,12 @@ routerAdd(
             results.push(
               statement.expect === "rows"
                 ? sqlLib.selectRows(db, statement.sql, statement.params)
-                : sqlLib.executeStatement(db, statement.sql, statement.params),
+                : sqlLib.executeStatement(db, statement.sql, statement.params)
             );
           } catch (statementError) {
             throw new Error(
               `Statement ${i + 1} of ${statements.length}: ` +
-                (statementError.message || String(statementError)),
+                (statementError.message || String(statementError))
             );
           }
         }
@@ -132,7 +132,7 @@ routerAdd(
       });
     }
   },
-  $apis.requireSuperuserAuth(),
+  $apis.requireSuperuserAuth()
 );
 
 // Body: { table } -> { success, table, columns, primaryKey, uniqueIndexes }
@@ -162,6 +162,7 @@ routerAdd(
         success: true,
         table: body.table,
         columns: schema.columns,
+        sourceColumns: schema.sourceColumns,
         primaryKey: schema.primaryKey,
         uniqueIndexes: schema.uniqueIndexes,
       });
@@ -172,5 +173,5 @@ routerAdd(
       });
     }
   },
-  $apis.requireSuperuserAuth(),
+  $apis.requireSuperuserAuth()
 );
