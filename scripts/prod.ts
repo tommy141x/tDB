@@ -48,13 +48,13 @@ const INCLUDE = [
   "README.md",
   "LICENSE.md",
 
-  // The template, not the config. `config.lua` is the operator's copy, created
-  // from this on first start and gitignored because tDB writes the generated
-  // superuser password into it — so it must not exist in a release either, or
-  // every install would start from whatever this machine's copy happened to
-  // hold. It stays at the root rather than moving into a config/ directory:
+  // Every credential-shaped key in it is blank, permanently and by
+  // construction, so this machine's copy IS the shippable one — there is no
+  // template to keep separately and nothing to strip on the way out. Real
+  // values live in `config.local.lua`, which is gitignored and is not listed
+  // here. It stays at the root rather than moving into a config/ directory:
   // consumers and docs have named that path since 1.0.
-  "config.example.lua",
+  "config.lua",
 
   // Named as '@tDB/lib/MySQL.lua' by every consumer's manifest — the oxmysql
   // drop-in shim. tDB never loads it itself, which is exactly why it is easy to

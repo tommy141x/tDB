@@ -5,7 +5,6 @@
   "private": true,
   "description": "Database resource for FiveM: a drop-in oxmysql replacement backed by PocketBase, with realtime and collection APIs on top",
   "scripts": {
-    "//secrets:check": "Layer 3 of the credential gate, and the only layer that cannot be skipped: every credential-shaped key in every tracked config file must be BLANK at HEAD. The key set is derived from Diag.SECRET_PATTERNS in tLib (one list, parsed out of the Lua that the runtime redactor uses) rather than hand-listed -- a four-name array is exactly how Advanced.S3.AccessKey went uncovered. Layer 1 is .githooks/pre-commit, which refuses the commit; layer 2 blanks the staged copy of a release. The real value lives in the gitignored config.local.lua sidecar, so there is nothing to strip and nothing a `git pull` can overwrite. Exit 1 = a credential has a value; exit 2 = the gate could not run, which is NOT a pass.",
     "secrets:check": "bun run ../tLib/scripts/secret-gate.ts",
     "secrets:install-hooks": "bun run ../tLib/scripts/secret-gate.ts --install-hooks",
     "secrets:check-hooks": "bun run ../tLib/scripts/secret-gate.ts --check-hooks",
@@ -13,6 +12,7 @@
     "runtime": "bun scripts/fetch-runtime.ts",
     "prod": "bun scripts/fetch-runtime.ts --all && bun scripts/prod.ts",
     "test": "bun scripts/run-tests.ts",
+    "thumb": "bun scripts/thumb.ts",
     "docs:check": "bun scripts/check-docs.mjs",
     "verify": "bun run secrets:check && bun run lint && bun run test && bun run docs:check",
     "lint": "biome lint .",

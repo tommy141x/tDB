@@ -14,6 +14,7 @@
 import { spawnSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { settlePocketBase } from "./settle-pocketbase.ts";
 
 const DIR = join(import.meta.dir, "..", "tests", "dev");
 
@@ -27,6 +28,12 @@ if (files.length === 0) {
 }
 
 let failed = 0;
+let leaked = 0;
+
+// Clear anything an interrupted earlier run left behind, or the first suite
+// inherits a port that is already taken.
+const before = await settlePocketBase();
+if (before) console.log(`cleared ${before} leftover PocketBase instance(s) from a previous run`);
 
 for (const file of files) {
   const result = spawnSync(process.execPath, [join(DIR, file)], {
@@ -36,6 +43,23 @@ for (const file of files) {
   const ok = result.status === 0;
   if (!ok) failed++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${file}`);
+
+  // kill() only signals, so a suite's PocketBase can outlive it and the next
+  // suite then races a dying process. Three suites were blamed for regressions
+  // that were really this; each passed alone. Waited for rather than slept
+  // through, so a clean run costs almost nothing.
+  const killedAfter = await settlePocketBase();
+  if (killedAfter) {
+    leaked += killedAfter;
+    console.log(`      ^ ${file} leaked ${killedAfter} PocketBase process(es)`);
+  }
+}
+
+if (leaked) {
+  console.log(
+    `\n${leaked} PocketBase process(es) had to be force-killed between suites - ` +
+      "a suite is not shutting its server down"
+  );
 }
 
 console.log(`\n${files.length - failed}/${files.length} suites passed`);

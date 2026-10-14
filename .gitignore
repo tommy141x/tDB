@@ -15,12 +15,15 @@ __pycache__/
 *.old
 *.log
 
-# The operator's copy, created from config.example.lua on first run. tDB writes
-# the generated superuser password into it, so it must never be tracked.
-config.lua
-
-# The developer's real credentials. Never committed, never packaged.
-# The tracked config.lua holds blanks permanently; tlib.secrets overlays this
-# file onto Config at server start. See tLib/shared/imports/secrets/server.lua.
+# Real credentials, including the superuser password tDB generates on first
+# start. Never committed, never packaged. The tracked config.lua holds blanks
+# permanently and server/utils/config-loader.js overlays this file onto it.
+# Precedence matches the estate: convar > config.local.lua > config.lua.
 config.local.lua
 config/config.local.lua
+
+# `bun run gallery` captures and the `bun run thumb` composite built from them.
+# Regenerated on demand and consumed by the store page in tWeb, not by anything
+# here. banner.jpg is the exception and IS tracked: README.md shows it.
+assets/hero/
+docs/public/thumb.jpg
