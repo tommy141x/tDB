@@ -75,14 +75,22 @@ rather than silently changing its meaning.
 
 ## The admin UI is not reachable from outside
 
-**Cause.** Usually `Config.ExposeAdmin`, tLib not running, or the wrong port
-forwarded. tDB's own PocketBase port is internal and is never the one to forward.
+**Cause.** Most often tLib's port is closed on the host or not forwarded in NAT.
+tLib cannot detect either one: it binds the port and reports its listener up
+regardless of whether anything outside can reach it. After that, the causes are
+`Config.ExposeAdmin`, tLib not running, or the wrong port forwarded. tDB's own
+PocketBase port is internal and is never the one to forward.
 
 **Fix.**
 
-1. Confirm `Config.ExposeAdmin = true`.
-2. Confirm tLib is running and reports its HTTP listener up.
-3. Confirm the port you forwarded is tLib's `setr tlib_http_port`, not 8090.
+1. Open tLib's port — `tlib_http_port`, default 7777 — in the host firewall and
+   forward it in NAT. tLib's install guide has the step, at
+   [open port 7777](https://timmygstudios.com/docs/tLib/installation#open-port-7777).
+   Test it from outside the network; a probe from the server itself can pass on
+   a port the internet cannot reach.
+2. Confirm `Config.ExposeAdmin = true`.
+3. Confirm tLib is running and reports its HTTP listener up.
+4. Confirm the port you forwarded is tLib's, not PocketBase's 8090.
 
 Script access is local and unaffected either way.
 

@@ -16,6 +16,14 @@ it, and the admin UI answers. Budget about five minutes.
   and `ensure`d before tDB
 - No other database resource running. See [Replace oxmysql](#replace-oxmysql)
 
+tDB does not serve the admin panel itself. It claims the `/db` route on tLib,
+which owns the server's single external port — `tlib_http_port`, default
+**7777** — so the panel answers at `http://<your server>:7777/db/_/` and is
+listed on tLib's hub. That port has to be open on the host and forwarded to it;
+tLib's install guide has the step, at
+[open port 7777](https://timmygstudios.com/docs/tLib/installation#open-port-7777).
+PocketBase's own port is internal and is never the one to forward.
+
 ---
 
 <Steps>

@@ -55,10 +55,15 @@ Config.Superuser = {
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `Config.ExposeAdmin` | boolean | `true` | Publish the admin UI through tLib's port. `false` keeps the database headless and unreachable from outside the machine |
+| `Config.ExposeAdmin` | boolean | `true` | Publish the admin UI at `/db/_/` on tLib's port. `false` keeps the database headless and unreachable from outside the machine |
 | `Config.ShowInHub` | boolean | `true` | List the admin UI in tLib's hub. Cosmetic only, [not a security control](#hiding-it-from-the-hub) |
 | `Config.Debug` | boolean | `false` | Print tDB's debug lines — the pid-file sweep, route probes, each backup, the settings asserted from `config.lua`. Off, a normal boot prints the startup box and nothing else |
 | `Config.AutoUpdate` | boolean | `false` | Run `pocketbase update` on start. It replaces the shipped, checksum-verified build with an unverified newer one, under a live database |
+
+tDB has no port or address of its own. The port the panel answers on is tLib's
+`tlib_http_port`, default 7777, and the address handed out is
+`tlib_http_public_url` — both documented in
+[tLib's convar reference](https://timmygstudios.com/docs/tLib/convars#http-router).
 
 ## Superuser
 
