@@ -1,0 +1,9 @@
+name: Token probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    uses: TIMMYG-Studios/workflows/.gitea/workflows/token-probe.yml@main
+    secrets: inherit
