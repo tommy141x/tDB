@@ -650,7 +650,17 @@ class OxMySQLAdapter {
         requestKey: null, // Concurrent queries must not cancel each other.
       });
     } catch (error) {
-      throw new Error(OxMySQLAdapter.describeError(error));
+      // The STATEMENT is named, because without it the message says something
+      // failed but not what was running - and a resource issues hundreds of
+      // statements. lb-phone's crypto update surfaced as
+      // `oxmysql:prepare_async: Something went wrong.` with no way to tell
+      // which of its queries it was.
+      const statement = body && typeof body.sql === "string" ? body.sql : null;
+      const where = statement
+        ? ` while running: ${statement.replace(/\s+/g, " ").slice(0, 160)}`
+        : ` (${route})`;
+
+      throw new Error(`${OxMySQLAdapter.describeError(error)}${where}`);
     }
   }
 

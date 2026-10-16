@@ -4,6 +4,9 @@
 // set, so the caller gets "Something went wrong." instead of "no such table:
 // players". Dig the real message out.
 module.exports = (function () {
+  // The SDK's placeholder when the body carries no `message`.
+  const GENERIC = "Something went wrong.";
+
   function describeRouteError(error) {
     const response = error && error.response;
 
@@ -11,11 +14,39 @@ module.exports = (function () {
     if (response && response.error) return response.error;
 
     // What PocketBase's own routes send.
-    if (response && response.message && response.message !== "Something went wrong.") {
+    if (response && response.message && response.message !== GENERIC) {
       return `${response.message}${describeFields(response)}`;
     }
 
-    if (error && error.message) return `${error.message}${describeFields(response)}`;
+    // Nothing actionable in the body. Rather than passing the SDK's placeholder
+    // through - which is what reached a live server as
+    // `oxmysql:prepare_async: Something went wrong.` and told its operator
+    // nothing at all - say what IS known: how far the request got.
+    //
+    // status 0 is the SDK's "no HTTP response", so the request never completed:
+    // PocketBase starting, restarting, or too busy to answer. That is a
+    // different problem from a statement it rejected, and the two were
+    // indistinguishable.
+    const status = error && typeof error.status === "number" ? error.status : null;
+
+    if (status === 0) {
+      return (
+        "could not reach the database - the request never completed. PocketBase " +
+        "may be starting, restarting, or too busy to answer"
+      );
+    }
+
+    if (status === 404) {
+      return "the database route was not found (status 404) - tDB's pb_hooks may not have loaded";
+    }
+
+    if (error && error.message && error.message !== GENERIC) {
+      return `${error.message}${describeFields(response)}`;
+    }
+
+    if (status) {
+      return `the database rejected the request with status ${status}, and gave no reason`;
+    }
 
     return String(error);
   }
