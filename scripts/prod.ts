@@ -47,6 +47,10 @@ const INCLUDE = [
   "fxmanifest.lua",
   "README.md",
   "LICENSE.md",
+  // MIT requires the copyright and permission notice to travel with every
+  // copy. The release carries 63MB of PocketBase binaries plus three vendored
+  // libraries, so this file is a licence condition, not documentation.
+  "THIRD-PARTY-NOTICES.md",
 
   // Every credential-shaped key in it is blank, permanently and by
   // construction, so this machine's copy IS the shippable one — there is no
