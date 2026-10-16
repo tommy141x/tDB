@@ -10,7 +10,18 @@ popularity: 30
 resourceName: "tDB"
 docsUrl: "/docs/tDB"
 provider: "tebex"
-media: []
+# ⚠️ THE ART SAYS "tDatabase" AND IS SHOWN ANYWAY. That is the owner's call,
+# made 2026-10-16 after seeing the alternative: a listing with no `coverImage`
+# draws a black card with a letter in it, and this note previously argued that a
+# typographic placeholder beat a third spelling of the product's name. Shown a
+# page of real tiles with one blank square in it, the owner disagreed, and the
+# tile is a deliberate current piece of art where the placeholder is nothing.
+#
+# The spelling is still wrong and is still worth fixing: `thumb.jpg` and
+# `banner.jpg` BOTH print "tDatabase", so /docs/tDB carries it too. Re-cut both
+# in tDB's own repo — that repo's `scripts/thumb.ts` takes a `--headline`.
+media:
+  - { type: "image", src: "/assets/tDB/thumb.jpg", alt: "tDB" }
 pricing:
   - id: "tdb"
     kind: "one-time"
