@@ -1,6 +1,6 @@
 ---
 title: "tDB"
-description: "A database resource for FiveM. Drop-in replacement for oxmysql, backed by an embedded PocketBase, with no MySQL server to install or maintain."
+description: "A drop-in oxmysql replacement for FiveM, backed by an embedded PocketBase. No MySQL server to install or maintain."
 order: 0
 group: "tDB"
 published: true
@@ -8,10 +8,9 @@ published: true
 
 ![](/assets/tDB/banner.jpg)
 
-tDB gives your server a database without a database server. It answers every
-oxmysql export, translates MySQL SQL to SQLite as it goes, and runs an embedded
-[PocketBase](https://pocketbase.io/) underneath. There's no MySQL to install, no
-connection string, and nothing to keep running alongside it.
+tDB answers every oxmysql export, translates MySQL SQL to SQLite as it goes, and runs an
+embedded [PocketBase](https://pocketbase.io/) underneath. No MySQL to install, no connection
+string, nothing to keep running alongside it.
 
 ```lua
 -- Existing oxmysql code. Unchanged.
@@ -29,22 +28,22 @@ local row = exports.oxmysql:single_async('SELECT * FROM players WHERE citizenid 
 
 ## What it is not
 
-- **Not a MySQL server.** SQL is translated to SQLite. Most of what FiveM
-  scripts write translates cleanly; the rest is refused by name rather than
-  quietly changed. See [MySQL compatibility](/docs/tDB/mysql-compatibility).
-- **Not a drop-in for a database you already have data in.** tDB starts empty.
-  Moving an existing MySQL database across is a migration, not a swap.
-- **Not something to run next to oxmysql.** Two resources answering the same
-  export name is ambiguous, and they point at two different databases.
+- **Not a MySQL server.** SQL is translated to SQLite. What cannot be translated faithfully
+  is refused by name, never quietly changed — see
+  [MySQL compatibility](/docs/tDB/mysql-compatibility).
+- **Not a drop-in for a database you already have data in.** tDB starts empty; moving an
+  existing MySQL database across is a migration, not a swap.
+- **Not something to run next to oxmysql.** Two resources answering one export name is
+  ambiguous, and they point at two different databases.
 
 ## Requirements
 
 | Requirement | Detail |
 | --- | --- |
-| tLib | **v1.0 or later.** tDB declares `tlib_min_version '1.0'` and won't start without it |
+| tLib | **v1.0 or later.** tDB declares `tlib_min_version '1.0'` and will not start without it |
 | Platform | **Windows or Linux, x86-64.** The bundled PocketBase builds are `windows_amd64` and `linux_amd64`; there is no ARM build |
-| FiveM artifact | New enough to provide Node 22, which the manifest declares as `node_version '22'` |
-| Framework | None. tDB is a database, not a framework layer |
+| FiveM artifact | New enough for Node 22, which the manifest declares as `node_version '22'` |
+| Framework | None |
 | OneSync | Not required |
 
 ## Where to go next
@@ -75,6 +74,6 @@ local row = exports.oxmysql:single_async('SELECT * FROM players WHERE citizenid 
 
 ## Credits and licence
 
-tDB bundles [PocketBase](https://github.com/pocketbase/pocketbase) (MIT, by Gani
-Georgiev) and the Polyglot SQL transpiler `@polyglot-sql/sdk` (MIT, by TobiLG)
-as WebAssembly. tDB itself is MIT; see `LICENSE.md` in the repository.
+tDB bundles [PocketBase](https://github.com/pocketbase/pocketbase) (MIT, Gani Georgiev) and
+the Polyglot SQL transpiler `@polyglot-sql/sdk` (MIT, TobiLG) as WebAssembly. tDB itself is
+MIT; see `LICENSE.md` in the repository.

@@ -7,21 +7,18 @@ published: true
 ---
 
 Every name below is reachable as `exports.tDB:<name>`, `exports.oxmysql:<name>`,
-`exports['mysql-async']:<name>` and `exports.ghmattimysql:<name>`. The split into
-sections is documentation convention, not a code boundary.
+`exports['mysql-async']:<name>` and `exports.ghmattimysql:<name>`. The split into sections
+is documentation convention, not a code boundary.
+
+Exports marked **async** return a promise: use the `_async` name, or `Citizen.Await`.
 
 <Callout type="info" title="Every export exists from tDB's first frame">
-  They are registered at resource start, before PocketBase is up, exactly as
-  oxmysql's are. A call that lands before the database is ready parks until it
-  is, rather than raising "no such export". You only see FiveM's "no such
-  export" if the calling resource is `ensure`d **above** tDB in `server.cfg`,
-  so that tDB has not loaded yet. See [Readiness](#readiness).
+  They are registered at resource start, before PocketBase is up, exactly as oxmysql's are.
+  A call landing before the database is ready parks until it is. You only see FiveM's "no
+  such export" if the calling resource is `ensure`d **above** tDB. In the narrow window
+  after the adapters wire up but before the superuser session exists, one throws
+  `PocketBase client not ready yet`. See [Readiness](#readiness).
 </Callout>
-
-Exports marked **async** return a promise: use the `_async` name, or
-`Citizen.Await`. In the narrow window after the adapters are wired up but
-before the superuser session is established, one throws
-`PocketBase client not ready yet`.
 
 ## Readiness
 
@@ -35,13 +32,11 @@ before the superuser session is established, one throws
 
 ## oxmysql exports
 
-Each base name is registered three times: `name`, `name_async` and `nameSync`.
-**All three behave identically**, the suffix is stripped and never changes
-behaviour. There is no separate synchronous path.
+Each base name is registered three times: `name`, `name_async` and `nameSync`. **All three
+behave identically** — the suffix is stripped and there is no separate synchronous path.
 
-Accepted call shapes: `(sql)`, `(sql, params)`, `(sql, callback)`,
-`(sql, params, callback)`. With a callback the export returns nothing and
-invokes the callback; without one it returns a promise.
+Accepted call shapes: `(sql)`, `(sql, params)`, `(sql, callback)`, `(sql, params, callback)`.
+With a callback the export returns nothing and invokes it; without one it returns a promise.
 
 | Export | Returns |
 | --- | --- |
@@ -57,6 +52,10 @@ invokes the callback; without one it returns a promise.
 | `transaction` | true, or **false** if it rolled back. Never throws |
 | `store` | the query string unchanged. Synchronous, and works before readiness |
 
+A rows-returning export run against a write statement returns an empty result rather than
+erroring, and a write-returning export against a `SELECT` runs the select and returns nil.
+This mirrors oxmysql.
+
 ### mysql-async aliases
 
 | Alias | Behaves as | Returns |
@@ -70,18 +69,14 @@ invokes the callback; without one it returns a promise.
 
 <Callout type="info" title="execute returns rows; mysql_execute returns a count">
   `exports.oxmysql:execute` returns rows, matching oxmysql. `mysql_execute` and
-  `MySQL.Sync.execute` return an affected row count, matching mysql-async. Check
-  which name your script calls before you read its result.
+  `MySQL.Sync.execute` return an affected row count, matching mysql-async. Check which name
+  your script calls before reading its result.
 </Callout>
-
-A rows-returning export run against a write statement returns an empty result
-rather than erroring, and a write-returning export against a `SELECT` runs the
-select and returns nil. This mirrors oxmysql.
 
 ### Query cache
 
-Off by default. When on, row queries are cached and any write through tDB clears
-the cache, so a cached read cannot outlive the data it described.
+Off by default. When on, row queries are cached and any write through tDB clears the cache,
+so a cached read cannot outlive the data it described.
 
 | Export | Parameters | Returns |
 | --- | --- | --- |
@@ -92,11 +87,9 @@ the cache, so a cached read cannot outlive the data it described.
 
 ## `lib/MySQL.lua`
 
-Add `server_script '@tDB/lib/MySQL.lua'` to your `fxmanifest.lua`. Every entry
-has an `.await` form and a callable callback form.
-
-Every entry waits for the database before it dispatches, so a script that
-queries during its own startup gets its rows rather than "no such export". Once
+Add `server_script '@tDB/lib/MySQL.lua'` to your `fxmanifest.lua`. Every entry has an
+`.await` form and a callable callback form, and waits for the database before dispatching —
+so a script querying during its own startup gets rows rather than "no such export". Once
 the database is up the wait is a single `isReady` check.
 
 | Entry | Returns |
@@ -121,15 +114,12 @@ MySQL.ready(function() print('database up') end)
 
 Legacy namespaces: `MySQL.Sync.execute` (affected rows), `MySQL.Sync.insert`,
 `MySQL.Sync.fetchAll`, `MySQL.Sync.fetchSingle`, `MySQL.Sync.fetchScalar`,
-`MySQL.Sync.transaction`, and the matching `MySQL.Async.*` callback forms. Also
-`MySQL.ready`, `MySQL.isReady`, `MySQL.awaitConnection` and `MySQL.store`.
-
-`MySQL.Sync.prepare` and `MySQL.Async.prepare` are provided too.
+`MySQL.Sync.transaction`, `MySQL.Sync.prepare`, and the matching `MySQL.Async.*` callback
+forms. Also `MySQL.ready`, `MySQL.isReady`, `MySQL.awaitConnection` and `MySQL.store`.
 
 <Callout type="warning" title="One gap versus the full oxmysql library">
-  There is no `MySQL.Sync.rawExecute`; use `MySQL.rawExecute.await` instead.
-  The library also hardcodes the resource name `tDB`, so renaming the folder
-  breaks it.
+  There is no `MySQL.Sync.rawExecute`; use `MySQL.rawExecute.await`. The library also
+  hardcodes the resource name `tDB`, so renaming the folder breaks it.
 </Callout>
 
 ## Records
@@ -147,9 +137,9 @@ Legacy namespaces: `MySQL.Sync.execute` (affected rows), `MySQL.Sync.insert`,
 | `countRecords` | `collection`, `filter?`, `params?` | number | yes |
 | `filter` | `rawFilter`, `params?` | escaped filter string | no |
 
-`create`, `update`, `delete`, `getOne`, `getList`, `getFullList` and
-`getFirstListItem` check whether their first argument looks like SQL. That's how
-the shared name `update` reaches the oxmysql path when you pass a query.
+`create`, `update`, `delete`, `getOne`, `getList`, `getFullList` and `getFirstListItem`
+check whether their first argument looks like SQL. That is how the shared name `update`
+reaches the oxmysql path when you pass a query.
 
 ## Collections
 
@@ -192,15 +182,15 @@ the shared name `update` reaches the oxmysql path when you pass a query.
 
 ## Raw SQL
 
-`{:name}` placeholders, no MySQL translation.
+`{:name}` placeholders, no MySQL translation. All async.
 
-| Export | Parameters | Returns | Async |
-| --- | --- | --- | --- |
-| `sqlQuery` | `sql`, `params?` | array of rows | yes |
-| `sqlSingle` | `sql`, `params?` | first row, or nil | yes |
-| `sqlScalar` | `sql`, `params?`, `columnName?` | the value, or nil | yes |
-| `sqlExecute` | `sql`, `params?` | insert id only | yes |
-| `sqlTransaction` | `queries`: `{ sql, params?, expect? }` | true; throws and rolls back the whole batch on failure | yes |
+| Export | Parameters | Returns |
+| --- | --- | --- |
+| `sqlQuery` | `sql`, `params?` | array of rows |
+| `sqlSingle` | `sql`, `params?` | first row, or nil |
+| `sqlScalar` | `sql`, `params?`, `columnName?` | the value, or nil |
+| `sqlExecute` | `sql`, `params?` | insert id only |
+| `sqlTransaction` | `queries`: `{ sql, params?, expect? }` | true; throws and rolls back the whole batch on failure |
 
 ## Auth
 
@@ -234,7 +224,8 @@ All async. Every one takes the auth collection name first.
 
 ## Commands
 
-All are server console only, and all are gated on the `command.tdb` ACE.
+Server console only, all gated on the `command.tdb` ACE. See
+[Importing `.sql` files](/docs/tDB/sql-imports#commands) for what each does in full.
 
 | Command | Notes |
 | --- | --- |
@@ -250,9 +241,6 @@ Anything else prints
 `usage: tdb sql status | import <file> [--force] | tables [match] | query <sql> | plan | adopt`.
 Before the database is ready, every subcommand prints
 `not ready yet - wait for the startup banner`.
-
-See [Importing `.sql` files](/docs/tDB/sql-imports#commands) for what each one
-does in full.
 
 ## Events
 
@@ -275,10 +263,8 @@ All server-local. Use `AddEventHandler`.
 | Provides | `oxmysql`, `mysql-async`, `ghmattimysql` |
 | Platforms | `windows_amd64`, `linux_amd64` |
 
----
-
 ## Next steps
 
-- The shapes you'll actually write: [Beyond SQL](/docs/tDB/pocketbase)
+- The shapes you will actually write: [Beyond SQL](/docs/tDB/pocketbase)
 - What translates from MySQL and what does not: [MySQL compatibility](/docs/tDB/mysql-compatibility)
 - An export is erroring or never answers: [Troubleshooting](/docs/tDB/troubleshooting)

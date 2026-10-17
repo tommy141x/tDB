@@ -6,22 +6,14 @@ group: "tDB"
 published: true
 ---
 
-Everything lives in `config.lua`, in the resource folder. The defaults are meant
-to work as shipped; most servers change nothing.
-
-<Callout type="info" title="Credentials do not go in config.lua">
-  Every credential-shaped key in `config.lua` ships blank and is meant to stay
-  blank, so the file is safe to commit and safe to paste. Set a real value as a
-  server convar instead — see [Where a credential comes
-  from](#where-a-credential-comes-from).
-
-  Every default below is the value shipped in `config.lua`, and the same value
-  tDB falls back to when a key is missing.
-</Callout>
+Everything lives in `config.lua`, in the resource folder. Each default below is both the
+shipped value and what tDB falls back to when a key is missing. Most servers change nothing.
 
 ## Where a credential comes from
 
-Three places, and the first one that is set wins:
+Every credential-shaped key in `config.lua` ships blank and is meant to stay blank, so the
+file is safe to commit and safe to paste. Three places supply a real value, first one set
+wins:
 
 | | Where | Set it by |
 | --- | --- | --- |
@@ -29,18 +21,16 @@ Three places, and the first one that is set wins:
 | 2 | `config.local.lua` | editing that file; it is gitignored and never packaged |
 | 3 | `config.lua` | nothing — it ships blank and stays blank |
 
-The convar name is `tdb_`, then the option's path with the dots as underscores,
-lowercased: `Config.Superuser.Password` is `tdb_superuser_password`,
-`Config.Advanced.S3.SecretKey` is `tdb_advanced_s3_secretkey`.
+The convar name is `tdb_`, then the option's path with dots as underscores, lowercased:
+`Config.Superuser.Password` is `tdb_superuser_password`, `Config.Advanced.S3.SecretKey` is
+`tdb_advanced_s3_secretkey`.
 
-If you already have a password, the convar is the route to use: nothing is
-written to disk and nothing can be committed by accident. It also overrides a
-password tDB generated earlier, with no file to clean up first.
+If you already have a password, use the convar: nothing is written to disk, nothing can be
+committed by accident, and it overrides a password tDB generated earlier.
 
-`config.local.lua` exists because a convar cannot be written to. tDB generates a
-superuser password on first start and has to keep it somewhere, or the admin
-login would change on every restart. It uses the same syntax as `config.lua` and
-needs only the keys you are overriding:
+`config.local.lua` exists because a convar cannot be written to, and tDB must keep the
+password it generates somewhere or the admin login would change every restart. It uses
+`config.lua` syntax and needs only the keys you override:
 
 ```lua title="config.local.lua"
 Config = Config or {}
@@ -60,18 +50,14 @@ Config.Superuser = {
 | `Config.Debug` | boolean | `false` | Print tDB's debug lines — the pid-file sweep, route probes, each backup, the settings asserted from `config.lua`. Off, a normal boot prints the startup box and nothing else |
 | `Config.AutoUpdate` | boolean | `false` | Run `pocketbase update` on start. It replaces the shipped, checksum-verified build with an unverified newer one, under a live database |
 
-tDB has no port or address of its own. The port the panel answers on is tLib's
-`tlib_http_port`, default 7777, and the address handed out is
-`tlib_http_public_url` — both documented in
+tDB has no port or address of its own. The panel answers on tLib's `tlib_http_port`
+(default 7777) and the address handed out is `tlib_http_public_url` — both in
 [tLib's convar reference](https://timmygstudios.com/docs/tLib/convars#http-router).
 
 ## Superuser
 
 ```lua title="config.lua"
-Config.Superuser = {
-    Email = "",
-    Password = "",
-}
+Config.Superuser = { Email = "", Password = "" }
 ```
 
 Blank here, always. To pin a login you already have:
@@ -82,15 +68,13 @@ set tdb_superuser_password "…"
 ```
 
 With neither convar set, tDB generates both on first start and writes them into
-`config.local.lua`. The generated password is printed in the server console
-**once**, on the run that creates it. Every later start redacts it, so after
-that run it lives only in `config.local.lua`.
+`config.local.lua`. The generated password prints in the console **once**, on the run that
+creates it, and is redacted on every start after.
 
 <Callout type="warning" title="These are stored in plain text">
-  Both the convar and `config.local.lua` hold the superuser password
-  unencrypted. Keep `server.cfg` and `config.local.lua` off shared hosting
-  panels. To rotate: delete the pair from `config.local.lua`, unset the convars,
-  restart.
+  Both the convar and `config.local.lua` hold the superuser password unencrypted. Keep
+  `server.cfg` and `config.local.lua` off shared hosting panels. To rotate: delete the pair
+  from `config.local.lua`, unset the convars, restart.
 </Callout>
 
 ## Backups
@@ -109,20 +93,16 @@ Config.Backup = {
 | --- | --- | --- | --- |
 | `Enabled` | boolean | `false` | Master switch for automatic backups |
 | `OnStartup` | boolean | `true` | Back up before each start |
-| `ScheduleSeconds` | number | `0` | Seconds between backups. `0` disables the timer. Renamed from `Schedule` in 1.0; the old name still works and prints a deprecation warning until 2.0 |
-| `KeepLast` | number | `7` | How many automatic backups to retain. `0` keeps all of them |
-| `BackupPrefix` | string | `"auto_"` | Prefix used to recognise tDB's own backups, so manual ones are never pruned |
+| `ScheduleSeconds` | number | `0` | Seconds between backups. `0` disables the timer. Renamed from `Schedule` in 1.0; the old name works and warns until 2.0 |
+| `KeepLast` | number | `7` | How many automatic backups to retain. `0` keeps all |
+| `BackupPrefix` | string | `"auto_"` | Prefix identifying tDB's own backups, so manual ones are never pruned |
 
 Backups land in the PocketBase data directory under `backups`.
 
 ## SQL imports
 
 ```lua title="config.lua"
-Config.Sql = {
-    Enabled = true,
-    Dir = "sql",
-    OnChanged = "warn",
-}
+Config.Sql = { Enabled = true, Dir = "sql", OnChanged = "warn" }
 ```
 
 | Option | Type | Default | Description |
@@ -131,23 +111,19 @@ Config.Sql = {
 | `Dir` | string | `"sql"` | Relative to the resource, or an absolute path |
 | `OnChanged` | string | `"warn"` | What to do when a file changes after it was applied: `"warn"`, `"error"` or `"apply"` |
 
-`warn` and `error` differ only in log level; neither re-runs the file. `apply`
-re-runs it, replaying every `INSERT` it contains, so it only suits pure DDL
-dumps. Full behaviour is on [Importing `.sql` files](/docs/tDB/sql-imports).
+`warn` and `error` differ only in log level and neither re-runs the file. `apply` re-runs
+it, replaying every `INSERT` it contains, so it suits pure DDL dumps only. Full behaviour is
+on [Importing `.sql` files](/docs/tDB/sql-imports).
 
 ## Migrations
 
 ```lua title="config.lua"
-Config.Migrations = {
-    AutoApply = true,
-    Dir = ".runtime/pb_migrations",
-}
+Config.Migrations = { AutoApply = true, Dir = ".runtime/pb_migrations" }
 ```
 
-These are PocketBase's own collection migrations, not the `.sql` drop folder.
-PocketBase writes a migration file whenever you change a collection in the admin
-UI, so schema changes travel with the resource. Collection edits made in the UI
-are never reverted.
+These are PocketBase's own collection migrations, not the `.sql` drop folder. PocketBase
+writes a migration file whenever you change a collection in the admin UI, so schema changes
+travel with the resource. Collection edits made in the UI are never reverted.
 
 ## Advanced
 
@@ -168,44 +144,32 @@ Config.Advanced = {
 | `RemotePort` | string | `""` | Port of that instance. Both must be set together |
 | `Dev` | boolean | `false` | Run PocketBase with verbose logging |
 | `AutoMigrate` | boolean | `true` | Let PocketBase write a migration when a collection changes |
-| `PublicDir` | string | `"pb_public"` | Directory served as static files, relative to the resource folder |
-| `DataDir` | string | `".runtime/pb_data"` | Where the database and backups live, relative to the resource folder |
+| `PublicDir` | string | `"pb_public"` | Directory served as static files, relative to the resource |
+| `DataDir` | string | `".runtime/pb_data"` | Where the database and backups live, relative to the resource |
 
 <Callout type="warning" title="Moving DataDir does not move the data">
-  Changing it points PocketBase at a new, empty directory. Stop the server, move
-  the existing folder yourself, then change the key.
+  Changing it points PocketBase at a new, empty directory. Stop the server, move the
+  existing folder yourself, then change the key.
 </Callout>
 
 ### Local or remote
 
-By default tDB starts and manages its own PocketBase process on `127.0.0.1`. To
-point it at an instance you already run:
+By default tDB starts and manages its own PocketBase on `127.0.0.1`. To point it at an
+instance you already run, set both keys:
 
 ```lua title="config.lua"
-Config.Advanced = {
-    RemoteHost = "db.example.com",
-    RemotePort = "8090",
-}
+Config.Advanced = { RemoteHost = "db.example.com", RemotePort = "8090" }
 ```
 
-Both must be set. In remote mode no local process is started, and tDB treats the
-instance as somebody else's: `Migrations`, `Backup` and `S3` are all ignored,
-because configuring them is not tDB's job there.
-
-tDB probes the remote instance's `/api/health` before it reports ready. If that
-probe fails, startup stops there rather than registering exports against a
+In remote mode no local process starts, and tDB treats the instance as somebody else's:
+`Migrations`, `Backup` and `S3` are all ignored. tDB probes `/api/health` before reporting
+ready, and startup stops there on a failure rather than registering exports against a
 database that is not answering.
-
----
 
 ## Mail
 
-Mail is configured in the PocketBase admin UI, under **Settings → Mail**. There is
-no SMTP block in `config.lua`, so nothing about mail belongs in that file — put
-your SMTP host, credentials and sender address in the admin UI and tDB leaves them
-alone.
-
----
+Mail is configured in the PocketBase admin UI, under **Settings → Mail**. There is no SMTP
+block in `config.lua`, and tDB leaves those settings alone.
 
 ## S3
 
@@ -219,53 +183,37 @@ Config.Advanced = {
 }
 ```
 
-`Manage` decides who owns the setting, and it's `false` by default.
+`Manage` decides who owns the setting:
 
 | State | Behaviour |
 | --- | --- |
-| `Manage = false` (default) | tDB never touches it. Set it in the admin UI and it stays exactly as you left it. Everything else in the block is ignored |
-| `Manage = true`, `Enabled = true` | config.lua is the truth. Every field is applied on every start, secrets included. An admin-UI edit is reported, then overwritten |
-| `Manage = true`, `Enabled = false` | config.lua is still the truth, and the truth is "off". Genuinely disables it on the instance |
+| `Manage = false` (default) | tDB never touches it. Set it in the admin UI and it stays as you left it. Everything else in the block is ignored |
+| `Manage = true`, `Enabled = true` | `config.lua` is the truth. Every field is applied on every start, secrets included. An admin-UI edit is reported, then overwritten |
+| `Manage = true`, `Enabled = false` | `config.lua` is still the truth, and the truth is "off". Genuinely disables it |
 
-So if you configure S3 in the admin UI, leave `Manage = false`. Set it to `true`
-when you want `config.lua` to be the authority, which makes the folder plus that
-file a complete description of the instance. Collections, records, logs and
-on-demand backups are untouched either way.
+Collections, records, logs and on-demand backups are untouched either way.
 
-### Settings never sync back
+<Callout type="warning" title="Settings never sync back">
+  Settings only travel `config.lua` → PocketBase. `GET /api/settings` omits `s3.secret`
+  entirely — undefined, not masked — so reading them back would replace a real credential
+  with an empty string. For `Manage = true`, supply the keys as `tdb_advanced_s3_accesskey`
+  and `tdb_advanced_s3_secretkey` and leave the `config.lua` fields blank.
+</Callout>
 
-Settings only ever travel `config.lua` → PocketBase. PocketBase's
-`GET /api/settings` omits `s3.secret` entirely — it comes back undefined, not
-masked — so reading the instance's settings into `config.lua` would replace a real
-credential with an empty string. An S3 secret you set in the admin UI is therefore
-never written back for you. If you want `Manage = true`, supply the keys yourself
-as `tdb_advanced_s3_accesskey` and `tdb_advanced_s3_secretkey`; the fields in
-`config.lua` stay blank.
-
-Other fields in the block are still compared, so a rotated `SecretKey` is pushed
-even when the bucket, region and endpoint are unchanged.
-
----
+Other fields in the block are still compared, so a rotated `SecretKey` is pushed even when
+bucket, region and endpoint are unchanged.
 
 ## Hiding it from the hub
-
-tLib's hub lists the apps it serves. A server running several may not want the
-database admin panel among the things players see:
 
 ```lua title="config.lua"
 Config.ShowInHub = false   -- default: true
 ```
 
 <Callout type="danger" title="This is not a security setting">
-  It removes the hub entry and nothing else. The mount is still registered and
-  `/db` still answers to anyone who requests it. Delisting hides the admin UI
-  from you, not from them. For genuine unreachability use
-  `Config.ExposeAdmin = false`.
+  It removes the hub entry and nothing else. The mount is still registered and `/db` still
+  answers to anyone who requests it. Delisting hides the admin UI from you, not from them.
+  For genuine unreachability use `Config.ExposeAdmin = false`.
 </Callout>
-
-Leaving the key out keeps the default.
-
----
 
 ## Next steps
 

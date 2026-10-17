@@ -6,111 +6,100 @@ group: "tDB"
 published: true
 ---
 
-tDB stores data in SQLite. SQL arriving through the oxmysql exports is
-translated from MySQL per statement and cached by shape, so the cost is paid
-once per distinct query.
-
-Anything that cannot be translated faithfully raises an error naming the
-construct. tDB does not quietly change the meaning of a statement.
+tDB stores data in SQLite. SQL arriving through the oxmysql exports is translated per
+statement and cached by shape, so the cost is paid once per distinct query. Anything that
+cannot be translated faithfully raises an error naming the construct — tDB never quietly
+changes the meaning of a statement.
 
 ## Translated for you
 
 | MySQL | Becomes |
 | --- | --- |
-| `ON DUPLICATE KEY UPDATE` | `ON CONFLICT (...) DO UPDATE`, with the conflict target resolved from the table's real unique indexes |
+| `ON DUPLICATE KEY UPDATE` | `ON CONFLICT (...) DO UPDATE`, conflict target resolved from the table's real unique indexes |
 | `AUTO_INCREMENT`, `ENGINE=`, `DEFAULT CHARSET=` | dropped; SQLite has no equivalent table options |
 | inline `KEY` / `UNIQUE KEY` in `CREATE TABLE` | separate `CREATE INDEX` statements |
 | `ON UPDATE CURRENT_TIMESTAMP` | a trigger |
 | `DELETE ... LIMIT`, `LIMIT offset, count` | SQLite's forms |
 | backticks, `IF()`, `IFNULL()`, `CONCAT()`, `NOW()`, `UNIX_TIMESTAMP()` | SQLite equivalents |
-| `MATCH (a, b) AGAINST (? IN BOOLEAN MODE)` | a substring search, `a LIKE '%'\|\|?\|\|'%' OR b LIKE …` — see the note below |
+| `MATCH (a, b) AGAINST (? IN BOOLEAN MODE)` | a substring search — see [the approximation](#full-text-search-is-approximated) |
 | `ALTER TABLE … MODIFY`/`CHANGE COLUMN`, `ADD FOREIGN KEY` | the table is rebuilt, carrying rows, indexes and triggers across |
-| `SET @v := (SELECT IF(…)) ` + `PREPARE`/`EXECUTE` | the condition is evaluated and the chosen branch runs |
-| `CREATE PROCEDURE … IF NOT EXISTS … END IF` + `CALL` | the same: the condition is evaluated against the live schema |
+| `SET @v := (SELECT IF(…))` + `PREPARE`/`EXECUTE` | the condition is evaluated and the chosen branch runs |
+| `CREATE PROCEDURE … IF NOT EXISTS … END IF` + `CALL` | the same, evaluated against the live schema |
 | `SIGNAL SQLSTATE '…' SET MESSAGE_TEXT = 'x'` (in a trigger) | `SELECT RAISE(ABORT, 'x')` |
 | `UPDATE a JOIN b ON … SET …`, multi-table `DELETE` | an `EXISTS` subquery |
 | `IN (?)` with an array, `VALUES ?` with rows | expanded into a list, as mysql2 does |
-| `DATABASE()`, `SCHEMA()` | `'main'`, the name SQLite gives its primary schema |
+| `DATABASE()`, `SCHEMA()` | `'main'`, SQLite's name for its primary schema |
+| `VERSION()` | `sqlite_version()`. Not spoofed, so a script version-gating on MariaDB takes its own not-MariaDB branch |
+| `INT UNSIGNED ... AUTO_INCREMENT` | `INTEGER ... AUTOINCREMENT`; SQLite accepts AUTOINCREMENT only on a column declared exactly `INTEGER` |
+| `AUTO_INCREMENT` on a column of a composite `PRIMARY KEY` | the key narrows to that column, and the wider key's index is created separately |
+| `IF c THEN a; ELSE b; END IF;` in a trigger | two triggers with `WHEN` guards, since SQLite triggers have no `IF` |
+| `DECLARE v; SELECT e INTO v; ... v ...` | the variable collapses into a correlated subquery, when assigned once and read |
+| `UPDATE t JOIN u ON c SET a` in a trigger | `UPDATE t SET a FROM u WHERE c` |
+| `CREATE TRIGGER IF NOT EXISTS` | kept verbatim, so a re-import stays idempotent |
 
 ## Full-text search is approximated
 
-`MATCH … AGAINST` becomes a substring search across the same columns. This is a
-**stated approximation**, not an equivalence, and the differences are:
+`MATCH … AGAINST` becomes a substring search across the same columns —
+`a LIKE '%'||?||'%' OR b LIKE …`. This is a **stated approximation**, not an equivalence:
 
-- **No relevance ranking.** `MATCH` in MySQL orders by relevance when you do not
-  order by anything else. Of the nine `MATCH` statements measured across
-  ox_banking and ox_mdt, seven carry their own `ORDER BY`, so they do not read
-  relevance even on MySQL — but the two that do not will come back in an
-  arbitrary order.
-- **`BOOLEAN MODE` operators are taken literally.** Searching for `+john` looks
-  for the text `+john`, and `john*` for `john*`. MySQL would treat those as
-  "must contain" and "prefix".
-- **It is more permissive than MySQL, not less.** MySQL applies a minimum token
-  length (`innodb_ft_min_token_size`, 3 by default), so a two-character search
-  returns nothing there and does return rows here.
+- **No relevance ranking.** MySQL orders by relevance when you order by nothing else. Of
+  nine `MATCH` statements measured across ox_banking and ox_mdt, seven carry their own
+  `ORDER BY`; the two that do not come back in an arbitrary order.
+- **`BOOLEAN MODE` operators are taken literally.** `+john` looks for the text `+john`, and
+  `john*` for `john*`.
+- **It is more permissive than MySQL, not less.** MySQL applies a minimum token length
+  (`innodb_ft_min_token_size`, 3 by default), so a two-character search returns nothing
+  there and does return rows here.
 
-The alternative was to refuse the statement, which is what tDB used to do — and
-that meant the resource's search box returned an error rather than rows. SQLite's
-real full-text search is FTS5, a virtual table needing a shadow copy of each
-searched table plus triggers to keep it in sync; a `SELECT` cannot create that,
-and nothing asked for it.
-| `VERSION()` | `sqlite_version()`. Not spoofed as MySQL, so a script that version-gates on MariaDB takes its own not-MariaDB branch |
-| `INT UNSIGNED ... AUTO_INCREMENT` | `INTEGER ... AUTOINCREMENT`. SQLite accepts AUTOINCREMENT only on a column declared exactly `INTEGER` |
-| `AUTO_INCREMENT` on a column of a composite `PRIMARY KEY` | the key narrows to that column, and the index the wider key gave you is created separately |
-| `IF c THEN a; ELSE b; END IF;` in a trigger | two triggers with `WHEN` guards, since SQLite triggers have no `IF` but do have `WHEN` |
-| `DECLARE v; SELECT e INTO v; ... v ...` | the variable collapses into a correlated subquery, when it is assigned once and read |
-| `UPDATE t JOIN u ON c SET a` in a trigger | `UPDATE t SET a FROM u WHERE c`, using SQLite's `UPDATE ... FROM` |
-| `CREATE TRIGGER IF NOT EXISTS` | kept verbatim, so a re-import stays idempotent |
+The alternative was refusing the statement, which made a resource's search box return an
+error instead of rows. SQLite's real full-text search is FTS5, a virtual table needing a
+shadow copy of each searched table plus sync triggers — a `SELECT` cannot create that.
 
 ## Case-insensitive text
 
-SQLite compares text byte-exact; MySQL does not. Scripts written against MySQL
-assume a license or identifier matches regardless of case, so tDB creates text
-columns `COLLATE NOCASE`:
+SQLite compares text byte-exact; MySQL does not. Scripts written against MySQL assume a
+licence or identifier matches regardless of case, so tDB creates text columns
+`COLLATE NOCASE`:
 
 ```sql
 -- finds a row stored as 'license:ab12'
 SELECT * FROM players WHERE license = 'LICENSE:AB12'
 ```
 
-A `UNIQUE` key likewise rejects the same value in another case. A column
-declared `BINARY`, or with a `_bin` or `_cs` collation, stays byte-exact.
+A `UNIQUE` key likewise rejects the same value in another case. A column declared `BINARY`,
+or with a `_bin` or `_cs` collation, stays byte-exact.
 
 ## Refused by name
 
-These have no faithful SQLite translation and raise an error rather than being
-approximated:
+These have no faithful SQLite translation and raise rather than being approximated:
 
 `DATE_ADD`, `DATE_SUB`, `INTERVAL`, `STRAIGHT_JOIN`, `SQL_CALC_FOUND_ROWS`,
-`GROUP_CONCAT ... SEPARATOR`, `INFORMATION_SCHEMA`,
-`ALTER TABLE ... DROP FOREIGN KEY`, `DECLARE`, `SELECT ... INTO`,
-`UPDATE ... JOIN`
+`GROUP_CONCAT ... SEPARATOR`, `INFORMATION_SCHEMA`, `ALTER TABLE ... DROP FOREIGN KEY`,
+`DECLARE`, `SELECT ... INTO`, `UPDATE ... JOIN`
 
-The last five come up in MySQL dumps and in schema-checking code:
+The last five come up in MySQL dumps and schema-checking code:
 
-- **`INFORMATION_SCHEMA`** has no SQLite counterpart. SQLite's catalogue is
-  `sqlite_master` and the `pragma_*` table functions, and the column set differs.
-- **`DROP FOREIGN KEY`** is impossible in SQLite; a constraint can only go by
-  rebuilding the table.
-- **`DECLARE`, `SELECT ... INTO`, `UPDATE ... JOIN`** are procedural or
-  multi-table forms that SQLite triggers have no equivalent for. Each is
-  expressible by hand as a scalar subquery or a `WHERE ... IN (SELECT ...)`.
-  Most of them maintain a counter, so check your rewrite against the original
-  before you trust the numbers it produces.
+- **`INFORMATION_SCHEMA`** has no counterpart. SQLite's catalogue is `sqlite_master` and the
+  `pragma_*` table functions, with a different column set.
+- **`DROP FOREIGN KEY`** is impossible in SQLite; a constraint can only go by rebuilding the
+  table.
+- **`DECLARE`, `SELECT ... INTO`, `UPDATE ... JOIN`** are procedural or multi-table forms
+  SQLite triggers have no equivalent for. Each is expressible by hand as a scalar subquery
+  or a `WHERE ... IN (SELECT ...)`. Most maintain a counter, so check your rewrite's numbers
+  against the original.
 
-Rewrite the statement, or move it to
-[raw SQL](/docs/tDB/pocketbase#raw-sql) where you write SQLite directly.
+Rewrite the statement, or move it to [raw SQL](/docs/tDB/pocketbase#raw-sql) and write
+SQLite directly.
 
 ## Known limits
 
-- **`COLLATE NOCASE` folds ASCII only.** `Ä` and `ä` still compare as different.
-  MySQL's `general_ci` folds them.
-- **Collation is applied when a table is created.** A table that predates tDB
-  keeps binary collation until it's recreated.
+- **`COLLATE NOCASE` folds ASCII only.** `Ä` and `ä` still compare as different; MySQL's
+  `general_ci` folds them.
+- **Collation is applied when a table is created.** A table predating tDB keeps binary
+  collation until it is recreated.
 - **`RETURNING` is not supported** through the query path.
-- **SQLite type affinity is looser than MySQL's.** A column declared `INT` will
-  accept a string. Statements that relied on MySQL rejecting bad input will not
-  be rejected here.
+- **SQLite type affinity is looser than MySQL's.** A column declared `INT` accepts a string,
+  so statements relying on MySQL rejecting bad input will not be rejected here.
 
 ## Next steps
 
