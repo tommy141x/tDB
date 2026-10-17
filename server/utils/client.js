@@ -25,17 +25,17 @@
     global.EventSource = EventSourcePolyfill.EventSourcePolyfill || EventSourcePolyfill;
   }
 
-  // `debug` is filtered, the other levels are not - same contract and same
-  // `Config.Debug` as the `[PocketBase]` logger in server.js. Assigned below
-  // where the config is read, so anything logged before then stays filtered.
+  // `debug` is filtered, the other levels are not - same contract, same tag and
+  // same `Config.Debug` as the logger in server.js. Assigned below where the
+  // config is read, so anything logged before then stays filtered.
   let debugEnabled = false;
 
   const clientLogger = {
-    info: (msg) => console.log(`^2[PocketBase Client]^7 ${msg}`),
-    warn: (msg) => console.log(`^3[PocketBase Client]^7 ${msg}`),
-    error: (msg) => console.log(`^1[PocketBase Client]^7 ${msg}`),
+    info: (msg) => console.log(`[tDB] ${msg}`),
+    warn: (msg) => console.log(`^3[tDB]^7 ${msg}`),
+    error: (msg) => console.log(`^1[tDB]^7 ${msg}`),
     debug: (msg) => {
-      if (debugEnabled) console.log(`^5[PocketBase Client]^7 ${msg}`);
+      if (debugEnabled) console.log(`^5[tDB]^7 ${msg}`);
     },
     silent: () => {},
   };
@@ -527,7 +527,10 @@
   RegisterCommand(
     "tdb",
     async (source, args) => {
-      const say = (line) => console.log(`^2[tDB]^7 ${line}`);
+      // No colour: this carries every line of a command's output, including
+      // row dumps and "0 rows". Green on all of it made an empty result and a
+      // failure read as cheerfully as a success.
+      const say = (line) => console.log(`[tDB] ${line}`);
       const USAGE =
         "usage: tdb sql status | import <file> [--force] | tables [match] | " +
         "query <sql> | plan | adopt";

@@ -472,4 +472,4 @@ setmetatable(MySQL, {
     end,
 })
 
-print('^2[tDB]^7 MySQL compatibility library loaded')
+print('[tDB] MySQL compatibility library loaded')

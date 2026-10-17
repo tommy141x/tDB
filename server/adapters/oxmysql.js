@@ -300,6 +300,22 @@ class OxMySQLAdapter {
         this.reportIfSlow(call.sql, Date.now() - startedAt);
       }
 
+      // Only reached when the statement succeeded. On a throw the callback is
+      // never invoked and the caller waits forever - which looks like a bug,
+      // and is what oxmysql does. Measured against oxmysql 2.12.0's own
+      // dist/build.js: rawQuery routes failures to logError(invokingResource,
+      // cb, isPromise, ...), whose last act is
+      //     if (cb && isPromise) { try { return cb(null, output); } catch {} return; }
+      //     console.error(output);
+      // and its lib/MySQL.lua passes `options.return_callback_errors` as that
+      // `isPromise` slot for the callback form. That option defaults to FALSE
+      // and is opt-in per consuming resource via `mysql_option
+      // 'return_callback_errors'`, so by default oxmysql logs and drops the
+      // callback exactly as tDB does here. The await form always passes true,
+      // which is why awaiting a failed query rejects while a callback hangs.
+      //
+      // Matching the default is the point of a drop-in, so do not "fix" this.
+      // handleCallError has already logged by the time the caller is stuck.
       if (call.callback) {
         call.callback(value);
         return undefined;

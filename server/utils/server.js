@@ -45,12 +45,21 @@ function applyLogLevel(config) {
   debugEnabled = config?.Debug === true;
 }
 
+// One tag for the whole resource. This half used to print `[PocketBase]`, which
+// named the embedded project rather than tDB: a fault in tDB's own supervisor
+// code reported under someone else's name, and a relayed line from the real
+// PocketBase process was indistinguishable from a tDB line about it. Where that
+// distinction matters the subsystem goes inside the message instead - see the
+// `pocketbase:` prefix on the two stdout/stderr relays.
+//
+// INFO carries no colour. Only problem states are coloured; see the banner
+// note above.
 const logger = {
-  info: (msg) => console.log(`^2[PocketBase]^7 ${msg}`),
-  warn: (msg) => console.log(`^3[PocketBase]^7 ${msg}`),
-  error: (msg) => console.log(`^1[PocketBase]^7 ${msg}`),
+  info: (msg) => console.log(`[tDB] ${msg}`),
+  warn: (msg) => console.log(`^3[tDB]^7 ${msg}`),
+  error: (msg) => console.log(`^1[tDB]^7 ${msg}`),
   debug: (msg) => {
-    if (debugEnabled) console.log(`^5[PocketBase]^7 ${msg}`);
+    if (debugEnabled) console.log(`^5[tDB]^7 ${msg}`);
   },
   raw: (msg) => console.log(msg),
 };
@@ -1338,14 +1347,18 @@ function handlePocketBaseStdout(raw) {
     return;
   }
 
-  logger.debug(line);
+  // Prefixed because this is the PocketBase process talking, not tDB. Under a
+  // single `[tDB]` tag the two are otherwise the same line.
+  logger.debug(`pocketbase: ${line}`);
 }
 
 function handlePocketBaseStderr(raw) {
   const output = raw.trim();
   if (!output) return;
-  // Same rewrite as stdout.
-  logger.warn(output.replace(/http:\/\/(?:0\.0\.0\.0|127\.0\.0\.1):\d+/g, finalUrl));
+  // Same rewrite as stdout, and the same relay prefix.
+  logger.warn(
+    `pocketbase: ${output.replace(/http:\/\/(?:0\.0\.0\.0|127\.0\.0\.1):\d+/g, finalUrl)}`
+  );
 }
 
 /**

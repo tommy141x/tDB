@@ -642,7 +642,7 @@ module.exports = (function () {
         this.unknownKeys(s3, "Config.Advanced.S3", KNOWN_KEYS.S3);
       } catch (err) {
         console.log(
-          `^1[Config Loader]^7 Failed to load ${file}: ${err.message}`,
+          `^1[tDB]^7 config: Failed to load ${file}: ${err.message}`,
         );
       }
     }
@@ -682,7 +682,7 @@ module.exports = (function () {
         this.parse(CONFIG_FILE, this.configPath);
       } else {
         console.log(
-          `^3[Config Loader]^7 ${CONFIG_FILE} not found, using defaults`,
+          `^3[tDB]^7 config: ${CONFIG_FILE} not found, using defaults`,
         );
       }
 
@@ -716,7 +716,7 @@ module.exports = (function () {
       try {
         if (!this.localPath) {
           console.log(
-            "^1[Config Loader]^7 Cannot save credentials - config never loaded",
+            "^1[tDB]^7 config: Cannot save credentials - config never loaded",
           );
           return false;
         }
@@ -751,7 +751,7 @@ module.exports = (function () {
         return true;
       } catch (err) {
         console.log(
-          `^1[Config Loader]^7 Failed to write ${LOCAL_FILE}: ${err.message}`,
+          `^1[tDB]^7 config: Failed to write ${LOCAL_FILE}: ${err.message}`,
         );
         return false;
       }

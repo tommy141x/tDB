@@ -154,10 +154,16 @@ module.exports = (function () {
           ? `could not route this statement: ${first.slice(0, 160)}`
           : `could not route a call with a ${typeof first} first argument`;
 
-      throw new Error(
+      const message =
         `tDB ${detail} (export '${exportName}'). If it is SQL, the construct may be ` +
-          `unsupported; if it is a record call, check the collection name.`
-      );
+        `unsupported; if it is a record call, check the collection name.`;
+
+      // Log before throwing. This throw happens inside a FiveM export, where a
+      // throw returns `undefined` to the Lua caller and takes the message with
+      // it - so without this line an unsupported SQL construct, the likeliest
+      // failure in a translation layer, produces no console output at all.
+      this.logger.error(message);
+      throw new Error(message);
     }
   }
 
