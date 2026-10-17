@@ -921,9 +921,20 @@ module.exports = (function () {
   function rewriteUpdateJoin(sql) {
     const mask = codeMask(sql);
 
+    // ⚠️ Matched on `sql`, NOT `mask` — the same correction `rewriteDeleteLimit`
+    // below already carries. `codeMask` blanks a backticked identifier, so the
+    // `[`"[]?` groups in this pattern could never match the quoted form and
+    // every backticked statement fell through untranslated. Backticks are the
+    // default in FiveM and mysqldump output, so that was the common case, and
+    // the suite missed it because every fixture used bare identifiers.
+    //
+    // Offsets stay valid: `codeMask` preserves length, so `head[0].length`
+    // indexes `mask` and `sql` alike, and the clause scans below still use the
+    // mask so a string literal cannot fool them. Safe unquoted because the
+    // pattern is anchored at the statement start, where no literal can precede.
     const head =
       /^\s*UPDATE\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+(?:INNER\s+|LEFT\s+(?:OUTER\s+)?|RIGHT\s+(?:OUTER\s+)?|CROSS\s+)?JOIN\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+ON\s+/i.exec(
-        mask
+        sql
       );
     if (!head) return { sql, order: null };
 
@@ -1012,13 +1023,26 @@ module.exports = (function () {
   function rewriteDeleteJoin(sql) {
     const mask = codeMask(sql);
 
+    // ⚠️ Matched on `sql`, NOT `mask` — the same correction `rewriteDeleteLimit`
+    // below already carries. `codeMask` blanks a backticked identifier, so the
+    // `[`"[]?` groups in this pattern could never match the quoted form and
+    // every backticked statement fell through untranslated. Backticks are the
+    // default in FiveM and mysqldump output, so that was the common case, and
+    // the suite missed it because every fixture used bare identifiers.
+    //
+    // Offsets stay valid: `codeMask` preserves length, so `head[0].length`
+    // indexes `mask` and `sql` alike, and the clause scans below still use the
+    // mask so a string literal cannot fool them. Safe unquoted because the
+    // pattern is anchored at the statement start, where no literal can precede.
     const head =
-      /^\s*DELETE\s+([A-Za-z0-9_$]+)\s+FROM\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+(?:INNER\s+|LEFT\s+(?:OUTER\s+)?|CROSS\s+)?JOIN\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+ON\s+/i.exec(
-        mask
+      /^\s*DELETE\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)\s+FROM\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+(?:INNER\s+|LEFT\s+(?:OUTER\s+)?|CROSS\s+)?JOIN\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+ON\s+/i.exec(
+        sql
       );
     if (!head) return sql;
 
-    const deleteAlias = head[1];
+    // Quotes stripped here, not at the comparison: the alias group accepts a
+    // backticked name now, and every use below is a bare-name comparison.
+    const deleteAlias = head[1].replace(/[`"[\]]/g, "");
     const target = head[2];
     const targetAlias = head[3] || deleteAlias;
     const joined = head[4];
@@ -2614,20 +2638,11 @@ module.exports = (function () {
     translate,
     clearCache,
     SQLTranslationError,
-    // Exposed for tests.
-    _internal: {
-      expandListBind,
-      expandValuesInsert,
-      normalizePlaceholders,
-      parseRebuildActions,
-      readNamedParam,
-      toPocketBaseParams,
-      splitUpsert,
-      rewriteDeleteLimit,
-      rewriteFunctions,
-      rewriteCreateTable,
-      assertTranslated,
-      codeMask,
-    },
+    // Exposed for tests. Eleven other helpers were listed here and none of
+    // them was ever read - the suite reaches everything else through
+    // translate(), which is the better test anyway because it exercises the
+    // ordering between the rewrites rather than one in isolation. Add a name
+    // back when a test actually needs it.
+    _internal: { normalizePlaceholders },
   };
 })();

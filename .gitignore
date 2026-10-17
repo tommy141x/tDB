@@ -26,4 +26,9 @@ config/config.local.lua
 # Regenerated on demand and consumed by the store page in tWeb, not by anything
 # here. banner.jpg is the exception and IS tracked: README.md shows it.
 assets/hero/
-docs/public/thumb.jpg
+# docs/public/thumb.jpg   <- un-ignored 2026-10-17, see note below
+
+# ⚠️ NOT the storefront thumbnail. It is referenced by docs/product.mdx, so it
+# has to be in the repo: tWeb's sync copies from a CHECKOUT, and a file only
+# this machine has reaches the site once and then never updates again. That is
+# how a regenerated thumbnail silently keeps serving the old art.

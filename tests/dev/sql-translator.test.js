@@ -1198,6 +1198,52 @@ async function main() {
     ok(db.prepare("SELECT id FROM w").all().length === 1, "and leaves the other one");
   }
 
+  // ⚠ BACKTICKED IDENTIFIERS, WHICH EVERY FIXTURE ABOVE OMITS.
+  //
+  // Both rewrites matched their head pattern against `codeMask(sql)`, which
+  // BLANKS a quoted token -- so the quote branches in those patterns could
+  // never fire and a backticked statement fell through untranslated. Backticks
+  // are what FiveM resources and mysqldump actually emit, so this was the
+  // common case, and the suite was green because nothing here used one.
+  {
+    const db = freshDb();
+    db.exec("CREATE TABLE bq (id INTEGER PRIMARY KEY, n INTEGER)");
+    db.exec("CREATE TABLE bp (id INTEGER, keep INTEGER)");
+    db.exec("INSERT INTO bq VALUES (1,0),(2,0)");
+    db.exec("INSERT INTO bp VALUES (1,1)");
+
+    const upd = translator.translate(
+      "UPDATE `bq` AS q JOIN `bp` AS p ON q.id = p.id SET q.n = 7",
+      [],
+      { resolveConflictTarget }
+    );
+    ok(/EXISTS/i.test(upd.sql), "a backticked UPDATE ... JOIN is rewritten, not passed through");
+    db.prepare(upd.sql).run();
+    ok(db.prepare("SELECT n FROM bq WHERE id = 1").get().n === 7, "and updates the joined row");
+    ok(db.prepare("SELECT n FROM bq WHERE id = 2").get().n === 0, "and leaves the other one");
+
+    const del = translator.translate(
+      "DELETE q FROM `bq` q JOIN `bp` p ON q.id = p.id",
+      [],
+      { resolveConflictTarget }
+    );
+    ok(/EXISTS/i.test(del.sql), "a backticked multi-table DELETE is rewritten, not passed through");
+    ok(db.prepare(del.sql).run().changes === 1, "and removes only the joined row");
+
+    // The safety check refused nothing before this fix, because the pattern it
+    // guards never matched a quoted statement -- so a DELETE naming the WRONG
+    // table emitted invalid SQLite instead of being refused.
+    let refused = false;
+    try {
+      translator.translate("DELETE p FROM `bq` q JOIN `bp` p ON q.id = p.id", [], {
+        resolveConflictTarget,
+      });
+    } catch {
+      refused = true;
+    }
+    ok(refused, "a backticked DELETE naming the non-leading table is still refused");
+  }
+
   // Four aliases, an INNER JOIN and four assignments: qbx_vehicleshop's, which
   // is the shape that has to keep working.
   const financing = translator.translate(
