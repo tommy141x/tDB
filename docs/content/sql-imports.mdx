@@ -22,10 +22,7 @@ another.
 
 ## What to expect
 
-- **A file runs once, ever.** Applying a dump twice duplicates every row its `INSERT`s
-  carry, so what has run is recorded in the `tdb_sql_imports` table.
-- **A file lands whole or not at all.** The whole file goes out in one transaction. Past 500
-  statements it is chunked and atomicity becomes per-chunk; the importer says so.
+- **A file runs once, ever.** What has run is recorded in the `tdb_sql_imports` table.
 - **A failure does not stop the server.** The file, line and statement are reported, nothing
   is applied, and it is retried on the next restart.
 - **A file edited after it ran is reported, not re-run.**
@@ -34,15 +31,11 @@ another.
 - **mysqldump session noise is ignored:** `SET NAMES`, `LOCK TABLES`,
   `/*!40000 ALTER TABLE ... DISABLE KEYS */`, `START TRANSACTION` and friends.
 
-Statements are split by a scanner rather than `split(";")`, so semicolons in string
-literals, escapes, backtick identifiers, `--` / `#` / block comments and `DELIMITER` blocks
-survive intact.
-
 ## Changing a file after it has run
 
-tDB notices and tells you but will not re-run it, because replaying a dump replays its
-`INSERT`s. `Config.Sql.OnChanged` decides how loudly: `"warn"` and `"error"` differ only in
-log level and neither re-runs; `"apply"` re-runs it, which suits pure DDL dumps only.
+tDB tells you but will not re-run it, because replaying a dump replays its `INSERT`s.
+`Config.Sql.OnChanged` decides how loudly: `"warn"` and `"error"` differ only in log level
+and neither re-runs; `"apply"` re-runs it, which suits pure DDL dumps only.
 
 To replay one file on demand:
 
@@ -65,49 +58,38 @@ Server console only. A player with the `command.tdb` ACE still gets nothing back
 | `tdb sql adopt` | Hands them over now, after taking a backup |
 
 <Callout type="info" title="Calling it from a script">
-  The command is registered restricted. A resource using `ExecuteCommand` needs
-  `add_ace resource.<name> command.tdb allow` in `server.cfg`, or FiveM denies it silently.
-  Even then, output only appears in the server console.
+  A resource using `ExecuteCommand` needs `add_ace resource.<name> command.tdb allow` in
+  `server.cfg`, or FiveM denies it silently. Even then, output only appears in the server
+  console.
 </Callout>
 
 ## Where the imported data lives
 
-An imported dump lands as plain SQLite tables, which the admin UI's Collections screen does
-not list — it shows PocketBase's own `_collections` registry, so a successful import can
-look like a failed one. So tDB hands each table over to PocketBase as a real **base
-collection** under its own name, browsable *and* editable in the native UI. There is still
-one table, read and written by both SQL and the admin UI. This runs after startup and after
-a manual `tdb sql import`, and is idempotent.
+Each imported table is handed to PocketBase as a **base collection** under its own name,
+browsable and editable in the admin UI. There is still one table, read and written by both
+SQL and the admin UI.
 
 <Callout type="warning" title="It rewrites tables, so it backs up first">
-  PocketBase will not adopt a table it did not create, so each one is recreated and its rows
-  copied across. tDB takes a PocketBase backup before the first table is touched and refuses
-  to continue if that backup fails. Restore it from **Admin → Backups**.
+  tDB takes a PocketBase backup before the first table is touched and refuses to continue if
+  that backup fails. Restore it from **Admin → Backups**.
 </Callout>
 
 ### What changes when a table is adopted
 
-- **`id` becomes TEXT**, because PocketBase's `id` is a system field. Existing values are
-  preserved and an integer primary key keeps getting integers, so ordering and paging still
-  behave. Every parameter binds as text for the same reason, so `WHERE id = ?` matches
-  whether the caller passes `5` or `"5"`.
-- **Nullable columns stay nullable.** PocketBase has no `NULL` — every column it creates is
-  `NOT NULL` with a zero default — so tDB rebuilds the table it created, while still empty,
-  carrying your nullability across and keeping `WHERE col IS NULL` matching.
-- **An edit in the admin UI cannot blank a `NULL`.** The record API sends every field on a
-  save, so editing one would write `''` or `0` over an unrelated `NULL`; a guard trigger
-  restores it. Setting a real value still works. Deliberately changing a `NULL` text field
-  to an empty string through the UI is the one case decided for you — it stays `NULL`. Use
+- **`id` becomes TEXT.** Existing values are preserved and an integer primary key keeps
+  getting integers. `WHERE id = ?` matches whether you pass `5` or `"5"`.
+- **Nullable columns stay nullable**, and `WHERE col IS NULL` keeps matching.
+- **An edit in the admin UI cannot blank a `NULL`.** Setting a real value works, but
+  changing a `NULL` text field to an empty string through the UI leaves it `NULL`. Use
   `UPDATE t SET col = '' WHERE ...` for a literal empty string.
-- **Foreign keys become triggers**, since a collection cannot declare one. Each
-  `ON DELETE CASCADE` and `ON DELETE SET NULL` is re-created as a trigger and fires for
-  admin-UI deletes too. `RESTRICT` and `NO ACTION` cannot be reproduced and are reported.
-- **`INSERT INTO t VALUES (NULL, ...)` stops working.** MySQL reads that `NULL` as "assign
-  the next id"; PocketBase declares `id` as `NOT NULL`. Name your columns, or pass an id.
+- **Foreign keys become triggers.** `ON DELETE CASCADE` and `ON DELETE SET NULL` are
+  re-created and fire for admin-UI deletes too. `RESTRICT` and `NO ACTION` cannot be
+  reproduced and are reported.
+- **`INSERT INTO t VALUES (NULL, ...)` stops working.** Name your columns, or pass an id.
 
 ## Rewritten triggers
 
-Three MySQL trigger shapes have no direct SQLite spelling but are still expressible:
+Three MySQL trigger shapes are rewritten rather than refused:
 
 | MySQL | Becomes |
 | --- | --- |
@@ -115,30 +97,23 @@ Three MySQL trigger shapes have no direct SQLite spelling but are still expressi
 | `DECLARE v; SELECT e INTO v; ... v ...` | a correlated subquery in place of the variable |
 | `UPDATE t JOIN u ON c SET a` | `UPDATE t SET a FROM u WHERE c` |
 
-The conversion is attempted only after the ordinary path has failed, and is **all or nothing
-per trigger**: two `DECLARE`s, a reassigned variable, a nested `IF` and a two-table `UPDATE`
-are skipped rather than approximated.
-
-```txt
-phone.sql: trigger phone_instagram_increment_like_count rewritten for SQLite (IF/ELSE), as 2 triggers
-phone.sql: applied 111 statement(s) in 95ms, 5 trigger(s) rewritten, 1 trigger(s) skipped
-```
+A trigger with two `DECLARE`s, a reassigned variable, a nested `IF` or a two-table `UPDATE`
+is skipped rather than approximated.
 
 ## Skipped triggers
 
-A `CREATE TRIGGER` with no faithful SQLite form is the one statement tDB drops rather than
-failing the file over. Every table and row still arrives; what stops happening is whatever
-the trigger maintained, usually a cached counter. It is never silent — each is warned at
-import time naming the trigger and the construct, the file records `PARTIAL`, and
+A `CREATE TRIGGER` with no SQLite form is the one statement tDB drops rather than failing
+the file over. Every table and row still arrives; what stops happening is whatever the
+trigger maintained, usually a cached counter. Each is warned at import time, and
 `tdb sql status` lists them:
 
 ```txt
 PARTIAL   phone.sql  106 statement(s), 249ms - 6 trigger(s) skipped: ...
 ```
 
-A `PARTIAL` file counts as applied and is not re-run, because its `INSERT`s did land. To add
-the triggers, rewrite them as SQLite in a second `.sql` file and drop that in too; the
-counter they maintained is recomputable with an `UPDATE`.
+A `PARTIAL` file counts as applied and is not re-run. To add the triggers, rewrite them as
+SQLite in a second `.sql` file and drop that in too; the counter they maintained is
+recomputable with an `UPDATE`.
 
 <Callout type="note" title="Anything other than a trigger still fails the file">
   A `CREATE TABLE` or an `INSERT` that cannot be translated rolls the whole file back. Only
@@ -148,8 +123,8 @@ counter they maintained is recomputable with an `UPDATE`.
 ## This is not `Config.Migrations`
 
 `Config.Migrations` is PocketBase's own collection migration system, recording changes you
-make in the admin UI so they travel with the resource. The `sql/` folder is for other
-people's MySQL dumps. The two never interact.
+make in the admin UI. The `sql/` folder is for other people's MySQL dumps. The two never
+interact.
 
 ## Next steps
 

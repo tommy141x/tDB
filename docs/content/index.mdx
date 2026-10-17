@@ -6,7 +6,7 @@ group: "tDB"
 published: true
 ---
 
-![](/assets/tDB/banner.jpg)
+![tDB banner](/assets/tDB/banner.jpg)
 
 tDB answers every oxmysql export, translates MySQL SQL to SQLite as it goes, and runs an
 embedded [PocketBase](https://pocketbase.io/) underneath. No MySQL to install, no connection
@@ -28,13 +28,11 @@ local row = exports.oxmysql:single_async('SELECT * FROM players WHERE citizenid 
 
 ## What it is not
 
-- **Not a MySQL server.** SQL is translated to SQLite. What cannot be translated faithfully
-  is refused by name, never quietly changed — see
-  [MySQL compatibility](/docs/tDB/mysql-compatibility).
+- **Not a MySQL server.** SQL is translated to SQLite, and a few constructs are refused —
+  see [MySQL compatibility](/docs/tDB/mysql-compatibility).
 - **Not a drop-in for a database you already have data in.** tDB starts empty; moving an
   existing MySQL database across is a migration, not a swap.
-- **Not something to run next to oxmysql.** Two resources answering one export name is
-  ambiguous, and they point at two different databases.
+- **Not something to run next to oxmysql.** Remove oxmysql.
 
 ## Requirements
 
@@ -45,32 +43,6 @@ local row = exports.oxmysql:single_async('SELECT * FROM players WHERE citizenid 
 | FiveM artifact | New enough for Node 22, which the manifest declares as `node_version '22'` |
 | Framework | None |
 | OneSync | Not required |
-
-## Where to go next
-
-<DocCards>
-  <DocCard href="/docs/tDB/installation" title="Installation">
-    Install tDB, remove oxmysql, and start the server.
-  </DocCard>
-  <DocCard href="/docs/tDB/configuration" title="Configuration">
-    Every `config.lua` option, with defaults.
-  </DocCard>
-  <DocCard href="/docs/tDB/mysql-compatibility" title="MySQL compatibility">
-    What translates to SQLite, what's refused, and the known limits.
-  </DocCard>
-  <DocCard href="/docs/tDB/sql-imports" title="Importing .sql files">
-    Load a script's MySQL dump without a MySQL server.
-  </DocCard>
-  <DocCard href="/docs/tDB/pocketbase" title="Beyond SQL">
-    Records, collections, realtime and the admin UI.
-  </DocCard>
-  <DocCard href="/docs/tDB/api-reference" title="API reference">
-    Every export, command and event.
-  </DocCard>
-  <DocCard href="/docs/tDB/troubleshooting" title="Troubleshooting">
-    The symptoms tDB produces, and what to do about each.
-  </DocCard>
-</DocCards>
 
 ## Credits and licence
 

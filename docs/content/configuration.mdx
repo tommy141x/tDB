@@ -6,14 +6,12 @@ group: "tDB"
 published: true
 ---
 
-Everything lives in `config.lua`, in the resource folder. Each default below is both the
-shipped value and what tDB falls back to when a key is missing. Most servers change nothing.
+Everything lives in `config.lua`, in the resource folder. Most servers change nothing.
 
 ## Where a credential comes from
 
-Every credential-shaped key in `config.lua` ships blank and is meant to stay blank, so the
-file is safe to commit and safe to paste. Three places supply a real value, first one set
-wins:
+Every credential-shaped key in `config.lua` ships blank and should stay blank, so the file
+is safe to commit and safe to paste. Three places supply a real value, first one set wins:
 
 | | Where | Set it by |
 | --- | --- | --- |
@@ -25,12 +23,10 @@ The convar name is `tdb_`, then the option's path with dots as underscores, lowe
 `Config.Superuser.Password` is `tdb_superuser_password`, `Config.Advanced.S3.SecretKey` is
 `tdb_advanced_s3_secretkey`.
 
-If you already have a password, use the convar: nothing is written to disk, nothing can be
-committed by accident, and it overrides a password tDB generated earlier.
+A convar overrides a password tDB generated earlier.
 
-`config.local.lua` exists because a convar cannot be written to, and tDB must keep the
-password it generates somewhere or the admin login would change every restart. It uses
-`config.lua` syntax and needs only the keys you override:
+`config.local.lua` is where tDB stores the password it generates, and is also yours to
+edit. It uses `config.lua` syntax and needs only the keys you override:
 
 ```lua title="config.local.lua"
 Config = Config or {}
@@ -47,11 +43,11 @@ Config.Superuser = {
 | --- | --- | --- | --- |
 | `Config.ExposeAdmin` | boolean | `true` | Publish the admin UI at `/db/_/` on tLib's port. `false` keeps the database headless and unreachable from outside the machine |
 | `Config.ShowInHub` | boolean | `true` | List the admin UI in tLib's hub. Cosmetic only, [not a security control](#hiding-it-from-the-hub) |
-| `Config.Debug` | boolean | `false` | Print tDB's debug lines — the pid-file sweep, route probes, each backup, the settings asserted from `config.lua`. Off, a normal boot prints the startup box and nothing else |
-| `Config.AutoUpdate` | boolean | `false` | Run `pocketbase update` on start. It replaces the shipped, checksum-verified build with an unverified newer one, under a live database |
+| `Config.Debug` | boolean | `false` | Print tDB's debug lines. Off, a normal boot prints the startup box and nothing else |
+| `Config.AutoUpdate` | boolean | `false` | Run `pocketbase update` on start, replacing the shipped build with an unverified newer one under a live database |
 
-tDB has no port or address of its own. The panel answers on tLib's `tlib_http_port`
-(default 7777) and the address handed out is `tlib_http_public_url` — both in
+The panel answers on tLib's `tlib_http_port` (default 7777) and the address handed out is
+`tlib_http_public_url` — both in
 [tLib's convar reference](https://timmygstudios.com/docs/tLib/convars#http-router).
 
 ## Superuser
@@ -60,7 +56,7 @@ tDB has no port or address of its own. The panel answers on tLib's `tlib_http_po
 Config.Superuser = { Email = "", Password = "" }
 ```
 
-Blank here, always. To pin a login you already have:
+Leave these blank. To pin a login you already have:
 
 ```txt title="server.cfg"
 set tdb_superuser_email "admin@example.com"
@@ -121,9 +117,9 @@ on [Importing `.sql` files](/docs/tDB/sql-imports).
 Config.Migrations = { AutoApply = true, Dir = ".runtime/pb_migrations" }
 ```
 
-These are PocketBase's own collection migrations, not the `.sql` drop folder. PocketBase
-writes a migration file whenever you change a collection in the admin UI, so schema changes
-travel with the resource. Collection edits made in the UI are never reverted.
+PocketBase's own collection migrations, not the `.sql` drop folder. A migration file is
+written whenever you change a collection in the admin UI, so schema changes travel with the
+resource.
 
 ## Advanced
 
@@ -161,15 +157,12 @@ instance you already run, set both keys:
 Config.Advanced = { RemoteHost = "db.example.com", RemotePort = "8090" }
 ```
 
-In remote mode no local process starts, and tDB treats the instance as somebody else's:
-`Migrations`, `Backup` and `S3` are all ignored. tDB probes `/api/health` before reporting
-ready, and startup stops there on a failure rather than registering exports against a
-database that is not answering.
+In remote mode no local process starts, and `Migrations`, `Backup` and `S3` are ignored.
 
 ## Mail
 
 Mail is configured in the PocketBase admin UI, under **Settings → Mail**. There is no SMTP
-block in `config.lua`, and tDB leaves those settings alone.
+block in `config.lua`.
 
 ## S3
 
@@ -191,17 +184,11 @@ Config.Advanced = {
 | `Manage = true`, `Enabled = true` | `config.lua` is the truth. Every field is applied on every start, secrets included. An admin-UI edit is reported, then overwritten |
 | `Manage = true`, `Enabled = false` | `config.lua` is still the truth, and the truth is "off". Genuinely disables it |
 
-Collections, records, logs and on-demand backups are untouched either way.
-
 <Callout type="warning" title="Settings never sync back">
-  Settings only travel `config.lua` → PocketBase. `GET /api/settings` omits `s3.secret`
-  entirely — undefined, not masked — so reading them back would replace a real credential
-  with an empty string. For `Manage = true`, supply the keys as `tdb_advanced_s3_accesskey`
-  and `tdb_advanced_s3_secretkey` and leave the `config.lua` fields blank.
+  Settings only travel `config.lua` → PocketBase. For `Manage = true`, supply the keys as
+  `tdb_advanced_s3_accesskey` and `tdb_advanced_s3_secretkey` and leave the `config.lua`
+  fields blank.
 </Callout>
-
-Other fields in the block are still compared, so a rotated `SecretKey` is pushed even when
-bucket, region and endpoint are unchanged.
 
 ## Hiding it from the hub
 
@@ -210,8 +197,7 @@ Config.ShowInHub = false   -- default: true
 ```
 
 <Callout type="danger" title="This is not a security setting">
-  It removes the hub entry and nothing else. The mount is still registered and `/db` still
-  answers to anyone who requests it. Delisting hides the admin UI from you, not from them.
+  It removes the hub entry and nothing else. `/db` still answers to anyone who requests it.
   For genuine unreachability use `Config.ExposeAdmin = false`.
 </Callout>
 

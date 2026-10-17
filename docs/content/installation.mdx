@@ -20,7 +20,7 @@ Extract the [tLib release zip](https://github.com/tommy141x/tLib/releases) into
 ### Extract tDB
 
 Put the folder in `resources/` and keep the name `tDB`. A rename breaks the `@tDB/...`
-paths other resources use to find the library file.
+paths other resources use.
 
 <Callout type="warning" title="Transfer the zip, then unzip on the server">
   FTP clients in ASCII mode corrupt the PocketBase binary and the WebAssembly transpiler
@@ -39,9 +39,7 @@ ensure tDB
 
 ### Start the server
 
-tDB provisions PocketBase itself on first start: it creates the superuser, writes the
-credentials into `config.local.lua`, and authenticates. The PocketBase web installer never
-appears.
+On first start tDB creates a superuser and writes the credentials into `config.local.lua`.
 
 **Copy the superuser password out of that first startup box.** It is shown once, on the run
 that generates it, and redacted afterwards. It is also in `config.local.lua`, which is
@@ -57,20 +55,16 @@ says **Waiting for tLib's HTTP listener**, that is not an error — see
 
 ## Open tLib's port
 
-tDB does not serve the admin panel itself. It claims the `/db` route on tLib, which owns the
-server's single external port (`tlib_http_port`, default **7777**), so the panel answers at
-`http://<your server>:7777/db/_/` and is listed on tLib's hub.
-
-That port must be open on the host and forwarded to it — see
+The admin panel answers at `http://<your server>:7777/db/_/`, on tLib's `tlib_http_port`
+(default **7777**). That port must be open on the host and forwarded to it — see
 [open port 7777](https://timmygstudios.com/docs/tLib/installation#open-port-7777).
 PocketBase's own port is internal and is never the one to forward.
 
 ## Replace oxmysql
 
-1. Remove `oxmysql` from `server.cfg`. tDB publishes every one of its exports a second time
-   under the `oxmysql`, `mysql-async` and `ghmattimysql` names, so `exports.oxmysql:...`
-   resolves to tDB with no script edits. The manifest's `provide` lines satisfy a
-   `dependency 'oxmysql'` check; they do **not** route exports on their own.
+1. Remove `oxmysql` from `server.cfg`. tDB answers the `oxmysql`, `mysql-async` and
+   `ghmattimysql` export names too, so `exports.oxmysql:...` resolves to tDB with no script
+   edits.
 2. Change any file reference: `server_script '@oxmysql/lib/MySQL.lua'` becomes
    `server_script '@tDB/lib/MySQL.lua'`. Scripts that only call `exports.oxmysql` need no
    change.
@@ -78,8 +72,7 @@ PocketBase's own port is internal and is never the one to forward.
    see [Importing `.sql` files](/docs/tDB/sql-imports).
 
 <Callout type="danger" title="Don't run tDB and oxmysql together">
-  Two resources answering the same export name is ambiguous, and they point at two different
-  databases. Remove one.
+  They answer the same export name and point at two different databases. Remove one.
 </Callout>
 
 ## Working from a git clone
@@ -92,9 +85,7 @@ bun scripts/fetch-runtime.ts          # this platform
 bun scripts/fetch-runtime.ts --all    # both, for building a release
 ```
 
-The script downloads the pinned version into `.runtime/` and verifies it against
-PocketBase's published checksums, failing rather than warning on a mismatch. Change
-`PB_VERSION` at the top of that script to move to a different release.
+Change `PB_VERSION` at the top of that script to move to a different release.
 
 ## Next steps
 

@@ -21,10 +21,8 @@ published: true
 
 ## No such export when calling exports.tDB
 
-Every tDB export exists from its first frame, and a call arriving before the database is up
-parks until it answers — so this means the calling resource started *before* tDB, not that
-the database is still coming up. `@tDB/lib/MySQL.lua` waits for the database on every call
-but cannot help if tDB itself has not started.
+The calling resource started *before* tDB, not the database being slow — a call made before
+the database is up parks until it answers.
 
 1. Check `ensure tDB` sits above the calling resource in `server.cfg`. This is almost always
    it.
@@ -33,8 +31,7 @@ but cannot help if tDB itself has not started.
 
 ## Only superusers can perform this action, repeating
 
-The superuser credentials tDB is using no longer match the database. Token expiry is *not*
-the cause: tDB refreshes the token ahead of time, on a schedule read from the token itself.
+The superuser credentials tDB is using no longer match the database.
 
 1. Unset `tdb_superuser_email` and `tdb_superuser_password` in `server.cfg`, and delete the
    `Config.Superuser` block from `config.local.lua`.
@@ -45,8 +42,8 @@ Fixed when the startup box reports the client authenticated.
 
 ## The PocketBase setup screen opened in my browser
 
-The instance you reached is not the one tDB started — tDB always provisions its superuser
-headlessly. Find the second PocketBase bound to that port and stop it.
+The instance you reached is not the one tDB started. Find the second PocketBase bound to
+that port and stop it.
 
 ## Batch requests are not allowed
 
@@ -55,16 +52,13 @@ PocketBase's batch API is off by default. Enable it in **Admin → Settings → 
 
 ## An error naming a SQL construct
 
-That statement has no faithful SQLite translation, so tDB refused it rather than silently
-changing its meaning. Check the name against
+That statement has no SQLite translation. Check the name against
 [refused constructs](/docs/tDB/mysql-compatibility#refused-by-name), then rewrite it or move
 it to [raw SQL](/docs/tDB/pocketbase#raw-sql) and write SQLite directly.
 
 ## The admin UI is not reachable from outside
 
-Most often tLib's port is closed on the host or not forwarded in NAT. tLib cannot detect
-either: it binds the port and reports its listener up regardless of what can reach it.
-Script access is local and unaffected either way.
+Most often tLib's port is closed on the host or not forwarded in NAT.
 
 1. Open tLib's port — `tlib_http_port`, default 7777 — in the host firewall and forward it
    in NAT, following
@@ -77,16 +71,15 @@ Script access is local and unaffected either way.
 
 ## The startup box says Waiting for tLib's HTTP listener
 
-Not an error: tLib's router is not up yet, so there is nothing to mount on. tDB claims the
-mount as soon as tLib reports ready. If it never clears, tLib is failing to bind — check
-tLib's log and whether its port is taken.
+Not an error: tLib's router is not up yet. The admin URL appears as soon as tLib reports
+ready. If it never clears, tLib is failing to bind — check tLib's log and whether its port
+is taken.
 
 ## The startup box tells me to update tLib
 
-tLib did not report HTTP readiness, so tDB cannot know whether a mount would work and
-publishes no admin URL. Install tLib 1.0 or newer, start it before tDB, and read tLib's
-startup output for the listener error. Your `Config.ExposeAdmin` setting is untouched and
-the database is unaffected — only the admin UI is.
+tLib did not report HTTP readiness, so no admin URL is published. Install tLib 1.0 or
+newer, start it before tDB, and read tLib's startup output for the listener error. The
+database is unaffected — only the admin UI is.
 
 ## A script says a table does not exist
 

@@ -7,17 +7,13 @@ published: true
 ---
 
 Every name below is reachable as `exports.tDB:<name>`, `exports.oxmysql:<name>`,
-`exports['mysql-async']:<name>` and `exports.ghmattimysql:<name>`. The split into sections
-is documentation convention, not a code boundary.
+`exports['mysql-async']:<name>` and `exports.ghmattimysql:<name>`.
 
 Exports marked **async** return a promise: use the `_async` name, or `Citizen.Await`.
 
-<Callout type="info" title="Every export exists from tDB's first frame">
-  They are registered at resource start, before PocketBase is up, exactly as oxmysql's are.
-  A call landing before the database is ready parks until it is. You only see FiveM's "no
-  such export" if the calling resource is `ensure`d **above** tDB. In the narrow window
-  after the adapters wire up but before the superuser session exists, one throws
-  `PocketBase client not ready yet`. See [Readiness](#readiness).
+<Callout type="info" title="A call before the database is up parks until it answers">
+  You only see FiveM's "no such export" if the calling resource is `ensure`d **above** tDB.
+  See [Readiness](#readiness).
 </Callout>
 
 ## Readiness
@@ -33,7 +29,7 @@ Exports marked **async** return a promise: use the `_async` name, or `Citizen.Aw
 ## oxmysql exports
 
 Each base name is registered three times: `name`, `name_async` and `nameSync`. **All three
-behave identically** — the suffix is stripped and there is no separate synchronous path.
+behave identically.**
 
 Accepted call shapes: `(sql)`, `(sql, params)`, `(sql, callback)`, `(sql, params, callback)`.
 With a callback the export returns nothing and invokes it; without one it returns a promise.
@@ -51,10 +47,6 @@ With a callback the export returns nothing and invokes it; without one it return
 | `rawExecute` | as `prepare`, without the unwrapping |
 | `transaction` | true, or **false** if it rolled back. Never throws |
 | `store` | the query string unchanged. Synchronous, and works before readiness |
-
-A rows-returning export run against a write statement returns an empty result rather than
-erroring, and a write-returning export against a `SELECT` runs the select and returns nil.
-This mirrors oxmysql.
 
 ### mysql-async aliases
 
@@ -75,8 +67,7 @@ This mirrors oxmysql.
 
 ### Query cache
 
-Off by default. When on, row queries are cached and any write through tDB clears the cache,
-so a cached read cannot outlive the data it described.
+Off by default. When on, row queries are cached and any write through tDB clears the cache.
 
 | Export | Parameters | Returns |
 | --- | --- | --- |
@@ -88,9 +79,8 @@ so a cached read cannot outlive the data it described.
 ## `lib/MySQL.lua`
 
 Add `server_script '@tDB/lib/MySQL.lua'` to your `fxmanifest.lua`. Every entry has an
-`.await` form and a callable callback form, and waits for the database before dispatching —
-so a script querying during its own startup gets rows rather than "no such export". Once
-the database is up the wait is a single `isReady` check.
+`.await` form and a callable callback form, and waits for the database before dispatching,
+so a script querying during its own startup gets rows.
 
 | Entry | Returns |
 | --- | --- |
@@ -137,9 +127,8 @@ forms. Also `MySQL.ready`, `MySQL.isReady`, `MySQL.awaitConnection` and `MySQL.s
 | `countRecords` | `collection`, `filter?`, `params?` | number | yes |
 | `filter` | `rawFilter`, `params?` | escaped filter string | no |
 
-`create`, `update`, `delete`, `getOne`, `getList`, `getFullList` and `getFirstListItem`
-check whether their first argument looks like SQL. That is how the shared name `update`
-reaches the oxmysql path when you pass a query.
+Pass SQL as the first argument to `update` or `delete` and the call goes down the oxmysql
+path instead.
 
 ## Collections
 
