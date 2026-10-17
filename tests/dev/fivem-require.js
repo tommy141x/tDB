@@ -44,13 +44,15 @@ const SERVER_SCRIPTS = manifestServerScripts();
 const originalResolve = Module._resolveFilename;
 Module._resolveFilename = function (request, parent, ...rest) {
   const from = parent && parent.filename;
-  const rootBased =
-    // A manifest script: resolves from the resource root.
-    (from && SERVER_SCRIPTS.has(path.resolve(from))) ||
-    // The harness itself, standing in for the manifest.
-    (from && path.dirname(path.resolve(from)) === path.join(ROOT, ".dev"));
+  const rootBased = Boolean(from) && SERVER_SCRIPTS.has(path.resolve(from));
 
-  if (rootBased && /^\.\/(utils|bin|adapters)\//.test(request)) {
+  // Every relative specifier, not a list of directory names. The list used to
+  // read `utils|bin|adapters`, which were the top-level directories before the
+  // sources moved under `server/` -- after the move nothing matched, so this
+  // rewrite silently did nothing at all. A name list has to be re-edited after
+  // every move and gives no sign when it has not been; "from the root" is the
+  // actual FiveM rule and cannot go stale.
+  if (rootBased && request.startsWith("./")) {
     return originalResolve.call(
       this,
       path.join(ROOT, request.slice(2)),

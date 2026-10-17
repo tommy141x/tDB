@@ -56,7 +56,7 @@ function findTestInstances(): Found[] {
   return (result.stdout || "")
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.includes("pocketbase-linux") || line.includes("pocketbase-darwin"))
+    .filter((line) => line.includes("pocketbase-linux"))
     .map((line) => {
       const at = line.indexOf(" ");
       return { pid: Number(line.slice(0, at)), commandLine: line.slice(at + 1) };

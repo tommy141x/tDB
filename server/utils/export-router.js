@@ -2,7 +2,6 @@
 // it. Split out of client.js so the pre-readiness behaviour can be tested
 // without starting the resource: no FiveM globals here, everything injected.
 module.exports = (function () {
-  // Routes each export call to the first adapter that claims it, by priority.
   class ExportRouter {
     constructor(exportsFn, whenReady, logger, onFn) {
       this.adapters = [];
@@ -20,10 +19,10 @@ module.exports = (function () {
     }
 
     registerAdapter(adapter, priority = 100) {
-      if (!adapter.canHandle || typeof adapter.canHandle !== "function") {
+      if (typeof adapter.canHandle !== "function") {
         throw new Error("Adapter must implement canHandle(exportName, args) method");
       }
-      if (!adapter.handle || typeof adapter.handle !== "function") {
+      if (typeof adapter.handle !== "function") {
         throw new Error("Adapter must implement handle(exportName, args) method");
       }
       if (!adapter.name) {

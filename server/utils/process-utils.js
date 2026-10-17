@@ -154,11 +154,7 @@ module.exports = (function () {
         lastError = error;
 
         if (attempt < maxAttempts) {
-          const delay = Math.min(
-            baseDelay * Math.pow(2, attempt - 1),
-            maxDelay,
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await sleep(Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay));
         }
       }
     }

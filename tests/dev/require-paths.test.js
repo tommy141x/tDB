@@ -50,7 +50,7 @@ function manifestServerScripts() {
   return scripts;
 }
 
-// The resource's own sources. bin/ and server/vendor are third-party bundles
+// The resource's own sources. server/vendor is a set of third-party bundles
 // shipped as published; their internal requires are not ours to police.
 const SOURCE_DIRS = ["server/utils", "server/adapters"];
 
@@ -133,12 +133,16 @@ for (const file of sources) {
 
   const rel = path.relative(ROOT, file).replace(/\\/g, "/");
   const source = stripComments(fs.readFileSync(file, "utf8"));
-  const rootBased = [...source.matchAll(/require\(\s*["'](\.\/(?:utils|bin|adapters)\/[^"']*)["']\s*\)/g)]
+  // `./server/...`, because that is where the sources live. This named
+  // `utils|bin|adapters` -- the top-level directories from before the move
+  // under `server/` -- so after the move it matched nothing and passed for
+  // every file without ever testing anything.
+  const rootBased = [...source.matchAll(/require\(\s*["'](\.\/server\/[^"']*)["']\s*\)/g)]
     .map((m) => m[1]);
 
   ok(
     rootBased.length === 0,
-    `${rel} does not require "./utils/..." style paths`,
+    `${rel} does not require "./server/..." style paths`,
     rootBased.join(", "),
   );
 }
