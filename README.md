@@ -42,7 +42,6 @@ Full instructions, including the one case `provide` cannot cover, are in
 - [Configuration](https://timmygstudios.com/docs/tDB/configuration)
 - [MySQL compatibility](https://timmygstudios.com/docs/tDB/mysql-compatibility)
 - [Importing `.sql` files](https://timmygstudios.com/docs/tDB/sql-imports)
-- [Beyond SQL](https://timmygstudios.com/docs/tDB/pocketbase)
 - [API reference](https://timmygstudios.com/docs/tDB/api-reference)
 - [Troubleshooting](https://timmygstudios.com/docs/tDB/troubleshooting)
 

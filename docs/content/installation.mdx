@@ -49,7 +49,7 @@ gitignored and must stay that way. To pin your own login instead, set
 
 You are done when the startup box reports the database ready and prints an admin URL. If it
 says **Waiting for tLib's HTTP listener**, that is not an error — see
-[the admin UI](/docs/tDB/pocketbase#the-admin-ui).
+[the admin UI](/docs/tDB/configuration#the-admin-ui).
 
 </Steps>
 
@@ -86,9 +86,3 @@ bun scripts/fetch-runtime.ts --all    # both, for building a release
 ```
 
 Change `PB_VERSION` at the top of that script to move to a different release.
-
-## Next steps
-
-- The options worth knowing about: [Configuration](/docs/tDB/configuration)
-- Before you port a large schema: [MySQL compatibility](/docs/tDB/mysql-compatibility)
-- The startup box is not green: [Troubleshooting](/docs/tDB/troubleshooting)

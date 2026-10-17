@@ -46,9 +46,19 @@ Config.Superuser = {
 | `Config.Debug` | boolean | `false` | Print tDB's debug lines. Off, a normal boot prints the startup box and nothing else |
 | `Config.AutoUpdate` | boolean | `false` | Run `pocketbase update` on start, replacing the shipped build with an unverified newer one under a live database |
 
+### The admin UI
+
+On by default and needs no configuration. It is at `http://<your server>:7777/db/`, the
+panel itself at `/db/_/`; sign in with `Config.Superuser`. For a headless database, set
+`Config.ExposeAdmin = false`.
+
 The panel answers on tLib's `tlib_http_port` (default 7777) and the address handed out is
 `tlib_http_public_url` — both in
-[tLib's convar reference](https://timmygstudios.com/docs/tLib/convars#http-router).
+[tLib's convar reference](https://timmygstudios.com/docs/tLib/convars#http-router). That is
+the only port you ever set: PocketBase's own is internal, so do not open or forward it.
+
+If the startup box says **Waiting for tLib's HTTP listener**, tLib's router is not up yet
+and tDB publishes the admin URL as soon as it is. The database itself works throughout.
 
 ## Superuser
 
@@ -200,9 +210,3 @@ Config.ShowInHub = false   -- default: true
   It removes the hub entry and nothing else. `/db` still answers to anyone who requests it.
   For genuine unreachability use `Config.ExposeAdmin = false`.
 </Callout>
-
-## Next steps
-
-- Loading a script's MySQL dump: [Importing `.sql` files](/docs/tDB/sql-imports)
-- Records, collections, realtime and the admin UI: [Beyond SQL](/docs/tDB/pocketbase)
-- A setting is not doing what this page says: [Troubleshooting](/docs/tDB/troubleshooting)

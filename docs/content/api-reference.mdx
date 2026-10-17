@@ -1,7 +1,7 @@
 ---
 title: "API reference"
 description: "Every tDB export, the oxmysql compatibility surface, the MySQL.lua library, console commands and events."
-order: 6
+order: 5
 group: "tDB"
 published: true
 ---
@@ -25,6 +25,15 @@ Exports marked **async** return a promise: use the `_async` name, or `Citizen.Aw
 | `isClientAuthenticated` | none | boolean, live rather than the boot result | no |
 | `getUrl` | none | string base URL, or nil before ready | no |
 | `awaitConnection` | none | true | yes |
+
+A record or collection call made too early can still throw `PocketBase client not ready yet`.
+Wrap the first one:
+
+```lua
+exports.tDB:onReady(function()
+    local players = exports.tDB:getFullList('players')
+end)
+```
 
 ## oxmysql exports
 
@@ -130,6 +139,15 @@ forms. Also `MySQL.ready`, `MySQL.isReady`, `MySQL.awaitConnection` and `MySQL.s
 Pass SQL as the first argument to `update` or `delete` and the call goes down the oxmysql
 path instead.
 
+Build every filter with `filter()`, so values are bound rather than interpolated into the
+string:
+
+```lua
+local f    = exports.tDB:filter('score > {:min} && banned = {:banned}', { min = 100, banned = false })
+local top  = exports.tDB:getFullList('players', { filter = f })
+local one  = exports.tDB:getFirstListItem('players', f)
+```
+
 ## Collections
 
 | Export | Parameters | Returns | Async |
@@ -144,6 +162,18 @@ path instead.
 | `getCollectionScaffolds` | `options?` | scaffold map | yes |
 | `createMigrationHelper` | none | table of `createCollection`, `updateCollection`, `deleteCollection` closures | no |
 
+```lua
+exports.tDB:createCollection({
+    name = 'players',
+    type = 'base',
+    fields = {
+        { name = 'username', type = 'text', required = true },
+        { name = 'score',    type = 'number' },
+        { name = 'banned',   type = 'bool' },
+    },
+})
+```
+
 ## Realtime
 
 | Export | Parameters | Returns | Async |
@@ -157,6 +187,18 @@ path instead.
 | `sendRealtimeMessage` | `topic`, `data` | number of clients sent to | yes |
 | `getRealtimeClients` | none | array of `{ id, authenticated, authId }` | yes |
 
+Subscribe, then handle the event tDB raises. The name is
+`pocketbase:<collection>:<topic>` for a collection and `pocketbase:topic:<topic>` for a
+custom one:
+
+```lua
+exports.tDB:subscribe('bans', '*')
+
+AddEventHandler('pocketbase:bans:*', function(data)
+    if data.action == 'create' then print(data.record.id) end
+end)
+```
+
 ## Transactions and batches
 
 | Export | Parameters | Returns | Async |
@@ -169,9 +211,14 @@ path instead.
 | `batchUpsert` | `batch`, `collection`, `data`, `options?` | the handle | no |
 | `batchSend` | `batch` | batch result array | yes |
 
+`runTransaction` runs inside a real database transaction and needs no setting. The `batch*`
+exports are PocketBase's batch API and must be enabled in **Admin → Settings → Batch API**
+first.
+
 ## Raw SQL
 
-`{:name}` placeholders, no MySQL translation. All async.
+The same database the oxmysql exports use, with `{:name}` placeholders and no MySQL
+translation — write SQLite here. All async.
 
 | Export | Parameters | Returns |
 | --- | --- | --- |
@@ -180,6 +227,17 @@ path instead.
 | `sqlScalar` | `sql`, `params?`, `columnName?` | the value, or nil |
 | `sqlExecute` | `sql`, `params?` | insert id only |
 | `sqlTransaction` | `queries`: `{ sql, params?, expect? }` | true; throws and rolls back the whole batch on failure |
+
+Integers arrive as numbers and `NULL` arrives as `nil`, not an empty string.
+
+```lua
+local row = exports.tDB:sqlSingle('SELECT * FROM players WHERE id = {:id}', { id = 1 })
+
+exports.tDB:sqlTransaction({
+    { sql = 'UPDATE accounts SET balance = balance - {:n} WHERE id = {:a}', params = { n = 100, a = 'a' } },
+    { sql = 'UPDATE accounts SET balance = balance + {:n} WHERE id = {:b}', params = { n = 100, b = 'b' } },
+})
+```
 
 ## Auth
 
@@ -210,6 +268,8 @@ All async. Every one takes the auth collection name first.
 | `getFileUrl` | `record`, `filename`, `options?` | URL string | no |
 | `getFileToken` | `options?` | token string | yes |
 | `sendEmail` | `to` (string or array), `subject`, `html`, `text?` | true | yes |
+
+`sendEmail` needs mail configured in the admin UI — see [Mail](/docs/tDB/configuration#mail).
 
 ## Commands
 
@@ -251,9 +311,3 @@ All server-local. Use `AddEventHandler`.
 | Node | `node_version '22'` |
 | Provides | `oxmysql`, `mysql-async`, `ghmattimysql` |
 | Platforms | `windows_amd64`, `linux_amd64` |
-
-## Next steps
-
-- The shapes you will actually write: [Beyond SQL](/docs/tDB/pocketbase)
-- What translates from MySQL and what does not: [MySQL compatibility](/docs/tDB/mysql-compatibility)
-- An export is erroring or never answers: [Troubleshooting](/docs/tDB/troubleshooting)

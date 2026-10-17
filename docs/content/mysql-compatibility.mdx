@@ -68,7 +68,7 @@ These raise rather than being approximated:
 `GROUP_CONCAT ... SEPARATOR`, `INFORMATION_SCHEMA`, `ALTER TABLE ... DROP FOREIGN KEY`,
 `DECLARE`, `SELECT ... INTO`, `UPDATE ... JOIN`
 
-Rewrite the statement, or move it to [raw SQL](/docs/tDB/pocketbase#raw-sql) and write
+Rewrite the statement, or move it to [raw SQL](/docs/tDB/api-reference#raw-sql) and write
 SQLite directly. Replacements for the ones that come up most:
 
 | Refused | Write instead |
@@ -89,9 +89,3 @@ Most of these maintain a counter, so check your rewrite's numbers against the or
 - **`RETURNING` is not supported** through the query path.
 - **SQLite type affinity is looser than MySQL's.** A column declared `INT` accepts a string,
   so statements relying on MySQL rejecting bad input will not be rejected here.
-
-## Next steps
-
-- Loading a script's dump: [Importing `.sql` files](/docs/tDB/sql-imports)
-- The exports themselves: [API reference](/docs/tDB/api-reference)
-- A statement was refused by name: [Troubleshooting](/docs/tDB/troubleshooting#an-error-naming-a-sql-construct)
