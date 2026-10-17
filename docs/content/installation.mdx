@@ -53,12 +53,17 @@ says **Waiting for tLib's HTTP listener**, that is not an error — see
 
 </Steps>
 
-## Open tLib's port
+## The admin panel in a browser, if you want it
 
-The admin panel answers at `http://<your server>:7777/db/_/`, on tLib's `tlib_http_port`
-(default **7777**). That port must be open on the host and forwarded to it — see
-[open port 7777](https://timmygstudios.com/docs/tLib/installation#open-port-7777).
-PocketBase's own port is internal and is never the one to forward.
+**Optional. tDB is fully working without it** — queries, migrations and every export run
+over the server, and no port is involved.
+
+What a port buys is reaching the admin panel from a browser, at
+`http://<your server>:7777/db/_/`, on tLib's `tlib_http_port` (default **7777**). Open and
+forward that port if you want that; see
+[opening tLib's port](https://timmygstudios.com/docs/tLib/installation#opening-the-port-if-you-want-browser-access).
+Leave it closed and the database is unaffected. PocketBase's own port is internal and is
+never the one to forward.
 
 ## Replace oxmysql
 
