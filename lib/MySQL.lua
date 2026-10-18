@@ -472,4 +472,8 @@ setmetatable(MySQL, {
     end,
 })
 
-print('[tDB] MySQL compatibility library loaded')
+-- Deliberately silent. This file is loaded into the VM of every resource that
+-- swapped `@oxmysql/lib/MySQL.lua` for it, so a load line here prints once per
+-- consuming resource; oxmysql's own copy prints nothing. Config.Debug is not
+-- reachable from here either -- config.lua is parsed by config-loader.js in
+-- tDB's own VM, not this one.

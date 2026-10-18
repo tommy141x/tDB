@@ -475,7 +475,9 @@ module.exports = (function () {
               origins.push(entry);
             }
             rewrites.push(`${name} (${rewritten.shapes.join(" + ")})`);
-            logger.info(
+            // DEBUG: one line per trigger in the file, and the per-file summary
+            // at the end of applyFile already reports how many were rewritten.
+            logger.debug(
               `${filename}: trigger ${name} rewritten for SQLite ` +
                 `(${rewritten.shapes.join(" + ")})` +
                 (rewritten.statements.length > 1
@@ -647,7 +649,7 @@ module.exports = (function () {
           const outcome = await ddlSession.feed(marker.conditional, ddlDeps);
           if (outcome.ran.length) {
             rewrites.push(`conditional DDL (${outcome.ran.length} statement(s))`);
-            logger.info(
+            logger.debug(
               `${filename}: conditional DDL ran ${outcome.ran.length} statement(s)` +
                 (outcome.note ? ` - ${outcome.note}` : "")
             );
@@ -686,7 +688,7 @@ module.exports = (function () {
           });
         }
 
-        logger.info(
+        logger.debug(
           `${filename}: ${rebuild.table} rebuilt for ${rebuild.actions.length} ` +
             `ALTER action(s), ${planned.length} statement(s)`
         );

@@ -1735,7 +1735,7 @@ async function startPocketBase() {
 }
 
 async function connectToRemotePocketBase() {
-  logger.info("Connecting to remote PocketBase instance...");
+  logger.debug("Connecting to remote PocketBase instance...");
 
   const remoteUrl = buildSmartUrl(config.Advanced.RemoteHost, config.Advanced.RemotePort);
 
@@ -1788,7 +1788,7 @@ async function connectToRemotePocketBase() {
 
 async function stopPocketBase() {
   if (startupStatus.isRemoteMode) {
-    logger.info("Disconnecting from remote PocketBase...");
+    logger.debug("Disconnecting from remote PocketBase...");
     return;
   }
 
@@ -1799,7 +1799,7 @@ async function stopPocketBase() {
 
   if (!pocketbasePid || pocketbaseExited) return;
 
-  logger.info("Shutting down PocketBase...");
+  logger.debug("Shutting down PocketBase...");
 
   // The pump is stopped first: with the process going away there is nothing
   // left to read, and these paths (SIGINT/SIGTERM on FXServer, beforeExit) are
