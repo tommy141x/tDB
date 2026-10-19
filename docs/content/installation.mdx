@@ -59,11 +59,26 @@ says **Waiting for tLib's HTTP listener**, that is not an error — see
 over the server, and no port is involved.
 
 What a port buys is reaching the admin panel from a browser, at
-`http://<your server>:7777/db/_/`, on tLib's `tlib_http_port` (default **7777**). Open and
-forward that port if you want that; see
-[opening tLib's port](https://timmygstudios.com/docs/tLib/installation#opening-the-port-if-you-want-browser-access).
-Leave it closed and the database is unaffected. PocketBase's own port is internal and is
-never the one to forward.
+`http://<your server>:7777/db/_/`. Leave it closed and the database is unaffected.
+PocketBase's own port is internal and is never the one to forward.
+
+Both settings are **tLib's**, not tDB's — there is no port in tDB's config:
+
+```txt title="server.cfg — above ensure tLib"
+set tlib_http_port 7777
+set tlib_http_public_url "http://your-server-address:7777"
+```
+
+`tlib_http_port` is the port to open and forward on your host. `tlib_http_public_url`
+is the address tLib tells browsers to use, and it is the one worth setting deliberately:
+left unset, tLib detects your public IP, which is wrong whenever players reach the panel
+by hostname or through a proxy. The symptom is not an obvious one — the panel loads and
+then requests from it are refused — so if you reach the panel by anything other than a
+bare IP, set it to exactly the scheme, host and port you type in the browser.
+
+tLib prints the address it settled on at boot and says whether it was detected, so check
+that line rather than guessing. The full reference is
+[tLib's convars](https://timmygstudios.com/docs/tLib/convars#web).
 
 ## Replace oxmysql
 
@@ -91,3 +106,23 @@ bun scripts/fetch-runtime.ts --all    # both, for building a release
 ```
 
 Change `PB_VERSION` at the top of that script to move to a different release.
+
+## Optional: help us fix tDB
+
+tDB does not report its own faults to us. When it throws on your server the
+error sits in your console, and unless someone opens a ticket we never learn it
+happened — which means the bugs nobody reports are the ones that stay.
+
+One line opts in, in `server.cfg` above `ensure tLib`:
+
+```txt title="server.cfg"
+set tlib_telemetry 1
+```
+
+That sends errors, warnings, renderer crashes and slow-operation outliers from
+our own code. **No IP, no licence key, no server name, no player names or
+identifiers**, and `<resource>_diag` output is never included. `tlib_telemetry_status`
+in the console shows what is on and what decided it.
+
+It is off unless you set it, nothing is gated behind it, and
+[Diagnostics](/docs/tLib/telemetry) is the full account of what is and is not sent.
