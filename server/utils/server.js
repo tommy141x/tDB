@@ -1825,12 +1825,58 @@ async function stopPocketBase() {
   pidGuard.clear(resourcePath);
 }
 
-process.on("SIGINT", () => {
-  stopPocketBase().then(() => process.exit(0));
-});
-process.on("SIGTERM", () => {
-  stopPocketBase().then(() => process.exit(0));
-});
+// ⛔ THESE HANDLERS MUST ALWAYS LET THE HOST DIE. They used to be
+//
+//     process.on("SIGTERM", () => { stopPocketBase().then(() => process.exit(0)); });
+//
+// and that made FXServer unkillable, which took txAdmin's restart with it.
+//
+// In Node, registering a listener for SIGTERM REPLACES the default disposition
+// for the whole process -- and this runs inside FXServer's runtime, so the
+// process in question is the game server, not tDB. Once the listener existed,
+// a SIGTERM no longer terminated anything; it just called this function. If
+// `stopPocketBase()` did not settle -- or if `process.exit` does not reach the
+// host from a resource sandbox -- nothing else ever ended the process.
+//
+// Measured on the test server 2026-10-19: SIGTERM to the game server, then
+// five minutes with the process still alive, still answering players.json, and
+// not one line logged. txAdmin stops a server with SIGTERM, so its restart
+// spawned a replacement that could not bind 30120, read the bind failure as
+// "server process close detected", and respawned forever at a growing backoff.
+// A container restart always worked, because that ends in SIGKILL.
+//
+// The shape below is the standard one: do the cleanup, then REMOVE the listener
+// and re-raise the same signal so the default disposition applies and the host
+// dies exactly as it would have if tDB had never been loaded. Cleanup is
+// best-effort and must never be able to hold the process open -- a shutdown
+// that leaks one PocketBase is recoverable, a server that cannot be restarted
+// is not.
+let hostSignalHandled = false;
+
+function onHostSignal(signal) {
+  // A second SIGTERM arrives if an operator or supervisor gets impatient. Only
+  // the first does cleanup; the rest fall straight through to the default.
+  if (hostSignalHandled) return;
+  hostSignalHandled = true;
+
+  try {
+    // Deliberately NOT awaited. The part that matters -- asking tLib to unserve
+    // PocketBase -- is a synchronous export call inside stopPocketBase, so it
+    // has already been issued by the time this returns. Awaiting a promise here
+    // is what the old code did, and it is the thing that hung.
+    stopPocketBase();
+  } catch (err) {
+    logger.warn(`PocketBase shutdown on ${signal} failed: ${err.message}`);
+  }
+
+  process.removeAllListeners(signal);
+  process.kill(process.pid, signal);
+}
+
+process.on("SIGINT", () => onHostSignal("SIGINT"));
+process.on("SIGTERM", () => onHostSignal("SIGTERM"));
+// `beforeExit` is a different case and stays as it was: it fires on a normal
+// drain, not on a signal, and nothing is waiting on the process to die.
 process.on("beforeExit", () => {
   stopPocketBase();
 });

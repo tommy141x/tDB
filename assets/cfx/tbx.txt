@@ -1,0 +1,65 @@
+**[Store page](https://timmygstudios.com/software/tdb)** · **[Documentation](https://timmygstudios.com/docs/tDB)** · [Discord](https://timmygstudios.com/discord)
+
+---
+
+# tDB — a database without a database server
+
+tDB is a drop-in replacement for oxmysql. It answers every oxmysql export with the same return values, translates MySQL SQL to SQLite as it goes, and runs an embedded [PocketBase](https://pocketbase.io/) underneath. There is no MySQL server to install, no connection string to configure, and nothing to keep running alongside your server.
+
+Existing scripts do not change. `exports.oxmysql:single_async(...)` keeps working, because tDB declares `provide 'oxmysql'` and resolves those calls itself.
+
+**Free and open source. MIT licensed, full source included, no escrow.**
+
+**[Get tDB — free, MIT](https://timmygstudios.com/software/tdb)** · [Documentation](https://timmygstudios.com/docs/tDB) · [Discord](https://timmygstudios.com/discord)
+
+---
+
+**0** database servers to install · **3** resource names provided: `oxmysql`, `mysql-async`, `ghmattimysql` · **MIT** licence, source included
+
+---
+
+## Highlights
+
+- **Drop-in for oxmysql** — the same exports and the same return values, so existing resources need no edits
+- **No MySQL to run** — an embedded PocketBase replaces the database server entirely, and provisions itself on first start
+- **MySQL SQL translated to SQLite** — handled by the Polyglot SQL transpiler; what cannot be translated is refused by name rather than quietly changed
+- **Import existing `.sql` dumps** — load a script's MySQL dump without ever standing up a MySQL server
+- **More than SQL when you want it** — PocketBase collections, realtime subscriptions, file storage and an admin UI are all there underneath
+- **Open source** — MIT licensed with the full source in the repository
+
+---
+
+## What it is not
+
+- **Not a MySQL server.** SQL is translated to SQLite. Most of what FiveM scripts write translates cleanly; the rest is refused rather than silently altered
+- **Not a drop-in for a database you already have data in.** tDB starts empty — moving an existing MySQL database across is a migration, not a swap
+- **Not something to run next to oxmysql.** Two resources answering the same export name is ambiguous, and they point at two different databases
+
+---
+
+## Requirements
+
+| | |
+|---|---|
+| Dependencies | [tLib](https://timmygstudios.com/docs/tLib) v1.0+ (free). tDB declares `tlib_min_version '1.0'` and will not start without it |
+| Platform | Windows or Linux, x86-64. The bundled PocketBase builds are `windows_amd64` and `linux_amd64`; there is no ARM build |
+| Artifact | New enough to provide Node 22, which the manifest declares as `node_version '22'` |
+| Frameworks | None required, and OneSync is not required |
+
+---
+
+**[Get tDB — free, MIT](https://timmygstudios.com/software/tdb)** — full source included, no escrow.
+
+[Documentation](https://timmygstudios.com/docs/tDB) · [Discord](https://timmygstudios.com/discord)
+
+Installation, configuration, the MySQL compatibility list, SQL imports, the API and troubleshooting are all public.
+
+---
+
+|  |  |
+|---|---|
+| Code is accessible | Yes — MIT, full source, no escrow |
+| Subscription-based | No |
+| Lines (approximately) | 14,800 |
+| Requirements | tLib v1.0+, a Windows or Linux x86-64 host, and an artifact providing Node 22 |
+| Support | Yes |
