@@ -228,5 +228,24 @@ jobs:
             echo "No documentation changes to sync."
           else
             git commit -m "docs($SLUG): sync from source ($ACTOR@${SHA:0:7})"
-            git push
+
+            # RETRY, BECAUSE SIBLING SYNCS RACE. Every resource pushes its docs
+            # into the same tWeb repo, and a bare `git push` loses whenever two
+            # land together. Measured 2026-10-20: tUnit pushed at 22:43:01,
+            # tAFK's run started at :11 against that base, tDetector pushed at
+            # :20, and tAFK's push was rejected at :22. Its docs were silently
+            # dropped -- the only trace was a red run in tAFK, which nobody
+            # watches, while tWeb looked fine and served a stale page.
+            #
+            # Rebase rather than merge: these commits only ever touch this
+            # resource's own directories, so a conflict here is not a real
+            # conflict, and a merge commit per collision would be noise.
+            for attempt in 1 2 3 4 5; do
+              if git push; then exit 0; fi
+              echo "push rejected (attempt $attempt) -- rebasing onto the winner and retrying"
+              git pull --rebase --quiet || exit 1
+              sleep $((attempt * 3))
+            done
+            echo "::error::Could not push docs after 5 attempts."
+            exit 1
           fi
