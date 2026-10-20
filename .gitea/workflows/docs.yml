@@ -67,6 +67,51 @@ jobs:
           fi
           echo "Synced $actual page(s)."
 
+          # ── The provenance stamp ──────────────────────────────────────────────────
+          #
+          # Records which commit of THIS repo the pages just copied came from, plus a
+          # sha256 per page. tWeb's scripts/check-docs-provenance.ts holds the full
+          # argument; the short version is that tWeb could not otherwise tell a synced
+          # page from a hand-edited one, and could not date a tree at all.
+          #
+          # ⚠️ NOT OPTIONAL, and omitting it does not merely skip a check. tWeb's gate
+          # EXITS 1 when a page's hash does not match its stamp, so a sync that writes
+          # pages without re-stamping turns tWeb's CI red and blocks its deploy for
+          # every product, not just this one. Measured 2026-10-20: tUnit and tChirp had
+          # current pages against stamps from 2026-10-17, and tWeb had been deploying
+          # by hand because of it. tRadar's docs.yml is the worked example.
+          #
+          # ⚠️ NO WALL-CLOCK FIELD, on purpose. A run timestamp would make the stamp
+          # differ on every run, so every run would commit to tWeb and trigger its CI
+          # and a deploy. Keyed on this repo's commit, the stamp changes only when the
+          # docs do, so a re-run over an unchanged tree stays the no-op it should be.
+          #
+          # ⚠️ NOT under tWeb/src/content/docs/. content-collections globs that for
+          # *.mdx, and the copy above replaces the directory wholesale.
+          mkdir -p tWeb/src/content/docs-provenance
+          {
+            printf '{\n'
+            printf '  "product": "%s",\n' "$SLUG"
+            printf '  "source": {\n'
+            printf '    "repo": "TIMMYG-Studios/tDB",\n'
+            printf '    "commit": "%s",\n' "$(git rev-parse HEAD)"
+            printf '    "committedAt": "%s"\n' "$(git log -1 --date=iso-strict --format=%cd)"
+            printf '  },\n'
+            printf '  "workflow": ".gitea/workflows/docs.yml",\n'
+            printf '  "pages": {\n'
+            # Trailing comma on all but the last entry, which JSON forbids. Hashed from
+            # the COPIES in tWeb rather than from docs/content, so the stamp describes
+            # the bytes that actually landed.
+            first=1
+            for page in "$DEST"/*.mdx; do
+              [ "$first" -eq 1 ] || printf ',\n'
+              first=0
+              printf '    "%s": "%s"' "$(basename "$page")" "$(sha256sum "$page" | cut -d' ' -f1)"
+            done
+            printf '\n  }\n}\n'
+          } >"tWeb/src/content/docs-provenance/$SLUG.json"
+          echo "Stamped src/content/docs-provenance/$SLUG.json"
+
       # Media cannot be replaced wholesale: public/assets/$SLUG is shared with the
       # marketing page. The manifest records what this sync published last time, so
       # only files deleted here are removed; anything else is left alone.
@@ -217,6 +262,7 @@ jobs:
           git config user.email "actions@gitea.local"
 
           git add "src/content/docs/$SLUG/" "public/assets/$SLUG/" ".docs-sync/$SLUG-media.txt"
+          git add "src/content/docs-provenance/$SLUG.json"
 
           # A single file, so `git add` on it is fatal if the sync step above
           # took its absent-source exit. Guard it the same way as the changelog.
