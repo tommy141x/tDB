@@ -63,3 +63,7 @@ Installation, configuration, the MySQL compatibility list, SQL imports, the API 
 | Lines (approximately) | 14,800 |
 | Requirements | tLib v1.0+, a Windows or Linux x86-64 host, and an artifact providing Node 22 |
 | Support | Yes |
+
+---
+
+*oxmysql, mysql-async and ghmattimysql are named only to identify the APIs tDB answers. tDB is not affiliated with or endorsed by their authors.*
