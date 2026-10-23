@@ -32,3 +32,10 @@ assets/hero/
 # has to be in the repo: tWeb's sync copies from a CHECKOUT, and a file only
 # this machine has reaches the site once and then never updates again. That is
 # how a regenerated thumbnail silently keeps serving the old art.
+
+# The sql/ drop folder is the OPERATOR's, and anything in it is applied to their
+# database at startup. A .sql committed here ships to every customer and runs on
+# their server: `sql/01-lb-phone.sql` did exactly that, 75 CREATE TABLEs of a paid
+# third-party schema, until 2026-10-23. Only the README belongs in git.
+sql/*
+!sql/README.md
