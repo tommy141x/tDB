@@ -40,7 +40,7 @@ module.exports = (function () {
       return "the database route was not found (status 404) - tDB's pb_hooks may not have loaded";
     }
 
-    if (error && error.message && error.message !== GENERIC) {
+    if (error?.message && error.message !== GENERIC) {
       return `${error.message}${describeFields(response)}`;
     }
 

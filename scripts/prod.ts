@@ -9,10 +9,11 @@
  * to obfuscate and no provenance token to arm. What is left is the part that
  * actually goes wrong — deciding what ships.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import AdmZip from "adm-zip";
 import {
+  mergeLicenceFiles,
   assertManifestStaged,
   createZip,
   stageFiles,
@@ -46,16 +47,6 @@ const DIST = join(ROOT, ".build", "dist");
 const INCLUDE = [
   "fxmanifest.lua",
   "README.md",
-  "LICENSE.md",
-  // MIT requires the copyright and permission notice to travel with every
-  // copy. The release carries 63MB of PocketBase binaries plus three vendored
-  // libraries, so this file is a licence condition, not documentation.
-  "THIRD-PARTY-NOTICES.md",
-  // The IBM Plex faces are compiled into the PocketBase binaries, and OFL 1.1
-  // condition 2 wants the licence to travel with a bundled copy. The faces'
-  // own name tables carry no nameID 13, only a nameID 14 pointing at
-  // scripts.sil.org/OFL, so the archive is the only place the text can be.
-  "OFL-IBMPlex.txt",
 
   // Every credential-shaped key in it is blank, permanently and by
   // construction, so this machine's copy IS the shippable one — there is no
@@ -100,6 +91,22 @@ assertManifestStaged(readFileSync(join(ROOT, "fxmanifest.lua"), "utf8"), INCLUDE
 
 stageFiles(ROOT, DIST, INCLUDE);
 
+step("Merging the licence and notices");
+{
+  const bundle = mergeLicenceFiles({
+    root: ROOT,
+    dist: DIST,
+    name: "tDB",
+    sources: [
+      { title: "Licence (MIT)", file: "LICENSE.md" },
+      { title: "Third-party notices", file: "THIRD-PARTY-NOTICES.md" },
+      { title: "SIL Open Font License 1.1, for the IBM Plex faces", file: "OFL-IBMPlex.txt" }
+    ],
+  });
+  console.log(`  ${bundle.out} — ${bundle.sections.length} section(s), ${(bundle.bytes / 1024).toFixed(1)} KB`);
+}
+
+
 // ── Every redistributed component must be named in the notices ─────────────
 //
 // The three licence files reach the archive only because someone wrote them
@@ -113,10 +120,14 @@ stageFiles(ROOT, DIST, INCLUDE);
 // components today — the two PocketBase binaries, eventsource, the js-sdk and
 // polyglot.
 step("Checking licence coverage of the staged tree");
-const notices = readFileSync(join(DIST, "THIRD-PARTY-NOTICES.md"), "utf8");
-for (const file of ["LICENSE.md", "THIRD-PARTY-NOTICES.md", "OFL-IBMPlex.txt"]) {
-  if (!existsSync(join(DIST, file)) || statSync(join(DIST, file)).size === 0) {
-    console.error(`${file} is missing from the staged tree — put it back in INCLUDE.`);
+const notices = readFileSync(join(DIST, "server", "LICENSE.txt"), "utf8");
+// The three documents are merged into `server/LICENSE.txt` rather than staged loose,
+// so what has to exist is the merged file and each document's text inside it.
+// `mergeLicenceFiles` throws on a missing or empty source; this checks the result, which
+// is the artifact the condition actually binds.
+for (const marker of ["MIT License", "PocketBase", "SIL OPEN FONT LICENSE"]) {
+  if (!notices.includes(marker)) {
+    console.error(`server/LICENSE.txt does not contain "${marker}" — the merge lost a section.`);
     process.exit(1);
   }
 }
@@ -172,4 +183,8 @@ for (const binary of [".runtime/pocketbase-linux", ".runtime/pocketbase-win.exe"
 }
 
 step("Packaging");
+// One merged `server/LICENSE.txt` instead of up to four legal files at the resource
+// root. The root is what an operator sees when they extract the zip, and none of those
+// documents is something they open. The REPO keeps them separate -- different things
+// edit them at different times -- so the merge happens here, on the staged tree.
 createZip(new AdmZip(), DIST, join(ROOT, ".build", "tDB.zip"), "tDB");
