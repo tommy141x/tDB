@@ -259,9 +259,9 @@
 
     notifyReady();
 
-    // After readiness on purpose. A new view costs ~38ms, so a first run over a
-    // freshly imported dump would otherwise delay every resource waiting on the
-    // database. Idempotent, so later boots are a no-op.
+    // After readiness on purpose: adoption walks the whole schema, so a first run
+    // over a freshly imported dump would otherwise delay every resource waiting
+    // on the database. Idempotent, so later boots are a no-op.
     if (isAuthenticated) adoptTables();
   };
 
