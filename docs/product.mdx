@@ -11,25 +11,7 @@ popularity: 30
 resourceName: "tDB"
 docsUrl: "/docs/tDB"
 provider: "tebex"
-# ⚠️ WITHOUT THIS KEY THE PAGE SAYS "Not available yet" AND tDB CANNOT BE OBTAINED.
-#
-# `buy-rail.tsx` takes a Tebex `packageId` or this; with both absent it renders a
-# DISABLED "Not available yet" button. tDB is free and MIT so it has no packageId,
-# and a free product is the one case where a missing pricing key is normal — which
-# is why nothing flagged the live page showing that from launch until 2026-10-23,
-# with v1.0 published on GitHub the whole time.
-#
-# `/releases/latest/download/`, not a pinned `/v1.0/` path, so the next release is
-# served without editing this file and this can never point at a superseded build.
-# Verified 2026-10-23: 200, redirecting to the asset.
 downloadUrl: "https://github.com/tommy141x/tDB/releases/latest/download/tDB.zip"
-# ⚠️ THE ART SAYS "tDatabase" AND IS SHOWN ANYWAY — the owner's call, 2026-10-16.
-# A listing with no `coverImage` draws a black card with a letter in it, and a
-# blank square among real tiles looked worse than the wrong spelling.
-#
-# Still worth fixing: `thumb.jpg` and `banner.jpg` BOTH print "tDatabase", so
-# /docs/tDB carries it too. Re-cut both in tDB's own repo — `scripts/thumb.ts`
-# there takes a `--headline`.
 media:
   - { type: "image", src: "/assets/tDB/thumb.jpg", alt: "tDB" }
 pricing:

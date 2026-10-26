@@ -34,8 +34,8 @@
 //     drops constraints, so this module requires the original CREATE TABLE text
 //     and patches that in place instead. See planRebuild's doc comment.
 //
-// No FiveM globals, no I/O: the caller does the introspection and the
-// execution, this only decides what to run.
+// The caller does the introspection and the execution; this only decides what
+// to run.
 module.exports = (() => {
   // Double quotes, NOT backticks. The opposite of pb-adopt.js's quote(), and
   // deliberately: pb-adopt sends its statements through the oxmysql path, where

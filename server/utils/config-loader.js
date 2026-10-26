@@ -11,10 +11,9 @@
 // resource and cannot use the Lua `tlib.secrets` module that does this for the
 // other resources, so the overlay lives here instead.
 //
-// buildDefaults() below is the single source of truth for every default.
-// config.lua documents those values and must agree with them;
-// tests/dev/config-defaults.test.js parses it through this loader and fails if
-// the two ever drift apart.
+// buildDefaults() below owns every default. config.lua documents those values
+// and must agree with them; tests/dev/config-defaults.test.js fails if they
+// drift apart.
 module.exports = (function () {
   const fs = require("fs");
   const path = require("path");
@@ -626,11 +625,10 @@ module.exports = (function () {
         // operator reads the box top-down and a "did you mean" line above the
         // settings it applies reads as though nothing was applied.
         //
-        // One known blind spot, stated rather than papered over: the Advanced
-        // slice stops at the S3 sub-table, so a stray key written BELOW it is
-        // not seen. Extending the slice past a nested table with a regex is how
-        // this parser starts matching braces it cannot count, and the shipped
-        // file has nothing there.
+        // Blind spot: the Advanced slice stops at the S3 sub-table, so a stray
+        // key written BELOW it is not seen. Extending the slice past a nested
+        // table with a regex is how this parser starts matching braces it cannot
+        // count, and the shipped file has nothing there.
         this.unknownKeys(whole, "Config", KNOWN_KEYS.root, /^\s*Config\.([A-Za-z_]\w*)\s*=/);
         this.unknownKeys(superuser, "Config.Superuser", KNOWN_KEYS.Superuser);
         this.unknownKeys(backup, "Config.Backup", KNOWN_KEYS.Backup);

@@ -12,9 +12,6 @@
  * `sql-import`), and one genuine orphan from an interrupted run sat holding a
  * port for an hour.
  *
- * A flaky gate is worse than a slow one: it trains you to re-run instead of to
- * read, which is how a real failure gets waved through.
- *
  * The LIVE instance is never touched. tDB in a running FiveM server keeps its
  * data in `.runtime/pb_data` under the resource, where a test instance always
  * uses a temp directory - so the data-dir path is what separates them, not the

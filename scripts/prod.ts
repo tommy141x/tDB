@@ -1,10 +1,6 @@
 /**
  * `bun run prod` — cut the release zip.
  *
- * Until this existed, tDB's releases were assembled by hand, which is why the
- * README could promise "a release download already contains the PocketBase
- * binary" with nothing checking that it did.
- *
  * Unlike the other resources here, tDB is MIT and unescrowed: there is nothing
  * to obfuscate and no provenance token to arm. What is left is the part that
  * actually goes wrong — deciding what ships.
@@ -71,13 +67,12 @@ const INCLUDE = [
   // A drop folder for the customer's own .sql files, applied at startup. Ships
   // with its README, which is the only instructions they get.
   //
-  // THE README ONLY, NEVER THE DIRECTORY. Staging `sql` wholesale shipped
-  // `sql/01-lb-phone.sql` to every customer: 53 KB of a paid third-party resource's
-  // schema, 75 CREATE TABLEs, committed as a test fixture in 2d10162 and never meant
-  // to leave this machine. `Config.Sql.Enabled` defaults true and this folder is
-  // applied at startup, so every install was creating those 75 tables in the
-  // operator's own database on first boot. A directory entry here means "and whatever
-  // anyone ever drops in it", which for a drop folder is precisely the wrong default.
+  // THE README ONLY, NEVER THE DIRECTORY. Staging `sql` wholesale once shipped a
+  // local test fixture — 53 KB of a paid third-party resource's schema, 75 CREATE
+  // TABLEs — to every customer, and because `Config.Sql.Enabled` defaults true and
+  // this folder is applied at startup, every install created those 75 tables on
+  // first boot. A directory entry means "and whatever anyone drops in it", which
+  // for a drop folder is precisely the wrong default.
   "sql/README.md",
 
   ".runtime/pocketbase-linux",

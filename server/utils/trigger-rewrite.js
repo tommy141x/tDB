@@ -19,8 +19,8 @@
 // rewrite would corrupt them silently and permanently - refusing is cheap and a
 // wrong answer is not.
 //
-// Nothing here touches FiveM or the database. translateStatement is injected so
-// the body still gets ordinary MySQL-to-SQLite treatment for functions.
+// translateStatement is injected, so the body still gets ordinary
+// MySQL-to-SQLite treatment for functions.
 module.exports = (function () {
   const HEADER =
     /^\s*CREATE\s+TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"]?([A-Za-z0-9_$]+)[`"]?\s+(BEFORE|AFTER)\s+(INSERT|UPDATE|DELETE)\s+ON\s+[`"]?([A-Za-z0-9_$]+)[`"]?\s+FOR\s+EACH\s+ROW\s+BEGIN\s+([\s\S]*?)\s*END\s*(?:\$\$|\/\/|;)?\s*$/i;

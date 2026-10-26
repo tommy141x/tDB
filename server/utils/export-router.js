@@ -1,6 +1,5 @@
 // Routes each oxmysql/PocketBase export call to the first adapter that claims
-// it. Split out of client.js so the pre-readiness behaviour can be tested
-// without starting the resource: no FiveM globals here, everything injected.
+// it. Split out of client.js so the pre-readiness behaviour can be tested.
 module.exports = (function () {
   class ExportRouter {
     constructor(exportsFn, whenReady, logger, onFn) {

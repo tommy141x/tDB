@@ -123,7 +123,6 @@ are **not** MIT — `spf13/cobra`, `google/pprof` and
 `modernc.org/*` are BSD 3-clause, and `go-sourcemap/sourcemap` is BSD 2-clause.
 Both Apache-2.0 (§4) and BSD (clause 2) ask a binary redistribution to carry a
 copy of the licence and the copyright notice, which this file does not yet do.
-That gap is recorded here rather than papered over.
 
 ### Embedded in PocketBase's admin UI
 

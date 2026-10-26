@@ -2,11 +2,7 @@
  * Runs every standalone test under tests/dev.
  *
  * These are not bun:test files -- each one is a plain script that throws on
- * failure and exits 0 on success, so `bun test` does not discover them. That
- * predates this runner and is not worth converting: the suites assert against
- * a real SQLite engine and a real PocketBase process, and they are readable as
- * scripts. What they lacked was a single entry point, so `bun run test` now
- * means the same thing here as it does in every sibling resource.
+ * failure and exits 0 on success, so `bun test` does not discover them.
  *
  * Each file gets its own process, because they install globals (the FiveM
  * `require` shim in particular) that would leak between suites in one.

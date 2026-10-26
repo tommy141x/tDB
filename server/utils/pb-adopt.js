@@ -34,9 +34,7 @@
 //
 //   * A collection cannot express a FOREIGN KEY, so each one is re-created as a
 //     trigger. ON DELETE CASCADE and SET NULL fire for deletes made through the
-//     admin UI too, which was verified rather than assumed.
-//
-// Nothing here touches FiveM. Everything is injected, so it is testable offline.
+//     admin UI too.
 module.exports = (function () {
   const WORKING_SUFFIX = "__tdb_adopting";
   // The prefix an earlier version of tDB used for its read-only view

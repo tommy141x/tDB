@@ -15,8 +15,6 @@
 //
 // Callers must subscribe to the status events before querying current status, or
 // a transition landing between the two is lost.
-//
-// No FiveM globals here; everything is injected so this is testable offline.
 module.exports = (function () {
   const HEALTH_PATH = "/api/health";
 

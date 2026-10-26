@@ -4,9 +4,7 @@
  * The frame, the light rig and the guards are tLib's (`shared/ts/build/hero.ts`); this file is
  * only tDB's words and its layer placement.
  *
- * Inputs are the two PocketBase admin captures in `assets/hero/`. They are real screenshots of
- * tDB's own backend, kept in the repo so this is reproducible rather than depending on wherever
- * they were pasted from.
+ * Inputs are the two real PocketBase admin captures in `assets/hero/`.
  *
  *   bun run thumb
  *   bun run thumb -- --format banner

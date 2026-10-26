@@ -11,9 +11,8 @@
 //   B  CREATE PROCEDURE p() BEGIN IF <cond> THEN <ddl>; END IF; END
 //      CALL p(); DROP PROCEDURE p;
 //
-// Both are refused by name by the translator's gate, which fails the whole
-// import, which leaves the resource with no schema at all - so these are not
-// optional to understand.
+// Both are refused by the translator's gate, which fails the whole import and
+// leaves the resource with no schema at all.
 //
 // THE DESIGN DECISION: evaluate, never pattern-match.
 //
@@ -26,17 +25,14 @@
 // answer decides the branch, exactly as MySQL would. Nothing here reads a
 // condition and infers what it probably means.
 //
-// That is what makes this safe rather than a guess. A condition tDB happens to
-// evaluate differently from MySQL - because SQLite reports no CHECK
-// constraints, say - then produces a different but honest outcome, not a wrong
-// one: the branch that ran is the branch the live database called for.
+// A condition tDB evaluates differently from MySQL - because SQLite reports no
+// CHECK constraints, say - still produces an honest outcome: the branch that ran
+// is the branch the live database called for.
 //
 // Anything outside the two spellings is refused with the construct named, never
 // approximated. A half-understood procedure body is the one outcome worse than
 // a failed import: it reports success having built the wrong schema.
 //
-// Plain CommonJS, no FiveM globals, no I/O of its own - `scalar` and `exec` are
-// injected, so the whole thing is testable offline against node:sqlite.
 module.exports = (function () {
   function refuse(message, construct) {
     const error = new Error(message);

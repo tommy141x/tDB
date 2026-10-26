@@ -770,8 +770,7 @@ module.exports = (function () {
    * never adopted the live order IS the source order.
    *
    * Returns the statement unchanged when the order cannot be resolved, leaving
-   * the gate to refuse it in its own words - a wrong expansion is exactly the
-   * silent corruption the refusal existed to prevent.
+   * the gate to refuse it in its own words.
    */
   function expandValuesInsert(sql, resolveColumnOrder) {
     if (typeof resolveColumnOrder !== "function") return sql;
