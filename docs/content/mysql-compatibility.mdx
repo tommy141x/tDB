@@ -78,8 +78,6 @@ SQLite directly. Replacements for the ones that come up most:
 | `DECLARE`, `SELECT ... INTO` | a scalar subquery |
 | `UPDATE ... JOIN` | `UPDATE t SET a FROM u WHERE c`, or `WHERE ... IN (SELECT ...)` |
 
-Most of these maintain a counter, so check your rewrite's numbers against the original.
-
 ## Known limits
 
 - **`COLLATE NOCASE` folds ASCII only.** `Ä` and `ä` still compare as different; MySQL's
