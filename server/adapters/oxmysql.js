@@ -726,8 +726,8 @@ class OxMySQLAdapter {
 
       // A batch row that arrives as a 1-INDEXED OBJECT rather than an array.
       //
-      // This is not an exotic shape: a Lua row with a leading nil hole has an
-      // undefined `#`, so msgpack emits a map, not a sequence -
+      // A Lua row with a leading nil hole has an undefined `#`, so msgpack
+      // emits a map, not a sequence -
       // `{ inventory, owner }` with an empty inventory marshals as
       // `{"2": owner}`. oxmysql normalises exactly this case
       // (src/utils/parseExecute.ts, the array-of-objects branch), and without

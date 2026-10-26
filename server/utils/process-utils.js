@@ -7,10 +7,6 @@
 // catalog that names the program and the shape of its arguments. tDB's side of
 // that deal is: name "pocketbase", never a path, and pass arguments that match
 // one of the declared invocations.
-//
-// There is deliberately no local fallback. tLib is a hard `dependency` in
-// fxmanifest.lua, so a missing export is an installation fault to report at the
-// operator, not a case to route around by spawning here.
 module.exports = (function () {
   /** How often a one-shot's result is asked for. Short because every caller is
    *  awaiting it inside startup, and the poll is a cheap in-process export

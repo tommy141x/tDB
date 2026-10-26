@@ -122,12 +122,10 @@ module.exports = (function () {
         AutoMigrate: true,
         PublicDir: "pb_public",
         DataDir: ".runtime/pb_data",
-        // THERE IS NO SMTP BLOCK, and there is not meant to be one. Mail
-        // settings live in the PocketBase admin UI and nowhere else: tDB's
-        // default was `Manage = false`, i.e. the admin UI owns them, so
-        // config.lua held a second copy of eight fields that it then declined
-        // to apply - including an SMTP password sitting in a file next to a
-        // comment explaining it was being ignored.
+        // ⚠️ Don't add an SMTP block. Mail defaulted to `Manage = false` like
+        // S3 does, so config.lua held eight fields it declined to apply -
+        // including an SMTP password sitting on disk doing nothing. Mail lives
+        // in the PocketBase admin UI only.
         //
         // Manage false means tDB never touches S3 on the instance, so the
         // admin UI owns it. See reconcileSettings() in server.js.

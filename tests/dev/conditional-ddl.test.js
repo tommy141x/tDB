@@ -43,9 +43,7 @@ const section = (n) => console.log(`\n=== ${n}`);
 const rows = (db, sql) => db.prepare(sql).all();
 const scalar = (db, sql) => Object.values(db.prepare(sql).get())[0];
 
-// ---------------------------------------------------------------------------
 // The database the migrations run against
-// ---------------------------------------------------------------------------
 
 // Column types are declared with widths on purpose: CHARACTER_MAXIMUM_LENGTH is
 // read back out of the declared type by rewriteInformationSchema, so a bare
@@ -173,9 +171,7 @@ const indexExists = (db, name) =>
 const columnExists = (db, table, name) =>
   scalar(db, `SELECT COUNT(*) FROM pragma_table_info('${table}') WHERE name='${name}'`) === 1;
 
-// ---------------------------------------------------------------------------
 // Spelling A, verbatim from esx-framework/ESX-Legacy-Addons
-// ---------------------------------------------------------------------------
 
 const PREPARE_SEQUENCE = ["PREPARE s FROM @banking_migration", "EXECUTE s", "DEALLOCATE PREPARE s"];
 
@@ -197,9 +193,7 @@ const ADD_USERS_PINCODE = `SET @banking_migration := (SELECT IF(
   'SELECT 1',
   'ALTER TABLE \`users\` ADD COLUMN \`pincode\` INT NULL'))`;
 
-// ---------------------------------------------------------------------------
 // Spelling B, verbatim from XxNightLordxX/K9Script
-// ---------------------------------------------------------------------------
 
 const K9_NAME = "john_k9_migration_0004_add_idx_citizen_job_active";
 

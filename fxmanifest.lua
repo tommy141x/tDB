@@ -22,12 +22,10 @@ node_version '22'
 tlib_min_version '1.0'
 
 
--- config.lua is deliberately NOT listed here, and neither is config.local.lua.
---
--- Nothing in tDB's Lua reads the Config table; server/utils/config-loader.js
--- parses both files directly and is their only reader. Listing them would also
--- make an operator who deleted one stop the whole resource, since a
--- server_script missing at load time is fatal.
+-- ⚠️ Do not add config.lua or config.local.lua here. A server_script missing at
+-- load time is fatal, so an operator who deleted one would stop the whole
+-- resource — and nothing in tDB's Lua reads Config anyway. config-loader.js
+-- parses both files directly and is their only reader.
 server_scripts {
     '@tLib/imports.lua',
     'server/utils/version.lua',

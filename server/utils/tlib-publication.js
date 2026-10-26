@@ -45,8 +45,7 @@ module.exports = (function () {
     };
   }
 
-  // Null when there is nothing to dial. Inventing a localhost default is the
-  // mistake this replaces.
+  // Null when there is nothing to dial, never an invented localhost default.
   function healthUrl(status, mount) {
     const local = status && status.localUrl;
     if (!local) return null;

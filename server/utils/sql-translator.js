@@ -206,8 +206,7 @@ module.exports = (function () {
   // and still uses the primary key index, where a `CAST(id AS INTEGER)` rewrite
   // both broke id 0 and forced a table scan.
   //
-  // It also tracks MySQL more closely than the old behaviour did, since MySQL
-  // compares '7' = 7 as equal.
+  // It also tracks MySQL, which compares '7' = 7 as equal.
   function bindValue(value) {
     if (value === undefined || value === null) return null;
 
@@ -828,9 +827,7 @@ module.exports = (function () {
    *   (a LIKE CONCAT('%', ?, '%') OR b LIKE CONCAT('%', ?, '%'))
    *
    * A STATED APPROXIMATION, in the same class as ADD PRIMARY KEY becoming a
-   * UNIQUE INDEX, and the reasoning is worth recording because the obvious
-   * objection - "that is not full-text search" - matters less here than it
-   * looks:
+   * UNIQUE INDEX. Where it diverges from MySQL:
    *
    *   * SQLite's answer is FTS5, which is a virtual table. Using it would mean
    *     creating a shadow table per searched table plus triggers to keep it in
@@ -845,8 +842,8 @@ module.exports = (function () {
    *   * BOOLEAN MODE's operators (+word, -word, word*) are taken LITERALLY.
    *     A search for `+john` looks for the text "+john".
    *
-   * Without this the whole statement is refused, which is not "less wrong" - it
-   * means the resource's search box returns an error instead of rows.
+   * The alternative is refusing the statement, which makes the resource's
+   * search box return an error instead of rows.
    *
    * Returns { sql, expansions } where each expansion records the original
    * placeholder index that was duplicated and how many copies it now has, so
@@ -921,17 +918,13 @@ module.exports = (function () {
   function rewriteUpdateJoin(sql) {
     const mask = codeMask(sql);
 
-    // ⚠️ Matched on `sql`, NOT `mask` — the same correction `rewriteDeleteLimit`
-    // below already carries. `codeMask` blanks a backticked identifier, so the
-    // `[`"[]?` groups in this pattern could never match the quoted form and
-    // every backticked statement fell through untranslated. Backticks are the
-    // default in FiveM and mysqldump output, so that was the common case, and
-    // the suite missed it because every fixture used bare identifiers.
-    //
-    // Offsets stay valid: `codeMask` preserves length, so `head[0].length`
-    // indexes `mask` and `sql` alike, and the clause scans below still use the
-    // mask so a string literal cannot fool them. Safe unquoted because the
-    // pattern is anchored at the statement start, where no literal can precede.
+    // ⚠️ Matched on `sql`, NOT `mask`. codeMask blanks a backticked identifier,
+    // so these `[`"[]?` groups never matched the quoted form and every
+    // backticked statement — the default in FiveM and mysqldump output — fell
+    // through untranslated. Every fixture used bare names, so the suite missed
+    // it. Safe unquoted: the pattern is anchored at the statement start, where
+    // no literal can precede. Offsets still line up because codeMask preserves
+    // length, and the clause scans below stay on the mask.
     const head =
       /^\s*UPDATE\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+(?:INNER\s+|LEFT\s+(?:OUTER\s+)?|RIGHT\s+(?:OUTER\s+)?|CROSS\s+)?JOIN\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+ON\s+/i.exec(
         sql
@@ -1023,17 +1016,10 @@ module.exports = (function () {
   function rewriteDeleteJoin(sql) {
     const mask = codeMask(sql);
 
-    // ⚠️ Matched on `sql`, NOT `mask` — the same correction `rewriteDeleteLimit`
-    // below already carries. `codeMask` blanks a backticked identifier, so the
-    // `[`"[]?` groups in this pattern could never match the quoted form and
-    // every backticked statement fell through untranslated. Backticks are the
-    // default in FiveM and mysqldump output, so that was the common case, and
-    // the suite missed it because every fixture used bare identifiers.
-    //
-    // Offsets stay valid: `codeMask` preserves length, so `head[0].length`
-    // indexes `mask` and `sql` alike, and the clause scans below still use the
-    // mask so a string literal cannot fool them. Safe unquoted because the
-    // pattern is anchored at the statement start, where no literal can precede.
+    // ⚠️ Matched on `sql`, NOT `mask` — same trap as rewriteUpdateJoin above:
+    // codeMask blanks a backticked identifier, so these groups never matched
+    // the quoted form. Safe unquoted (anchored at the statement start), and
+    // offsets still line up because codeMask preserves length.
     const head =
       /^\s*DELETE\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)\s+FROM\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+(?:INNER\s+|LEFT\s+(?:OUTER\s+)?|CROSS\s+)?JOIN\s+([`"[]?[A-Za-z0-9_$]+[`"\]]?)(?:\s+(?:AS\s+)?([A-Za-z0-9_$]+))?\s+ON\s+/i.exec(
         sql
@@ -2144,11 +2130,9 @@ module.exports = (function () {
       /^(?!\s*ALTER\s+TABLE)[\s\S]*\bADD\s+(?:CONSTRAINT\s+\S+\s+)?FOREIGN\s+KEY\b/i,
       "ALTER TABLE ... ADD FOREIGN KEY",
     ],
-    // No entry for MATCH ... AGAINST any more: rewriteMatchAgainst turns it into
-    // a substring search across the same columns, which is a stated
-    // approximation documented there and in the compatibility docs. The shapes
-    // it cannot take - more than one placeholder in the search term - are left
-    // for the transpiler to reject by position.
+    // MATCH ... AGAINST is translated by rewriteMatchAgainst, so an entry here
+    // would refuse statements that work. The shapes it cannot take - more than
+    // one placeholder in the search term - are left for the transpiler.
     // Multi-table DELETE, as in `DELETE a FROM a JOIN b ...`. SQLite deletes
     // from exactly one table and has no USING clause.
     [/^\s*DELETE\s+[A-Za-z_][A-Za-z0-9_]*\s+FROM\b/i, "multi-table DELETE"],
@@ -2161,13 +2145,11 @@ module.exports = (function () {
     [/^\s*(?:CREATE|ALTER)\b[\s\S]*\bENGINE\s*=/i, "ENGINE="],
     [/\bDEFAULT\s+CHARSET\b/i, "DEFAULT CHARSET"],
     [/\b(UNIQUE\s+)?KEY\s+[`"]?[A-Za-z0-9_$]+[`"]?\s*\(/i, "inline KEY/INDEX definition"],
-    // No entry for GROUP_CONCAT ... SEPARATOR any more. It was refusing
-    // statements the transpiler already translates correctly: measured,
-    // `GROUP_CONCAT(name SEPARATOR ', ')` becomes `GROUP_CONCAT(name, ', ')`,
-    // which the real engine accepts and answers correctly. The two forms that
-    // genuinely do not work - DISTINCT with a separator, and a bound parameter
-    // in the ORDER BY - are refused by name in rewriteGroupConcat, and the
-    // ORDER BY form that used to be dropped silently is now translated.
+    // GROUP_CONCAT ... SEPARATOR gets no entry: measured, the transpiler turns
+    // `GROUP_CONCAT(name SEPARATOR ', ')` into `GROUP_CONCAT(name, ', ')` and
+    // the real engine answers it correctly, so an entry refuses valid SQL. The
+    // two forms that genuinely do not work - DISTINCT with a separator, and a
+    // bound parameter in the ORDER BY - are refused in rewriteGroupConcat.
     [/\bSTRAIGHT_JOIN\b/i, "STRAIGHT_JOIN"],
     // SQLite's catalogue is sqlite_master and the pragma_* table functions, and
     // the column set here has no equivalent. Refused by name because otherwise

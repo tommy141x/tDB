@@ -6,9 +6,8 @@
     commas — a trailing comma on the last entry is legal Lua. Do not remove
     the quotes around text.
 
-    NOTHING HERE IS REQUIRED. tDB runs correctly with this file unedited:
-    the superuser login is generated on first start. Every setting below is
-    optional.
+    NOTHING HERE IS REQUIRED. tDB runs correctly with this file unedited —
+    the superuser login is generated on first start.
 
     CREDENTIALS DO NOT GO IN THIS FILE. Every credential-shaped key here
     ships blank and stays blank, so this file is safe to commit and safe to
@@ -26,16 +25,14 @@
 
     IF IT WON'T START: Lua reports the line BELOW the real mistake, so look
     one line up from whatever the console names. Fix the FIRST error only,
-    then restart — everything after it is usually just fallout from that one.
+    then restart — the rest is usually fallout from that one.
 
     Docs: https://timmygstudios.com/docs/tDB/configuration
 ------------------------------------------------------------------------]]
 
 Config = {}
 
--- ==========================================================================
---  1. COMMON SETTINGS
--- ==========================================================================
+-- 1. COMMON SETTINGS
 
 -- Publish the PocketBase admin panel at /db/_/ on tLib's public URL and port.
 -- Set false to keep tDB private; server resources can still use it internally
@@ -78,14 +75,12 @@ Config.Superuser = {
     Password = "",
 }
 
--- ==========================================================================
---  2. SQL IMPORTS
+-- 2. SQL IMPORTS
 --
---  Scripts normally ship a .sql file you load into MySQL by hand. Drop it in
---  Dir instead and it is applied on startup, before any other resource can
---  query. A file runs once, ever, and lands whole or not at all; what has run
---  is recorded in tdb_sql_imports. See `tdb sql status`.
--- ==========================================================================
+-- Scripts normally ship a .sql file you load into MySQL by hand. Drop it in
+-- Dir instead and it is applied on startup, before any other resource can
+-- query. A file runs once, ever, and lands whole or not at all; what has run
+-- is recorded in tdb_sql_imports. See `tdb sql status`.
 
 Config.Sql = {
     -- Default: true
@@ -103,13 +98,11 @@ Config.Sql = {
     OnChanged = "warn",
 }
 
--- ==========================================================================
---  3. BACKUPS
+-- 3. BACKUPS
 --
---  Backups land inside the PocketBase data directory, under `backups`.
---  That is the same disk as the database: it protects against a bad
---  migration, not against losing the machine.
--- ==========================================================================
+-- Backups land inside the PocketBase data directory, under `backups`. That is
+-- the same disk as the database: it protects against a bad migration, not
+-- against losing the machine.
 
 Config.Backup = {
     -- Master switch. Nothing below happens while this is false.
@@ -133,14 +126,12 @@ Config.Backup = {
     BackupPrefix = "auto_",
 }
 
--- ==========================================================================
---  4. MIGRATIONS
+-- 4. MIGRATIONS
 --
---  PocketBase's own collection migrations, not the .sql drop folder above.
---  PocketBase writes a migration file whenever you change a collection in the
---  admin UI, so schema changes travel with the resource. Collection edits made
---  in the UI are never reverted.
--- ==========================================================================
+-- PocketBase's own collection migrations, not the .sql drop folder above.
+-- PocketBase writes a migration file whenever you change a collection in the
+-- admin UI, so schema changes travel with the resource. Collection edits made
+-- in the UI are never reverted.
 
 Config.Migrations = {
     -- Apply pending migrations on start. Default: true
@@ -152,9 +143,7 @@ Config.Migrations = {
     Dir = ".runtime/pb_migrations",
 }
 
--- ==========================================================================
---  5. ADVANCED — most servers change nothing here
--- ==========================================================================
+-- 5. ADVANCED — most servers change nothing here
 
 Config.Advanced = {
     -- Use a PocketBase instance you already run instead of starting one. BOTH
@@ -184,29 +173,26 @@ Config.Advanced = {
     -- change this. Default: ".runtime/pb_data"
     DataDir = ".runtime/pb_data",
 
-    -- ----------------------------------------------------------------------
-    --  S3 storage for PocketBase's files and backups.
+    -- S3 storage for PocketBase's files and backups.
     --
-    --  Manage decides who owns this block:
+    -- Manage decides who owns this block:
     --
-    --    false  tDB never touches the setting. Set it in the admin UI and it
-    --           stays. Everything else in the block is ignored.
-    --    true   config.lua wins. Every field is applied on every start, and an
-    --           admin-UI edit is reported and then overwritten. Enabled =
-    --           false genuinely turns the feature off.
+    --   false  tDB never touches the setting. Set it in the admin UI and it
+    --          stays. Everything else in the block is ignored.
+    --   true   config.lua wins. Every field is applied on every start, and an
+    --          admin-UI edit is reported and then overwritten. Enabled = false
+    --          genuinely turns the feature off.
     --
-    --  Settings only travel config.lua -> PocketBase, never back: PocketBase
-    --  will not hand out the S3 secret once set, so syncing the other way
-    --  would overwrite a real credential with an empty one.
+    -- Settings only travel config.lua -> PocketBase, never back: PocketBase
+    -- will not hand out the S3 secret once set, so syncing the other way would
+    -- overwrite a real credential with an empty one.
     --
-    --  AccessKey and SecretKey are credentials, so they stay blank here. Set
-    --  `tdb_advanced_s3_accesskey` / `tdb_advanced_s3_secretkey` in
-    --  server.cfg, or put them in config.local.lua.
+    -- AccessKey and SecretKey are credentials, so they stay blank here. Set
+    -- `tdb_advanced_s3_accesskey` / `tdb_advanced_s3_secretkey` in server.cfg,
+    -- or put them in config.local.lua.
     --
-    --  Mail is not here. Set it in the PocketBase admin UI, under
-    --  Settings > Mail.
-    -- ----------------------------------------------------------------------
-
+    -- Mail is not here. Set it in the PocketBase admin UI, under Settings >
+    -- Mail.
     S3 = {
         Manage = false,
         Enabled = false,

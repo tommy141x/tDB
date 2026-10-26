@@ -192,12 +192,11 @@ module.exports = (function () {
    * ELSE is deliberately absent. No real statement uses it, and a branch this
    * guessed at would run DDL the migration never asked for.
    *
-   * The refusals happen HERE, not while the body runs, and that is not a
-   * refactor - it is a correctness fix. Checking a statement only when its
-   * branch is taken means a body containing ELSE passes silently whenever the
-   * condition comes back false, which for an idempotent migration is the second
-   * run and every run after it. Measured: an ELSE body and a nested IF both
-   * sailed through that way.
+   * The refusals happen HERE, not while the body runs. Checking a statement
+   * only when its branch is taken means a body containing ELSE passes silently
+   * whenever the condition comes back false, which for an idempotent migration
+   * is the second run and every run after it. Measured: an ELSE body and a
+   * nested IF both sailed through that way.
    */
   function parseBlocks(pieces, name) {
     const blocks = [];

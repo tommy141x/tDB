@@ -11,31 +11,14 @@
 // database during migrations. Hence this runs before createSuperuser touches the
 // data dir.
 //
-// PIDs are recycled, so "the recorded PID is alive" proves nothing. The
-// governing rule is unchanged and is the reason this file is not ten lines: an
-// identity we cannot establish counts as not ours, which risks leaving a real
-// orphan but never risks killing a stranger. A surviving orphan announces itself
-// as a bind failure naming a pid an operator can end by hand; a wrongly killed
-// stranger announces nothing, and on a game server the stranger is somebody's
-// database.
+// PIDs are recycled, so "the recorded PID is alive" proves nothing. Governing
+// rule: an identity we cannot establish counts as not ours. That risks leaving a
+// real orphan, which announces itself as a bind failure naming a pid an operator
+// can end by hand; the other way round, a wrongly killed stranger announces
+// nothing, and on a game server the stranger is somebody's database.
 //
-// What changed is how identity is established. This used to resolve the live
-// pid's executable and compare it against the binary we launched - /proc on
-// Linux, and a PowerShell command run through a tLib probe on Windows. That is
-// gone:
-//
-//   - The probe no longer exists on tLib's side, so the Windows branch could not
-//     work at all.
-//   - Linux containers are a first-class target here, not a port. A minimal
-//     container ships no PowerShell, no wmic and no tasklist, and a branch only
-//     the Windows dev box ever executes is the branch that rots. Assume nothing
-//     is installed that the resource did not ship.
-//   - It was one question with two implementations, and the two disagreed about
-//     what they could even answer: /proc returns EACCES for another user's
-//     process, which already read as "cannot confirm".
-//
-// The replacement asks three things, all answerable in-process from node's os,
-// net and process.kill on both platforms:
+// Identity is established by three questions, all answerable in-process from
+// node's os, net and process.kill on both platforms:
 //
 //   1. A boot identity written into the record at spawn - the machine's
 //      approximate boot instant, quantised to ten seconds so clock jitter and
@@ -47,17 +30,18 @@
 //      user, which is to say not ours to kill.
 //   3. Whether the recorded port is actually held, via a TCP connect to
 //      loopback. Holding the port is the entire harm an orphan does, so if
-//      nothing is listening there is no conflict to resolve. This is strictly
-//      safer than the old behaviour, which killed a path-matching process
-//      whether or not anything was actually wrong.
+//      nothing is listening there is no conflict to resolve.
 //
-// Be clear about what this does not cover, because it is not strictly stronger
-// than the exe-path check it replaces. Within a SINGLE boot, if PocketBase
+// ⛔ Do not go back to resolving the live pid's executable and comparing it
+// against the binary we launched. tLib's probe that the Windows branch needed is
+// gone, a minimal Linux container ships no PowerShell, wmic or tasklist, and
+// /proc returns EACCES for another user's process - which already read as
+// "cannot confirm".
+//
+// Residual gap the exe-path check did close: within a SINGLE boot, if PocketBase
 // exited, the OS handed its pid to an unrelated process, AND the recorded port
-// is now held by something else, this kills that unrelated process. The path
-// check did close that window. It is much narrower than the cross-boot case this
-// removes - it needs two independent coincidences inside one uptime - but it is
-// not zero.
+// is now held by something else, this kills that unrelated process. Two
+// independent coincidences inside one uptime, so narrow but not zero.
 //
 // Deliberately not shared with tAI's process-supervisor.ts: a cross-resource
 // require would make tDB fail to start when tAI is absent.

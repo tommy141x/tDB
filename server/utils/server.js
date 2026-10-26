@@ -31,14 +31,13 @@ const RED = "^1";
 const YELLOW = "^3";
 const GREY = "^8";
 
-// `debug` is filtered, the other levels are not - tLib's own logger has
-// filtered below INFO since it was written and this is tDB catching up. It
-// printed unconditionally, which made it a second INFO channel in a different
-// colour: the pid-file sweep, every route probe and each backup, on every boot.
+// `debug` is filtered, the other levels are not, matching tLib's own logger.
+// It used to print unconditionally, which made it a second INFO channel in a
+// different colour: the pid-file sweep, every route probe and each backup, on
+// every boot.
 //
 // applyLogLevel() sets the flag once the config is parsed, which is after this
-// module loads, so anything logged before then stays filtered. That is the
-// right default for a switch whose purpose is to be off.
+// module loads, so anything logged before then stays filtered.
 let debugEnabled = false;
 
 function applyLogLevel(config) {
@@ -182,8 +181,8 @@ function getPocketBasePath() {
   return fullPath;
 }
 
-// REMOTE mode only. There is deliberately no public-IP lookup: tDB has no public
-// address of its own, the admin UI appears wherever tLib's router reports.
+// REMOTE mode only. tDB has no public address of its own; the admin UI appears
+// wherever tLib's router reports.
 function buildSmartUrl(hostParam, port) {
   if (!hostParam || hostParam === "") {
     return null;
@@ -372,9 +371,7 @@ function displayStartupStatus() {
     row("Mode", "Headless");
   }
 
-  // No `Binding` row: it is 127.0.0.1 on every default install and `Admin`
-  // below is the address anyone actually opens. Remote keeps its URL, which
-  // is the one address the banner cannot otherwise imply.
+  // Remote's URL is the one address the banner cannot otherwise imply.
   if (startupStatus.isRemoteMode) {
     row("Remote", startupStatus.publicUrl);
   }
@@ -735,19 +732,14 @@ const TLIB_MOUNT = "/db";
 /**
  * Read tLib's HTTP status snapshot.
  *
- * GetHttpStatus is a hard dependency - `tlib_min_version '1.0'` in fxmanifest.lua
- * gates it - and there is deliberately no feature detection here. There used to
- * be, with a `tlibTooOld` latch and its own startup warning; that whole mechanism
- * is gone, because 0.6 is the only tLib that ever lacked the export and the gate
- * stops it before this file runs.
+ * GetHttpStatus is a hard dependency, gated by `tlib_min_version '1.0'` in
+ * fxmanifest.lua.
  *
- * ⚠️ GetHubUrl is still never called, and that is unrelated to versions: it is not
- * a readiness signal. It answers with a provisional localhost URL while
- * autodetection runs and keeps answering after a failed bind, so registering on
- * the strength of it would advertise a URL nothing here can tell apart from a dead
- * one. Returning null instead leaves the admin UI unpublished; the database is
- * unaffected, because every export goes over loopback and never touches the
- * router. tRadio does the same.
+ * ⚠️ Don't reach for GetHubUrl as a readiness signal: it answers with a
+ * provisional localhost URL while autodetection runs and keeps answering after
+ * a failed bind, so registering on it advertises a URL indistinguishable from a
+ * dead one. Returning null leaves the admin UI unpublished and the database
+ * unaffected, since every export goes over loopback.
  */
 function readTLibHttpStatus() {
   try {
@@ -1107,9 +1099,6 @@ function validateConfig() {
     );
   }
 
-  // No port validation: config.Port is not operator input, it is resolved at
-  // startup by resolveInternalPort(), which only returns a port it just bound.
-
   if (config.Advanced.S3.Enabled) {
     if (!config.Advanced.S3.Bucket) {
       errors.push(
@@ -1298,10 +1287,10 @@ async function reconcileSettings() {
 
 // ── The serving process, as seen from outside tLib ───────────────────────────
 //
-// There is no ChildProcess object here any more. What tDB holds is the pid tLib
-// reported (for the pid file, which is the unclean-shutdown guard's only
-// evidence), a cursor into tLib's line ring, and whether the process has been
-// seen to exit. Everything else is asked for by key.
+// tLib owns the process, so tDB holds only the pid tLib reported (for the pid
+// file, which is the unclean-shutdown guard's only evidence), a cursor into
+// tLib's line ring, and whether the process has been seen to exit. Everything
+// else is asked for by key.
 let pocketbasePid = 0;
 let outputCursor = 0;
 let outputTimer = null;
@@ -1310,9 +1299,8 @@ let pocketbaseExited = false;
 /**
  * One line of PocketBase's stdout.
  *
- * Unchanged in substance from the `stdout.on("data")` handler this replaces -
- * tLib splits the pipe into lines and drops blank ones, so the only thing gone
- * is the splitting. Every behaviour is deliberate and documented inline.
+ * tLib splits the pipe into lines and drops blank ones, so there is no
+ * splitting to do here.
  */
 function handlePocketBaseStdout(raw) {
   let line = raw.trim();

@@ -75,10 +75,6 @@ module.exports = (() => {
     return error;
   }
 
-  // ---------------------------------------------------------------------------
-  // Affinity
-  // ---------------------------------------------------------------------------
-
   /**
    * SQLite's own affinity rules, in their documented order, plus one MySQL
    * correction.
@@ -108,10 +104,6 @@ module.exports = (() => {
     if (type.includes("REAL") || type.includes("FLOA") || type.includes("DOUB")) return "REAL";
     return "NUMERIC";
   }
-
-  // ---------------------------------------------------------------------------
-  // Tokenising
-  // ---------------------------------------------------------------------------
 
   const TOKEN =
     /'(?:[^']|'')*'|"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_$]*|\d+(?:\.\d+)?(?:[eE][-+]?\d+)?|--[^\n]*|\/\*[\s\S]*?\*\/|\S/g;
@@ -169,10 +161,6 @@ module.exports = (() => {
     out.push(current);
     return out;
   }
-
-  // ---------------------------------------------------------------------------
-  // parseColumnDef
-  // ---------------------------------------------------------------------------
 
   const DEFAULT_NOW =
     /^(?:CURRENT_TIMESTAMP|NOW|LOCALTIME|LOCALTIMESTAMP|CURRENT_DATE|CURRENT_TIME)$/i;
@@ -375,10 +363,6 @@ module.exports = (() => {
     throw refuse(`DEFAULT ${text} is not a form this understands`, `DEFAULT ${word}`);
   }
 
-  // ---------------------------------------------------------------------------
-  // Reading the existing CREATE TABLE
-  // ---------------------------------------------------------------------------
-
   const TABLE_CONSTRAINT =
     /^\s*(?:CONSTRAINT|PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY|CHECK|KEY|INDEX)\b/i;
 
@@ -518,10 +502,6 @@ module.exports = (() => {
     return flags.slice(kept[0].at, kept[kept.length - 1].end).trim();
   }
 
-  // ---------------------------------------------------------------------------
-  // Declaring the new column
-  // ---------------------------------------------------------------------------
-
   function declareColumn(name, def, carried) {
     const parts = [quote(name), def.affinity];
 
@@ -542,10 +522,6 @@ module.exports = (() => {
 
     return parts.join(" ");
   }
-
-  // ---------------------------------------------------------------------------
-  // Renaming a column inside an index or trigger definition
-  // ---------------------------------------------------------------------------
 
   /**
    * Substitute one column name inside a stored index or trigger definition.
@@ -609,10 +585,6 @@ module.exports = (() => {
 
     return out + text.slice(cursor);
   }
-
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
 
   function findColumn(columns, name) {
     return (columns || []).find((column) => same(column.name, name)) || null;
@@ -726,10 +698,6 @@ module.exports = (() => {
     return (actions || []).some((action) => actionNeedsRebuild(action, columns));
   }
 
-  // ---------------------------------------------------------------------------
-  // Sequence start
-  // ---------------------------------------------------------------------------
-
   /**
    * MySQL's `AUTO_INCREMENT=9` as SQLite's sqlite_sequence row.
    *
@@ -761,10 +729,6 @@ module.exports = (() => {
     ];
   }
 
-  // ---------------------------------------------------------------------------
-  // The NOT NULL guard
-  // ---------------------------------------------------------------------------
-
   /**
    * Fail the rebuild with a sentence, before a row is touched, when a column
    * gaining NOT NULL still holds NULL.
@@ -790,10 +754,6 @@ module.exports = (() => {
       `DROP TABLE IF EXISTS temp.${quote(GUARD_TABLE)}`,
     ];
   }
-
-  // ---------------------------------------------------------------------------
-  // planRebuild
-  // ---------------------------------------------------------------------------
 
   /**
    * Plan a rebuild. PURE: returns an ordered array of SQLite statement strings.

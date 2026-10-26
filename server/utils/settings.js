@@ -10,13 +10,10 @@
 // asserts config.lua wholesale on every boot, `Enabled = false` included.
 // Drift the admin UI introduced is reported before it is overwritten.
 //
-// SMTP IS NOT HERE. Mail settings are the admin UI's alone - tDB shipped them
-// in config.lua with Manage defaulting to false, which is a second copy of
-// eight fields that it then declined to apply.
+// Mail is the admin UI's alone; see the note in config-loader.js.
 module.exports = (function () {
   // Fields PocketBase actually returns, so they can be compared. The secrets
-  // are deliberately absent: they are asserted blind because they cannot be
-  // read back.
+  // are not among them: they cannot be read back, so they are asserted blind.
   const COMPARABLE_FIELDS = {
     s3: [
       "enabled",
