@@ -123,8 +123,8 @@ function castFor(declared) {
   // real boolean when the DISPLAY WIDTH is 1 (`field.length !== 1` keeps
   // TINYINT(4) numeric). Without this, 0 reaches Lua as the number 0 - which is
   // TRUTHY - so `if row.banned then` fires for an unbanned player and
-  // `if not row.whitelisted then` admits everyone. An authorization inversion in
-  // both directions, and the most dangerous divergence found.
+  // `if not row.whitelisted then` admits everyone - an authorization inversion
+  // in both directions.
   //
   // Compared against 1 exactly, matching oxmysql's `value === '1'`: a column
   // holding 2 is false there, so it is false here.
@@ -205,8 +205,7 @@ function project(sql, shape) {
   //
   // A subquery projection has to name its columns, so `SELECT a.id, b.id`
   // produced `json_object('id', "id", 'id', "id")` - both halves resolving to
-  // the SAME first column, which silently returned A's id for both. mysql2 is
-  // last-wins, and the wrong id drives `DELETE ... WHERE id = row.id`.
+  // the SAME first column, which silently returned A's id for both.
   //
   // `WITH tdbq(c0, c1, ...) AS (<query>)` gives every output column a unique
   // handle regardless of its real name, so each json_object pair can reference

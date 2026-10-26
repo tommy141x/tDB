@@ -8,8 +8,6 @@
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
 
-// Resolve require() the way citizen-scripting-node does. See the file itself:
-// only manifest server_scripts get the resource root as their base.
 const ROOT = require("./fivem-require.js");
 
 const translator = require(path.join(ROOT, "server/utils/sql-translator.js"));
@@ -945,8 +943,7 @@ async function main() {
 
   section("The gate does not refuse valid SQL");
 
-  // The safety gate's own comment says refusing valid SQL is the worst outcome
-  // available here, and three of its patterns were doing it: they matched
+  // Three of the safety gate's patterns refused valid SQL: they matched
   // ordinary words that are only keywords in a context the pattern did not
   // check. Every entry below is plain, valid MySQL a resource could really
   // write, and every one was refused before this section existed.
@@ -1018,9 +1015,8 @@ async function main() {
     ["ALTER TABLE t DROP FOREIGN KEY fk_a", [], /DROP FOREIGN KEY/],
   ];
 
-  // Five entries left this list rather than being deleted quietly, because each
-  // one is now SUPPORTED and the suite has to say which behaviour replaced the
-  // refusal:
+  // Five entries left this list because each one is now SUPPORTED, and this is
+  // which behaviour replaced the refusal:
   //
   //   * ALTER TABLE ... MODIFY/CHANGE COLUMN now return a table-rebuild
   //     descriptor instead of throwing; see the section below.
@@ -1263,7 +1259,6 @@ async function main() {
     JSON.stringify(financing.params)
   );
 
-  // Two refusals, both about silence rather than syntax.
   for (const [sql, supplied, pattern] of [
     [
       // EXISTS cannot carry a value out of the joined table.

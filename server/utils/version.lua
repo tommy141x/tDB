@@ -14,9 +14,8 @@ local cachedRelease, fetched = nil, false
 -- a different indent from tRadio's and wrapped mid-phrase. server.js now emits a
 -- JSON array of { key, value, color }.
 --
--- A plain string is still accepted. The two sides ship together, so this is not
--- a live compatibility path, but a decode failure here would otherwise cost the
--- whole box -- the single least actionable startup state there is.
+-- A plain string is still accepted: a decode failure here would otherwise cost
+-- the whole startup box.
 local function parseInfo(status)
     if type(status) ~= 'string' or status == '' then return {} end
 

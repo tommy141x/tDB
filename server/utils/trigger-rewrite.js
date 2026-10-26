@@ -16,8 +16,7 @@
 // The contract is all-or-nothing: anything that does not match a shape exactly
 // returns { handled: false } and the caller falls back to skipping the trigger
 // and saying so. These statements maintain counters, so a half-understood
-// rewrite would corrupt them silently and permanently - refusing is cheap and a
-// wrong answer is not.
+// rewrite would corrupt them silently and permanently.
 //
 // translateStatement is injected, so the body still gets ordinary
 // MySQL-to-SQLite treatment for functions.

@@ -13,8 +13,6 @@ const fs = require("fs");
 const os = require("os");
 const { spawn, spawnSync } = require("child_process");
 
-// Resolve require() the way citizen-scripting-node does. See the file itself:
-// only manifest server_scripts get the resource root as their base.
 const ROOT = require("./fivem-require.js");
 
 const PocketBase = require(path.join(ROOT, "server/vendor/pocketbase.cjs.js"));

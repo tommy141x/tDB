@@ -328,8 +328,7 @@ section("How server.js wires the lifecycle up");
   ok(!/getRouterPort/.test(src), "the port-guessing health check is gone entirely");
 
   // A single dial made a mount that was live a second later read as permanently
-  // broken, and the banner then said so on every boot. A warning that is always
-  // there is a warning nobody reads.
+  // broken, and the banner then said so on every boot.
   const probe = src.slice(
     src.indexOf("async function checkRouteHealth"),
     src.indexOf("async function createSuperuser")

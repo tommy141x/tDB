@@ -16,8 +16,8 @@ node_version '22'
 -- "No such export" instead of a version message.
 tlib_min_version '1.0'
 
--- config.lua and config.local.lua are deliberately absent: config-loader.js
--- parses both directly, and a server_script that an operator deleted is fatal.
+-- config.lua and config.local.lua are parsed by config-loader.js, not listed
+-- here: a server_script pointing at a file an operator deleted is fatal.
 server_scripts {
     '@tLib/imports.lua',
     'server/utils/version.lua',

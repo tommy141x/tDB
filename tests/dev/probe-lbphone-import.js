@@ -130,7 +130,6 @@ async function main() {
       console.log(`  ${n ? "OK     " : "MISSING"} ${t}`);
     }
 
-    // Hand every imported table to PocketBase, and time it at scale.
     const pbAdopt = require(path.join(ROOT, "server/utils/pb-adopt.js"));
     const adoptDeps = {
       query: (q, p) => adapter.handle("query", [q, p || []]),

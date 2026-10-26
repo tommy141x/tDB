@@ -70,7 +70,6 @@ async function main() {
   ok(split("   \n\n  ").length === 0, "whitespace alone yields nothing");
   ok(split("SELECT 1;;;\nSELECT 2;").length === 2, "empty statements are dropped");
 
-  // The one that matters.
   const withSemicolon = split(
     `INSERT INTO items (name, description) VALUES ('bandage', 'Heals you; use it wisely');
      INSERT INTO items (name, description) VALUES ('radio', 'Talk to people');`

@@ -14,24 +14,23 @@
 // Both are refused by the translator's gate, which fails the whole import and
 // leaves the resource with no schema at all.
 //
-// THE DESIGN DECISION: evaluate, never pattern-match.
+// The condition is evaluated, never pattern-matched.
 //
 // Every condition in both spellings is an ordinary SELECT over
 // information_schema.COLUMNS / .STATISTICS / .TABLES / .TABLE_CONSTRAINTS, and
 // sql-translator's rewriteInformationSchema already turns all four into real
 // SQLite over sqlite_master and the pragma_* table functions. Measured: all
 // five conditions harvested from ESX, K9Script and esx_core translate and
-// return a value. So the condition is HANDED TO THE DATABASE and the real
-// answer decides the branch, exactly as MySQL would. Nothing here reads a
-// condition and infers what it probably means.
+// return a value. So the condition is handed to the database and the real
+// answer decides the branch, exactly as MySQL would.
 //
 // A condition tDB evaluates differently from MySQL - because SQLite reports no
 // CHECK constraints, say - still produces an honest outcome: the branch that ran
 // is the branch the live database called for.
 //
-// Anything outside the two spellings is refused with the construct named, never
-// approximated. A half-understood procedure body is the one outcome worse than
-// a failed import: it reports success having built the wrong schema.
+// Anything outside the two spellings is refused with the construct named rather
+// than approximated: a half-understood procedure body reports success having
+// built the wrong schema.
 //
 module.exports = (function () {
   function refuse(message, construct) {
@@ -110,9 +109,9 @@ module.exports = (function () {
 
   // MySQL's own rule, which is not JavaScript's: a string in boolean context is
   // read as a number and anything unparseable is false, so IF('abc', a, b)
-  // takes the ELSE branch. Every condition here returns 0 or 1 in practice; the
-  // rule is applied rather than assumed so a surprising value is not read as
-  // true by accident.
+  // takes the ELSE branch. Every condition here returns 0 or 1 in practice, so
+  // this only matters for a value neither side expected - which MySQL would
+  // read as false and JavaScript as true.
   function truthy(value) {
     if (value === null || value === undefined) return false;
     if (typeof value === "boolean") return value;

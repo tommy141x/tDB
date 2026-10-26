@@ -160,7 +160,6 @@ async function main() {
 
     console.log("\n=== Concurrent identical queries all resolve");
 
-    // The shape of a full server: many players, one code path, same instant.
     const many = await Promise.allSettled(
       Array.from({ length: 24 }, (_, i) =>
         oxCall("single", "SELECT * FROM players WHERE citizenid = ?", [
@@ -180,7 +179,6 @@ async function main() {
       show(many.slice(0, 3).map((r) => r.value)),
     );
 
-    // Same path, through the PocketBase adapter's collection API.
     const lists = await Promise.allSettled(
       Array.from({ length: 12 }, () => pbCall("getCollections")),
     );
@@ -191,7 +189,6 @@ async function main() {
       show(listRejected.slice(0, 2).map((r) => r.reason && r.reason.message)),
     );
 
-    // A mixed burst, which is what a busy server actually produces.
     const mixed = await Promise.allSettled([
       ...Array.from({ length: 8 }, () => oxCall("query", "SELECT * FROM players")),
       ...Array.from({ length: 8 }, () =>

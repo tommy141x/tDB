@@ -202,8 +202,7 @@ async function main() {
       created !== true ? String(created) : undefined
     );
 
-    // The shape the old name produced, to prove the assertion above is load
-    // bearing rather than describing a rule that does not exist.
+    // The shape the old name produced, as a control for the assertion above.
     let rejected = null;
     try {
       await pb.backups.create(`pre-adopt-${new Date().toISOString().replace(/[:.]/g, "-")}.zip`);

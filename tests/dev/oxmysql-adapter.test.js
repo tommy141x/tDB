@@ -10,8 +10,6 @@ const fs = require("fs");
 const os = require("os");
 const { spawn, spawnSync } = require("child_process");
 
-// Resolve require() the way citizen-scripting-node does. See the file
-// itself: only manifest server_scripts get the resource root as their base.
 const ROOT = require("./fivem-require.js");
 
 const OxMySQLAdapter = require(path.join(ROOT, "server/adapters/oxmysql.js"));
@@ -383,8 +381,6 @@ async function main() {
     const afterNew = await call("scalar", "SELECT COUNT(*) FROM players");
     ok(afterNew === before + 1, "upsert on a new key inserted", `${after} -> ${afterNew}`);
 
-    // A conflict target the statement never supplies would silently duplicate
-    // rows, so it must be refused instead.
     let refused = null;
     try {
       await call(

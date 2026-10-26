@@ -85,7 +85,7 @@ module.exports = (function () {
       // docs said before: scripts/fetch-runtime.ts pins a version AND verifies
       // it against the published checksum, and `update` replaces that vetted
       // binary with an unverified newer one, under a live database, without
-      // asking. Safe-by-default beats convenience here.
+      // asking.
       AutoUpdate: false,
 
       Superuser: {
@@ -154,9 +154,7 @@ module.exports = (function () {
    * NAME and reports the value it found under it, so it covers "the value is
    * wrong" completely - but a MISSPELLED key is a name it is never handed. Its
    * regex simply does not match, it returns null, the default stands, and the
-   * operator's setting does nothing at all with nothing said. That is the
-   * config bug this whole file's header calls the most expensive kind, and it
-   * was the only shape of it left uncovered here.
+   * operator's setting does nothing at all with nothing said.
    *
    * Kept beside the read() calls in parse() on purpose: the two lists have to
    * agree, and tests/dev/config-defaults.test.js parses the shipped config.lua
@@ -214,8 +212,8 @@ module.exports = (function () {
 
   /**
    * Keys that parse, are spelled correctly, and still do nothing. Reported in
-   * their own words rather than as a typo, because "did you mean" advice on a
-   * key the operator spelled perfectly is worse than silence.
+   * their own words rather than as a typo: the name is right, so "did you
+   * mean" advice would send the operator looking in the wrong place.
    */
   const INERT_KEYS = {
     Port:
@@ -253,9 +251,8 @@ module.exports = (function () {
    * The known name an unknown one was probably meant to be, or null.
    *
    * Case-insensitive, and the budget scales with length: `ExposeAdmn` and
-   * `exposeadmin` are both near-misses worth naming, while a wrong suggestion
-   * is worse than none - so it stays conservative and a long key gets no more
-   * slack in proportion than a short one.
+   * `exposeadmin` are both near-misses worth naming. Conservative, so a long
+   * key gets no more slack in proportion than a short one.
    */
   function suggest(unknown, known) {
     const budget = Math.max(2, Math.floor(unknown.length / 4));
@@ -281,7 +278,6 @@ module.exports = (function () {
       // operator has to go and edit.
       this.currentFile = CONFIG_FILE;
       // Collected during load() and drained by server.js into the startup box.
-      // A parse problem the operator never sees is the same as no validation.
       this.warnings = [];
     }
 
@@ -293,9 +289,8 @@ module.exports = (function () {
      * reads as `Config.Backup.KeepLast` rather than `KeepLast`.
      *
      * Absent key -> null, and the default stands. Key PRESENT but unparseable
-     * -> a warning naming file, key, expected and found, then null. Silently
-     * ignoring it is the anti-pattern: the operator's setting
-     * does nothing and nothing says so.
+     * -> a warning naming file, key, expected and found, then null, so an
+     * operator's setting cannot do nothing without saying so.
      */
     read(chunk, key, kind, label) {
       // Skip Lua-commented lines, and capture the whole right-hand side so the

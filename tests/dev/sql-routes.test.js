@@ -77,7 +77,6 @@ async function main() {
   const hooksDir = path.join(dataDir, "..", path.basename(dataDir) + "-hooks");
   fs.mkdirSync(hooksDir, { recursive: true });
 
-  // Run the resource's real hooks, not a copy that could drift.
   for (const file of fs.readdirSync(path.join(ROOT, "pb_hooks"))) {
     fs.copyFileSync(path.join(ROOT, "pb_hooks", file), path.join(hooksDir, file));
   }
@@ -282,7 +281,7 @@ async function main() {
     // it. 99999999999999.99 stores as 99999999999999.984. That is inherent, and
     // the affinity is kept deliberately rather than storing TEXT, because TEXT
     // would make `ORDER BY bank` sort lexicographically ("100" < "9") and
-    // break every balance listing - a worse failure than the 16th digit.
+    // break every balance listing.
     ok(
       typed.bank === "99999999999999.984",
       "DECIMAL comes back as text, with the float64 limit stated rather than hidden",

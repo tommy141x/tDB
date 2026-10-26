@@ -455,9 +455,8 @@ module.exports = (function () {
       } catch (error) {
         // A trigger is the one statement whose loss is recoverable: the tables
         // and every row still arrive, and only derived values it maintained go
-        // stale. Failing the file instead would import nothing at all, which is
-        // strictly worse, so skip it and say so loudly. Anything else still
-        // fails the whole file.
+        // stale. Failing the file over one would import nothing at all, so it
+        // is skipped with a warning. Anything else still fails the whole file.
         if (isCreateTrigger(entry.sql)) {
           const name = triggerName(entry.sql);
 
@@ -475,8 +474,6 @@ module.exports = (function () {
               origins.push(entry);
             }
             rewrites.push(`${name} (${rewritten.shapes.join(" + ")})`);
-            // DEBUG: one line per trigger in the file, and the per-file summary
-            // at the end of applyFile already reports how many were rewritten.
             logger.debug(
               `${filename}: trigger ${name} rewritten for SQLite ` +
                 `(${rewritten.shapes.join(" + ")})` +
@@ -549,8 +546,7 @@ module.exports = (function () {
 
     // A rebuild marker splits the file, because the statements before it have to
     // be in the database before its schema can be read. Atomicity is then per
-    // segment rather than per file - the same trade the chunked path already
-    // makes, and the reason both say so out loud.
+    // segment rather than per file, the same trade the chunked path makes.
     const segments = [[]];
     const breaksAt = [];
     for (const statement of statements) {

@@ -6,7 +6,6 @@ const seen = [];
 const handler = (reason) => seen.push(String((reason && reason.message) || reason));
 process.on("unhandledRejection", handler);
 
-// A deliberately unhandled rejection.
 Promise.reject(new Error("tdb-trap-control-marker"));
 
 await ctx.sleep(3000);

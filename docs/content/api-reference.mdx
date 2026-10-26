@@ -299,7 +299,7 @@ All server-local. Use `AddEventHandler`.
 | --- | --- |
 | `pocketbase:<collection>:<topic>` | `{ action = "create"\|"update"\|"delete", record }` |
 | `pocketbase:topic:<topic>` | whatever was published to the topic |
-| `tdb:startupStatus` | a single string: the rendered startup box |
+| `tdb:startupStatus` | a JSON string: the startup box rows, as `{ key, value, color }` |
 
 ## Version facts
 

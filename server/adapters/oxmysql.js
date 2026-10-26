@@ -588,18 +588,18 @@ class OxMySQLAdapter {
     return schema;
   }
 
-  /**
-   * MySQL fires ON DUPLICATE KEY on whichever unique constraint the row violates;
-   * SQLite makes you name one. Only a key whose every column the statement
-   * supplies can behave the same: a target the INSERT gives no values for can
-   * never match, and the upsert degrades into a plain insert with duplicate rows.
-   */
   // Returned when the insert cannot collide with any unique key, so the
   // ON DUPLICATE KEY UPDATE clause is unreachable and a plain INSERT is the
   // faithful translation. A string rather than a Symbol so it survives being
   // passed through the translator's options object unchanged.
   static NO_CONFLICT_POSSIBLE = "__tdb_no_conflict_possible";
 
+  /**
+   * MySQL fires ON DUPLICATE KEY on whichever unique constraint the row violates;
+   * SQLite makes you name one. Only a key whose every column the statement
+   * supplies can behave the same: a target the INSERT gives no values for can
+   * never match, and the upsert degrades into a plain insert with duplicate rows.
+   */
   resolveConflictTarget(table, insertColumns) {
     const schema = this.schemaCache.get(table);
 

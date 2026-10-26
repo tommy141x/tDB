@@ -50,9 +50,6 @@ function applyLogLevel(config) {
 // PocketBase process was indistinguishable from a tDB line about it. Where that
 // distinction matters the subsystem goes inside the message instead - see the
 // `pocketbase:` prefix on the two stdout/stderr relays.
-//
-// INFO carries no colour. Only problem states are coloured; see the banner
-// note above.
 const logger = {
   info: (msg) => console.log(`[tDB] ${msg}`),
   warn: (msg) => console.log(`^3[tDB]^7 ${msg}`),
@@ -84,8 +81,7 @@ const startupStatus = {
    *  cannot tell us where its listener is. */
   healthCheckPassed: null,
   /** What the last route probe actually saw ("HTTP 404", "ECONNREFUSED", ...)
-   *  and which URL it dialled. A verdict the operator cannot act on is the
-   *  thing this pair exists to stop: "check tLib's log" is not a diagnosis. */
+   *  and which URL it dialled. */
   routeProbeDetail: null,
   routeProbeUrl: null,
   clientAuthenticated: null,
@@ -118,8 +114,8 @@ applyLogLevel(config);
 logger.debug("Configuration loaded");
 
 // A key the parser could not read, or a deprecated one it read anyway. These go
-// in the startup box as well as the log: a setting that quietly did nothing is
-// the single most expensive config bug to support.
+// in the startup box as well as the log, so a setting that quietly did nothing
+// is visible without reading back through the boot.
 for (const warning of configLoader.getWarnings()) {
   logger.warn(warning);
   startupStatus.warnings.push(warning);
@@ -215,9 +211,8 @@ function buildSmartUrl(hostParam, port) {
   return `http://${hostParam}:${port}`;
 }
 
-// Reported by the client half once the SQL importer has run. Kept as state
-// rather than logged and forgotten: a console line at boot is read hours after
-// the symptom reaches a player, which is the failure mode this exists to stop.
+// Reported by the client half once the SQL importer has run, and kept as state
+// so the startup box and the reminder below can both read it.
 global.tdbReportSqlFailures = (failures) => {
   startupStatus.sqlFailures = Array.isArray(failures) ? failures : [];
 
@@ -426,9 +421,7 @@ function displayStartupStatus() {
   }
 
   // Lua owns the shared tLib version/banner display, so don't draw a second
-  // resource-specific startup box here. JSON because a FiveM event argument
-  // crossing into Lua as a table is fine, but the rows are built here and
-  // consumed in one place, and a string keeps the contract obvious.
+  // resource-specific startup box here.
   emit("tdb:startupStatus", JSON.stringify(rows));
 }
 
@@ -1157,7 +1150,7 @@ function validateConfig() {
  * Returning without stopping left tDB "running" with no exports registered, so
  * every consumer failed later with `no such export`, pointing at the wrong
  * resource. Stopping means the console names tDB once, at the top, with the
- * config errors right above it: fail fast.
+ * config errors right above it.
  */
 function abortStartup() {
   displayStartupStatus();
@@ -1366,14 +1359,6 @@ function handlePocketBaseExit(code) {
   }
 }
 
-/**
- * Drain tLib's ring into the line handlers, forever, and notice the exit.
- *
- * The exit needs two passes, not one: tLib sets its exit flag from the child's
- * 'exit' event, which can be delivered before the last chunk of stdout has been
- * split into lines. Stopping on the first `alive: false` would drop exactly the
- * lines that say why it died.
- */
 // tDB's own stop, not tLib's.
 //
 // The pump reaches across a resource boundary on a timer, and a timer that
@@ -1391,6 +1376,14 @@ on("onResourceStop", (stopped) => {
   pocketbaseExited = true;
 });
 
+/**
+ * Drain tLib's ring into the line handlers, forever, and notice the exit.
+ *
+ * The exit needs two passes, not one: tLib sets its exit flag from the child's
+ * 'exit' event, which can be delivered before the last chunk of stdout has been
+ * split into lines. Stopping on the first `alive: false` would drop exactly the
+ * lines that say why it died.
+ */
 function startOutputPump(api, held) {
   for (const line of held) handlePocketBaseStdout(line);
   held.length = 0;

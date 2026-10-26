@@ -2,8 +2,7 @@
  * `bun run prod` — cut the release zip.
  *
  * Unlike the other resources here, tDB is MIT and unescrowed: there is nothing
- * to obfuscate and no provenance token to arm. What is left is the part that
- * actually goes wrong — deciding what ships.
+ * to obfuscate and no provenance token to arm.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";

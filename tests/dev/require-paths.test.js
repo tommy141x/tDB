@@ -107,7 +107,6 @@ for (const file of sources) {
   const rel = path.relative(ROOT, file).replace(/\\/g, "/");
   const isServerScript = SERVER_SCRIPTS.has(file);
 
-  // A manifest script resolves from the root; a plain module from its own dir.
   const base = isServerScript ? ROOT : path.dirname(file);
 
   const source = stripComments(fs.readFileSync(file, "utf8"));

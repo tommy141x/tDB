@@ -43,8 +43,6 @@ const section = (n) => console.log(`\n=== ${n}`);
 const rows = (db, sql) => db.prepare(sql).all();
 const scalar = (db, sql) => Object.values(db.prepare(sql).get())[0];
 
-// The database the migrations run against
-
 // Column types are declared with widths on purpose: CHARACTER_MAXIMUM_LENGTH is
 // read back out of the declared type by rewriteInformationSchema, so a bare
 // TEXT would make the ESX banking condition unanswerable.

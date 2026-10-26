@@ -6,8 +6,7 @@
  * table WITH ROWS - including a NULL where one matters - runs the planned
  * statements against node:sqlite, and then asserts the rows survived, the new
  * shape is what was asked for, and the indexes and triggers still exist AND
- * still fire. Asserting the statement text would prove nothing about any of
- * that.
+ * still fire.
  *
  * The twelve statements exercised are the ones harvested from shipped FiveM
  * resources and currently refused by the translator.

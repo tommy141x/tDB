@@ -1,9 +1,8 @@
 /**
  * Conformance against oxmysql's real contract.
  *
- * tDB's claim is that it is a drop-in replacement, and the only honest way to
- * check that is against oxmysql's own source rather than against memory of it.
- * Both tables below are transcribed from:
+ * tDB's claim is that it is a drop-in replacement. Both tables below are
+ * transcribed from oxmysql's own source:
  *
  *   overextended/oxmysql @ bae715c244d7ef8136a025c8a35ced3daff51738
  *     src/index.ts     - the export surface
@@ -279,7 +278,7 @@ function main() {
       ok(typeof second === "function", "and it can be resolved more than once");
 
       // The aliased name must route to the SAME behaviour as tDB's own export,
-      // or the two can drift. Proven by dispatching through a stub adapter.
+      // or the two can drift.
       const seen = [];
       router.registerAdapter({
         name: "stub",
@@ -317,8 +316,8 @@ function main() {
         "and mysql-async gets `mysql_execute` (affectedRows), not `execute`"
       );
 
-      // No registrar (an older host, or a unit test) must warn rather than throw:
-      // losing the aliases is bad, taking the resource down with it is worse.
+      // No registrar (an older host, or a unit test) must warn rather than
+      // throw, so a missing one costs the aliases and not the resource.
       const bare = new ExportRouter(
         () => {},
         () => Promise.resolve(),

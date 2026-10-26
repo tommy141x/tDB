@@ -9,9 +9,8 @@
  * SQLite only gained in 3.44 (Nov 2023).
  *
  * node:sqlite on this machine is 3.53 and supports it, but node:sqlite is NOT
- * the engine that runs in production - PocketBase ships its own. Measuring the
- * wrong engine is how you ship a translation that works in the test suite and
- * fails on a server, so this asks the real one.
+ * the engine that runs in production - PocketBase ships its own, so this asks
+ * the real binary.
  *
  * Dev harness, not part of the suite. Run from the resource root:
  *   node tests/dev/probe-group-concat.js

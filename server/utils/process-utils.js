@@ -47,8 +47,8 @@ module.exports = (function () {
    * Poll a one-shot to completion. Never rejects.
    *
    * Polling rather than an event because the result crosses a resource
-   * boundary: an event registered after it fired is a hang, and a hang during
-   * startup provisioning is the worst failure shape available here.
+   * boundary: an event registered after it fired is a hang, and this runs
+   * during startup provisioning, which nothing else times out.
    *
    * Reading a finished job also forgets it on tLib's side, so this reads once
    * and keeps what it got.

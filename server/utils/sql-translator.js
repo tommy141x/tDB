@@ -20,7 +20,6 @@ module.exports = (function () {
 
   let initPromise = null;
 
-  // Safe to call repeatedly; the load happens once.
   function init() {
     if (!initPromise) {
       initPromise = polyglot.init();
@@ -32,8 +31,6 @@ module.exports = (function () {
     return polyglot.isInitialized();
   }
 
-  // Carries the original SQL and the offending construct, so the console line
-  // is actionable.
   class SQLTranslationError extends Error {
     constructor(message, { sql, construct, translated } = {}) {
       super(message);
@@ -445,21 +442,6 @@ module.exports = (function () {
     };
   }
 
-  // SQLite takes LIMIT on DELETE/UPDATE only when built with
-  // SQLITE_ENABLE_UPDATE_DELETE_LIMIT, which PocketBase's driver is not. Dropping
-  // the LIMIT would delete more rows than asked, so bound it through rowid.
-  /**
-   * ALTER TABLE forms MySQL has and SQLite does not.
-   *
-   * SQLite's ALTER TABLE can only rename, add a column, or drop a column: it
-   * cannot add a constraint or change a column's type. Found by running the
-   * corpus from esx_core, qbx_core and qb-core, where these appear 15 times and
-   * all of them translated to SQL that SQLite then rejected at execution -
-   * worse than a refusal, because it reaches the database before it fails.
-   *
-   * Indexes ARE expressible, so those are translated; the rest is refused by
-   * name through the gate.
-   */
   /**
    * Split an ALTER's action list on its TOP-LEVEL commas.
    *
@@ -596,8 +578,8 @@ module.exports = (function () {
         continue;
       }
 
-      // Something else in the list. Hand nothing over rather than guess: a
-      // partial rebuild is worse than a refusal that names the construct.
+      // Something else in the list. Hand nothing over rather than plan a
+      // partial rebuild, so the gate refuses it by name.
       return null;
     }
 
@@ -730,31 +712,6 @@ module.exports = (function () {
     return { sql, extraStatements: [] };
   }
 
-  /**
-   * UPDATE ... JOIN, and multi-table DELETE, as an EXISTS subquery.
-   *
-   * SQLite updates exactly one table and has no JOIN in UPDATE; its own answer
-   * is `UPDATE ... FROM`, which MySQL cannot parse - so the transpiler could
-   * never see that form. An EXISTS subquery is the shape that is valid in BOTH
-   * dialects, so the statement goes through the ordinary path with no marker:
-   *
-   *   UPDATE a JOIN b ON <on> SET a.x = ? WHERE <where>
-   *   UPDATE a SET x = ? WHERE EXISTS (SELECT 1 FROM b WHERE <on> AND (<where>))
-   *
-   * Equivalent whenever the SET expressions do not read the joined table -
-   * which all three real statements satisfy, since they all assign bound
-   * parameters. When one does read it, EXISTS cannot carry the value across and
-   * the statement is refused by name rather than guessed at.
-   *
-   * Two refusals, both about silence:
-   *
-   *   * A placeholder in the ON clause. MySQL's text order is ON, SET, WHERE
-   *     and the EXISTS form's is SET, ON, WHERE; placeholders are paired with
-   *     the rewritten statement by POSITION, so moving the ON clause past the
-   *     SET list would re-pair every one of them. esx_core has exactly such a
-   *     statement.
-   *   * A SET expression naming the joined table or its alias.
-   */
   /**
    * `INSERT INTO t VALUES (...)` -> `INSERT INTO t (a, b, c) VALUES (...)`.
    *
@@ -914,6 +871,22 @@ module.exports = (function () {
     };
   }
 
+  /**
+   * UPDATE ... JOIN as an EXISTS subquery.
+   *
+   * SQLite updates exactly one table and has no JOIN in UPDATE; its own answer
+   * is `UPDATE ... FROM`, which MySQL cannot parse - so the transpiler could
+   * never see that form. An EXISTS subquery is the shape that is valid in BOTH
+   * dialects, so the statement goes through the ordinary path with no marker:
+   *
+   *   UPDATE a JOIN b ON <on> SET a.x = ? WHERE <where>
+   *   UPDATE a SET x = ? WHERE EXISTS (SELECT 1 FROM b WHERE <on> AND (<where>))
+   *
+   * Equivalent whenever the SET expressions do not read the joined table -
+   * which all three real statements satisfy, since they all assign bound
+   * parameters. When one does read it, EXISTS cannot carry the value across, so
+   * that shape is refused by name below.
+   */
   function rewriteUpdateJoin(sql) {
     const mask = codeMask(sql);
 
@@ -1069,6 +1042,9 @@ module.exports = (function () {
     );
   }
 
+  // SQLite takes LIMIT on DELETE/UPDATE only when built with
+  // SQLITE_ENABLE_UPDATE_DELETE_LIMIT, which PocketBase's driver is not. Dropping
+  // the LIMIT would delete more rows than asked, so bound it through rowid.
   function rewriteDeleteLimit(sql) {
     const mask = codeMask(sql);
 
@@ -1139,7 +1115,6 @@ module.exports = (function () {
     return depths;
   }
 
-  // Functions SQLite has no equivalent for, expressed in terms it does have.
   /**
    * `SHOW TABLES` -> a query against SQLite's catalogue.
    *
@@ -1186,7 +1161,7 @@ module.exports = (function () {
         if (!filter) return `${base} ORDER BY name`;
         if (/^LIKE/i.test(filter)) return `${base} AND name ${filter} ORDER BY name`;
         // A WHERE on SHOW TABLES filters MySQL's own column name, which does
-        // not exist here. Refusing is better than inventing a mapping.
+        // not exist here, so there is nothing to map it onto.
         return _m;
       }
     );
@@ -1352,8 +1327,8 @@ module.exports = (function () {
    *
    * Column names are aliased to MySQL's, because that is what callers read:
    * `Field` from SHOW COLUMNS, `Key_name`/`Column_name` from SHOW INDEX. Only
-   * the columns scripts actually use are reproduced; inventing values for
-   * MySQL-specific metadata would be worse than leaving it out.
+   * the columns scripts actually use are reproduced; MySQL-specific metadata is
+   * left out rather than given an invented value.
    *
    * Everything emitted here has to stay parseable as MySQL, since it is still
    * handed to the MySQL front end. Hence backticked aliases and no backslashes.
@@ -2139,8 +2114,7 @@ module.exports = (function () {
     [/\bAUTO_INCREMENT\b/i, "AUTO_INCREMENT"],
     // Anchored to DDL, because `engine` is an ordinary column name: qbx_core
     // and qb-garages both run `UPDATE player_vehicles SET ... engine = ? ...`,
-    // and an unanchored pattern refused those outright. Refusing valid SQL is
-    // the worst outcome available here, so the statement type gates it.
+    // and an unanchored pattern refused those outright.
     [/^\s*(?:CREATE|ALTER)\b[\s\S]*\bENGINE\s*=/i, "ENGINE="],
     [/\bDEFAULT\s+CHARSET\b/i, "DEFAULT CHARSET"],
     [/\b(UNIQUE\s+)?KEY\s+[`"]?[A-Za-z0-9_$]+[`"]?\s*\(/i, "inline KEY/INDEX definition"],
@@ -2168,12 +2142,6 @@ module.exports = (function () {
     // (a scalar subquery, or a WHERE ... IN), which is why they are refused
     // rather than guessed at: these maintain counters, and a silently wrong
     // rewrite corrupts them for good.
-    // A column-list-free INSERT is positional, and once PocketBase owns a table
-    // the column order is PocketBase's, not the dump's: it sorts them. Measured
-    // on phone_message_messages, where `id,channel_id,sender,content,...` became
-    // `attachments,channel_id,content,id,...`. Every column survives, but values
-    // written positionally would land in the wrong ones, silently. Naming the
-    // columns is the fix, so say that rather than corrupting data.
     [
       // The gate matches against the code-masked statement, which blanks a
       // quoted table name to spaces, so this keys off the absence of a column
@@ -2186,8 +2154,7 @@ module.exports = (function () {
       // `INSERT INTO fxsql_values (name, enabled, payload) VALUES (...)` -- a
       // fully named INSERT -- as having no column list, and the same for
       // `qbxsql_benchmark_values`. Both are real statements in Qbox-project's
-      // qbxsql. Refusing valid SQL is the worst outcome available here, and
-      // this one hid behind codeMask: a BACKTICKED `\`fxsql_values\`` is
+      // qbxsql, and it hid behind codeMask: a BACKTICKED `\`fxsql_values\`` is
       // blanked before the gate runs and passed, so it only bit unquoted names.
       //
       // `OR IGNORE` as well as `IGNORE`: the gate runs after INSERT IGNORE has
@@ -2313,7 +2280,6 @@ module.exports = (function () {
     return updateSql.slice(setIndex + "SET".length).trim();
   }
 
-  // Run the full pipeline for one query shape.
   // Statement types MySQL has and SQLite does not, checked against the
   // original text before anything rewrites it.
   //
@@ -2424,9 +2390,6 @@ module.exports = (function () {
     let extraStatements = [];
     // Set when a CREATE OR REPLACE VIEW needs a DROP emitted ahead of it.
     let replacedView = null;
-
-    // Two spellings the MySQL front end will not parse, normalised before it
-    // sees them. Both are valid MySQL and both appear in shipped schemas.
 
     // `INT (10)` with a space before the width. ox_mdt writes every column
     // this way, and the parse failure took its whole schema with it.
@@ -2591,12 +2554,10 @@ module.exports = (function () {
     }
 
     // The permutation is applied last, so it describes the ORIGINAL placeholder
-    // positions regardless of what else ran in between. A malformed order is
-    // ignored rather than trusted: silently re-pairing parameters is the exact
-    // failure this machinery exists to avoid.
-    // A permutation has the same length; an expansion is longer. Either is
-    // fine - what is not is an entry pointing outside the original list, which
-    // would bind the wrong value, so that is checked rather than trusted.
+    // positions regardless of what else ran in between. A permutation has the
+    // same length and an expansion is longer, both fine; an entry pointing
+    // outside the original list would bind the wrong value, so it is checked
+    // and a malformed order ignored.
     let keys = normalized.keys;
     if (keyOrder && keyOrder.every((from) => from >= 0 && from < keys.length)) {
       keys = keyOrder.map((from) => keys[from]);
@@ -2619,11 +2580,8 @@ module.exports = (function () {
     translate,
     clearCache,
     SQLTranslationError,
-    // Exposed for tests. Eleven other helpers were listed here and none of
-    // them was ever read - the suite reaches everything else through
-    // translate(), which is the better test anyway because it exercises the
-    // ordering between the rewrites rather than one in isolation. Add a name
-    // back when a test actually needs it.
+    // Exposed for tests; the suite reaches the rest through translate(), which
+    // also exercises the ordering between the rewrites.
     _internal: { normalizePlaceholders },
   };
 })();

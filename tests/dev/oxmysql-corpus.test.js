@@ -323,8 +323,6 @@ async function main() {
     `rate was ${(rate * 100).toFixed(1)}%`
   );
 
-  // Every refusal has to name something. A bare parse error tells an operator
-  // nothing about what to change.
   const unnamed = verbatimRefused.filter((r) => r.construct === "parse error");
   ok(
     unnamed.length <= MAX_UNNAMED,
@@ -338,9 +336,9 @@ async function main() {
       : undefined
   );
 
-  // Anything that did translate has to be SQL a real engine accepts. A
-  // translation SQLite rejects is worse than a refusal, because it reaches the
-  // database before it fails.
+  // Anything that did translate has to be SQL a real engine accepts: a bad
+  // translation reaches the database before it fails, where a refusal never
+  // leaves the translator.
   const db = new DatabaseSync(":memory:");
   const rejected = [];
   for (const item of verbatimTranslated) {
@@ -356,8 +354,6 @@ async function main() {
     } catch (error) {
       // "no such table/column" is expected: the corpus has no schema loaded.
       // Only a syntax-level complaint means the translation itself is bad.
-      // No schema is loaded here, so a missing object is expected. Only a
-      // syntax-level complaint means the translation itself is bad.
       if (
         /no such (table|column|function|index|trigger|view|collation)|unknown/i.test(error.message)
       )

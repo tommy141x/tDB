@@ -290,10 +290,8 @@ module.exports = (function () {
    *
    * The guard fires only when the column WAS NULL and the incoming value is the
    * zero value, so a populated value is never touched and setting a real value
-   * over a NULL still works. The one case it decides for the operator is a
-   * deliberate NULL -> '' on a text column, which the UI cannot express anyway:
-   * it renders both as an empty box, so preserving the NULL is the only choice
-   * that does not lose information.
+   * over a NULL still works. It does override a deliberate NULL -> '' on a text
+   * column, which the UI renders identically to a NULL and so cannot ask for.
    *
    * No recursion risk: SQLite's recursive_triggers is off by default, so the
    * trigger's own UPDATE does not re-fire it.
@@ -549,8 +547,8 @@ module.exports = (function () {
    * cleaned up before retrying.
    *
    * Never throws. A table that fails is reported and the rest are still
-   * attempted, because stopping halfway through 164 tables is worse than
-   * finishing the ones that work.
+   * attempted: a run covers 164 tables, and one of them failing should not
+   * abandon the other 163.
    */
   async function adopt(deps, entryList) {
     let entries = entryList;
@@ -589,13 +587,6 @@ module.exports = (function () {
 
     await exec(REGISTRY_DDL);
 
-    // Why the order is recorded at all: adoption REORDERS columns - PocketBase
-    // sorts them - so `INSERT INTO t VALUES (...)` with no column list, which is
-    // positional, would land every value in the wrong column afterwards.
-    // Measured on phone_message_messages, where `id,channel_id,sender,content`
-    // became `attachments,channel_id,content,id`. Keeping the source order lets
-    // the translator expand such an INSERT into a named one instead of refusing
-    // it.
     for (const migration of REGISTRY_MIGRATIONS) {
       try {
         await exec(migration);
@@ -730,9 +721,7 @@ module.exports = (function () {
         // Clean up after ourselves. A failure part-way through leaves the
         // working collection and its table on disk: 27 `<table>__tdb_adopting`
         // tables were found on a live server after a failed run, the count grew
-        // on every boot, and a retry could collide with its own leftover. This
-        // is the "half importing / leaving files around" class, so the failing
-        // path has to tidy up rather than relying on the next run to notice.
+        // on every boot, and a retry could collide with its own leftover.
         try {
           const after = await collections.getFullList();
           const debris = after.find((c) => c.name === working);

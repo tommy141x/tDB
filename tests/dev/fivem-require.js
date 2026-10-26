@@ -49,9 +49,7 @@ Module._resolveFilename = function (request, parent, ...rest) {
   // Every relative specifier, not a list of directory names. The list used to
   // read `utils|bin|adapters`, which were the top-level directories before the
   // sources moved under `server/` -- after the move nothing matched, so this
-  // rewrite silently did nothing at all. A name list has to be re-edited after
-  // every move and gives no sign when it has not been; "from the root" is the
-  // actual FiveM rule and cannot go stale.
+  // rewrite silently did nothing at all.
   if (rootBased && request.startsWith("./")) {
     return originalResolve.call(
       this,

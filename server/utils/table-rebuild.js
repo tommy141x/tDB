@@ -60,12 +60,12 @@ module.exports = (() => {
   // They are emitted anyway rather than left to the caller because getting this
   // wrong is safe in the only direction that matters: with foreign keys still
   // enforced, the DROP TABLE below fails with "FOREIGN KEY constraint failed"
-  // and the transaction rolls back with the data untouched. Loud and lossless.
+  // and the transaction rolls back with the data untouched.
   //
   // PRAGMA foreign_key_check is NOT emitted. It reports violations as result
   // rows rather than as an error, so a statement list executed for effect
-  // cannot act on it - it would be theatre. The caller that wants the check can
-  // run it itself between the rebuild and the re-enable.
+  // cannot act on it. The caller that wants the check can run it itself between
+  // the rebuild and the re-enable.
   const PRAGMA_OFF = "PRAGMA foreign_keys = OFF";
   const PRAGMA_ON = "PRAGMA foreign_keys = ON";
 
@@ -79,8 +79,8 @@ module.exports = (() => {
    * SQLite's own affinity rules, in their documented order, plus one MySQL
    * correction.
    *
-   * This is the single biggest simplification in the module. SQLite has no
-   * column widths, no character sets and no per-type storage classes: a
+   * SQLite has no column widths, no character sets and no per-type storage
+   * classes: a
    * declared type is only a hint that picks one of five affinities. So
    * VARCHAR(11), VARCHAR(50) and MEDIUMTEXT are all exactly TEXT, and an ALTER
    * that changes nothing but a width, a CHARACTER SET or a case-insensitive
@@ -326,8 +326,7 @@ module.exports = (() => {
     if (text[0] === "'") {
       if (text.includes("\\")) {
         // MySQL reads \' and \\ inside a string literal; SQLite does not, so
-        // the same bytes would mean something different. Refusing beats
-        // guessing which engine's rules the dump was written for.
+        // the same bytes would mean something different.
         throw refuse(
           `DEFAULT ${text} uses a backslash escape, which SQLite does not read`,
           "DEFAULT with a backslash escape"
@@ -713,8 +712,7 @@ module.exports = (() => {
    * That is not a gap in practice - a plain INTEGER PRIMARY KEY hands out
    * max(id)+1, which is what `AUTO_INCREMENT=N` means in a dump, where N is
    * always one past the last row just inserted. It IS a gap for a hand-written
-   * `AUTO_INCREMENT=` far above the data, which would silently start lower. The
-   * limit is stated here rather than approximated with a dummy row.
+   * `AUTO_INCREMENT=` far above the data, which would silently start lower.
    */
   function sequenceStatements(table, value, isAutoincrement) {
     const start = Number(value);
@@ -770,9 +768,9 @@ module.exports = (() => {
    * declared `(id INTEGER PRIMARY KEY AUTOINCREMENT, x TEXT UNIQUE, y TEXT
    * CHECK (y <> ''), FOREIGN KEY (x) REFERENCES t(a))`, it reported none of the
    * AUTOINCREMENT, the UNIQUE, the CHECK or the foreign key. A rebuild driven
-   * by the pragma alone would therefore drop all four without a word, which is
-   * the exact failure mode this module exists to avoid. So the original text is
-   * patched in place instead, and only the entries an action names are touched.
+   * by the pragma alone would therefore drop all four without a word, so the
+   * original text is patched in place instead and only the entries an action
+   * names are touched.
    *
    * actions is what the translator parsed out of the ALTER:
    *   { kind: 'modify', column: 'ssn', definition: 'VARCHAR(11) NOT NULL' }
