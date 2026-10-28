@@ -58,16 +58,17 @@ it to [raw SQL](/docs/tDB/api-reference#raw-sql) and write SQLite directly.
 
 ## The admin UI is not reachable from outside
 
-Most often tLib's port is closed on the host or not forwarded in NAT.
-
-1. Open tLib's port — `tlib_http_port`, default 7777 — in the host firewall and forward it
-   in NAT, following
-   [opening tLib's port](https://timmygstudios.com/docs/tLib/installation#opening-the-port-if-you-want-browser-access). Test
-   from outside the network; a probe from the server itself can pass on a port the internet
-   cannot reach.
+1. **Try the FiveM server port first** — 30120 on a default install:
+   `http://<your server>:<server port>/tDB/`. Nothing has to be opened for that address, so it
+   rules out every firewall and NAT question in one step.
 2. Confirm `Config.ExposeAdmin = true`.
-3. Confirm tLib is running and reports its HTTP listener up.
-4. Confirm the port you forwarded is tLib's, not PocketBase's internal 8090.
+3. Confirm tLib is running, and that `tlib_http_ingress` has not been set to `false`.
+4. **Only if you opted into tLib's own listener** is there a port to open: `tlib_http_port`,
+   default 7777, in the host firewall and forwarded in NAT — see
+   [tLib's advanced listener guide](https://timmygstudios.com/docs/tLib/installation#advanced-tlibs-own-listener).
+   Test from outside the network; a probe from the server itself can pass on a port the
+   internet cannot reach. Confirm the port you forwarded is tLib's, not PocketBase's
+   internal 8090.
 
 ## The startup box says Waiting for tLib's HTTP listener
 

@@ -29,6 +29,16 @@ writes the credentials into `config.local.lua`, and authenticates. The
 PocketBase web installer never appears. The generated password is printed once,
 on that run only.
 
+The admin UI comes up with it, on your FiveM server port — 30120 on a default
+install — at `http://<your server>:<server port>/tDB/`. Nothing to open, forward or configure, and
+the path is case-insensitive. PocketBase's own port is internal; never forward
+it. `Config.ExposeAdmin = false` keeps the database headless instead.
+
+PocketBase realtime subscriptions are server-sent events and do not travel over
+that port, though the admin UI and the REST API do. For realtime, or a custom
+domain, configure tLib's own listener and use the same path on port `7777`;
+its older `/db` address still answers there, with a permanent redirect.
+
 `config.lua` is the file you edit, and it ships with every credential blank. A
 real credential comes from a server convar — `set tdb_superuser_password "…"` —
 or from the gitignored `config.local.lua` beside it. The convar wins.

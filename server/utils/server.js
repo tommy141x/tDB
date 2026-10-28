@@ -720,7 +720,12 @@ async function confirmBind(api, port, held, timeoutMs = 15000) {
 
 /** One constant because the registration and the health probe have to agree on
  *  the mount; they used to agree only by re-parsing the public URL's path. */
-const TLIB_MOUNT = "/db";
+// Named after the resource on purpose. On the FiveM server port a path's first
+// segment IS the resource name, so a mount that matches it is the same path on
+// both of tLib's doors: `:30120/tDB/_/` and `:7777/tDB/_/`. Renamed from "/db"
+// on 2026-10-27; LEGACY_TLIB_MOUNTS keeps the old one answering.
+const TLIB_MOUNT = "/tDB";
+const LEGACY_TLIB_MOUNTS = ["/db"];
 
 /**
  * Read tLib's HTTP status snapshot.
@@ -767,6 +772,7 @@ function registerWithTLib() {
   return globalThis.exports.tLib.RegisterWebApp({
     id: "db",
     mount: TLIB_MOUNT,
+    legacyMounts: LEGACY_TLIB_MOUNTS,
     port: config.Port,
     host: "127.0.0.1",
     // PocketBase has no base-path option, so it must see unprefixed paths. Its

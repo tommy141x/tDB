@@ -10,7 +10,7 @@ published: true
 
 tDB answers every oxmysql export, translates MySQL SQL to SQLite as it goes, and runs an
 embedded [PocketBase](https://pocketbase.io/) underneath. No MySQL to install, no connection
-string, nothing to keep running alongside it.
+string, no port to open, nothing to keep running alongside it.
 
 ```lua
 -- Existing oxmysql code. Unchanged.
@@ -21,7 +21,7 @@ local row = exports.oxmysql:single_async('SELECT * FROM players WHERE citizenid 
   items={[
     { value: "0", label: "database servers to install" },
     { value: "3", label: "resource names provided: oxmysql, mysql-async, ghmattimysql" },
-    { value: "1", label: "port, and it's tLib's" },
+    { value: "0", label: "ports to open: the admin UI answers on the FiveM server port" },
     { value: "MIT", label: "licence, source included" },
   ]}
 />

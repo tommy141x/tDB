@@ -53,32 +53,33 @@ says **Waiting for tLib's HTTP listener**, that is not an error — see
 
 </Steps>
 
-## The admin panel in a browser, if you want it
+## The admin panel in a browser
 
-**Optional. tDB is fully working without it** — queries, migrations and every export run
-over the server, and no port is involved.
+**Already working, with nothing to configure.** The panel is served on the FiveM server
+port — the one your players connect through:
 
-What a port buys is reaching the admin panel from a browser, at
-`http://<your server>:7777/db/_/`. Leave it closed and the database is unaffected.
-PocketBase's own port is internal and is never the one to forward.
-
-Both settings are **tLib's**, not tDB's — there is no port in tDB's config:
-
-```txt title="server.cfg — above ensure tLib"
-set tlib_http_port 7777
-set tlib_http_public_url "http://your-server-address:7777"
+```txt
+http://<your server>:<server port>/tDB/
 ```
 
-`tlib_http_port` is the port to open and forward on your host. `tlib_http_public_url`
-is the address tLib tells browsers to use, and it is the one worth setting deliberately:
-left unset, tLib detects your public IP, which is wrong whenever players reach the panel
-by hostname or through a proxy. The symptom is not an obvious one — the panel loads and
-then requests from it are refused — so if you reach the panel by anything other than a
-bare IP, set it to exactly the scheme, host and port you type in the browser.
+Your server port is whatever `endpoint_add_tcp` declares — 30120 on a default install. tDB
+prints the address in its startup box. The path is case-insensitive, so `/tdb/` works
+too, and tLib's hub at `/tLib/` links it. PocketBase's own port is internal and is
+never the one to forward.
 
-tLib prints the address it settled on at boot and says whether it was detected, so check
-that line rather than guessing. The full reference is
-[tLib's convars](https://timmygstudios.com/docs/tLib/convars#http-router).
+`Config.ExposeAdmin = false` keeps the database headless instead. The database itself works
+either way — queries, migrations and every export run over the server, with no port involved.
+
+### One thing this door cannot do
+
+**PocketBase realtime subscriptions do not work over it.** They are server-sent events, which
+the FiveM server port cannot carry. The admin UI and the REST API are unaffected.
+
+If you need realtime, or a custom domain, use tLib's own listener instead: an optional second
+door on port `7777` that has to be opened by hand, serving the panel at the same path,
+`:7777/tDB/`. The whole procedure — the port, `tlib_http_public_url` and the reverse-proxy
+notes — is [tLib's advanced listener guide](https://timmygstudios.com/docs/tLib/installation#advanced-tlibs-own-listener).
+Its older `/db` address still answers there, with a permanent redirect.
 
 ## Replace oxmysql
 

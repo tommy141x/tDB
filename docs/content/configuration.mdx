@@ -41,21 +41,26 @@ Config.Superuser = {
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `Config.ExposeAdmin` | boolean | `true` | Publish the admin UI at `/db/_/` on tLib's port. `false` keeps the database headless and unreachable from outside the machine |
+| `Config.ExposeAdmin` | boolean | `true` | Publish the admin UI at `/tDB/` through tLib. `false` keeps the database headless and unreachable from outside the machine |
 | `Config.ShowInHub` | boolean | `true` | List the admin UI in tLib's hub. Cosmetic only, [not a security control](#hiding-it-from-the-hub) |
 | `Config.Debug` | boolean | `false` | Print tDB's debug lines. Off, a normal boot prints the startup box and nothing else |
 | `Config.AutoUpdate` | boolean | `false` | Run `pocketbase update` on start, replacing the shipped build with an unverified newer one under a live database |
 
 ### The admin UI
 
-On by default and needs no configuration. It is at `http://<your server>:7777/db/`, the
-panel itself at `/db/_/`; sign in with `Config.Superuser`. For a headless database, set
-`Config.ExposeAdmin = false`.
+On by default, and there is nothing to open or configure. It is at
+`http://<your server>:<server port>/tDB/` — your FiveM server port, the one players already
+connect through, 30120 on a default install — and the path is case-insensitive. Sign in with `Config.Superuser`. For a headless
+database, set `Config.ExposeAdmin = false`.
 
-The panel answers on tLib's `tlib_http_port` (default 7777) and the address handed out is
-`tlib_http_public_url` — both in
-[tLib's convar reference](https://timmygstudios.com/docs/tLib/convars#http-router). That is
-the only port you ever set: PocketBase's own is internal, so do not open or forward it.
+PocketBase's own port is internal: never open or forward it.
+
+tLib's own listener is an optional second door, serving the panel at the same path on port
+`7777`. Take it if you need PocketBase's realtime subscriptions, which are server-sent events
+and cannot travel over the FiveM server port, or a custom domain. Its settings —
+`tlib_http_port` and `tlib_http_public_url` — are in
+[tLib's convar reference](https://timmygstudios.com/docs/tLib/convars#http-router), and the
+procedure is [tLib's advanced listener guide](https://timmygstudios.com/docs/tLib/installation#advanced-tlibs-own-listener).
 
 If the startup box says **Waiting for tLib's HTTP listener**, tLib's router is not up yet
 and tDB publishes the admin URL as soon as it is. The database itself works throughout.
@@ -207,6 +212,6 @@ Config.ShowInHub = false   -- default: true
 ```
 
 <Callout type="danger" title="This is not a security setting">
-  It removes the hub entry and nothing else. `/db` still answers to anyone who requests it.
+  It removes the hub entry and nothing else. `/tDB/` still answers to anyone who requests it.
   For genuine unreachability use `Config.ExposeAdmin = false`.
 </Callout>
