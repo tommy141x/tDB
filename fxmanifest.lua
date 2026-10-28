@@ -5,7 +5,7 @@ name 'tDB'
 description 'Database resource for FiveM: a drop-in oxmysql replacement backed by PocketBase, with realtime and collection APIs on top'
 author 'Tommy Johnston'
 author 'TIMMYG Studios'
-version '1.0.0'
+version '1.0'
 
 -- Bundles PocketBase 0.40.4 (MIT, Gani Georgiev). See THIRD-PARTY-NOTICES.md.
 
