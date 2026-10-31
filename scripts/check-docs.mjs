@@ -11,6 +11,7 @@ import path from "node:path";
 const SLUG = "tDB";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const CONTENT_DIR = path.join(ROOT, "docs", "content");
+const CHANGELOG_DIR = path.join(ROOT, "docs", "changelog");
 const PUBLIC_DIR = path.join(ROOT, "docs", "public");
 const ASSET_PREFIX = `/assets/${SLUG}/`;
 const DOCS_PREFIX = `/docs/${SLUG}/`;
@@ -35,6 +36,19 @@ function walk(dir, base = dir) {
 }
 
 const mdxFiles = walk(CONTENT_DIR).filter((f) => f.endsWith(".mdx"));
+// Changelog entries sync to the site with the docs and break the same ways, so they go
+// through every scan below. They are a separate set rather than more pages because they
+// are not pages: the frontmatter is product/version/date, and they have no docs slug.
+const changelogFiles = walk(CHANGELOG_DIR).filter((f) => f.endsWith(".mdx"));
+
+const sources = [
+  ...mdxFiles.map((rel) => ({ rel, changelog: false, abs: path.join(CONTENT_DIR, rel) })),
+  ...changelogFiles.map((rel) => ({
+    rel: `changelog/${rel}`,
+    changelog: true,
+    abs: path.join(CHANGELOG_DIR, rel),
+  })),
+];
 const mediaFiles = new Set(walk(PUBLIC_DIR).filter((f) => !f.startsWith(".")));
 
 if (mdxFiles.length === 0) {
@@ -58,8 +72,8 @@ function slugify(heading) {
 const pages = new Map();
 const referenced = new Set();
 
-for (const rel of mdxFiles) {
-  const text = fs.readFileSync(path.join(CONTENT_DIR, rel), "utf8");
+for (const { rel, changelog, abs } of sources) {
+  const text = fs.readFileSync(abs, "utf8");
 
   const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!fm) {
@@ -67,13 +81,23 @@ for (const rel of mdxFiles) {
     continue;
   }
   const field = (name) => fm[1].match(new RegExp(`^${name}:\\s*(.+)$`, "m"))?.[1]?.trim();
-  if (!field("title")) fail(rel, "frontmatter is missing required `title`");
-  for (const optional of ["description", "order", "group"]) {
-    if (!field(optional)) warn(rel, `frontmatter has no \`${optional}\``);
+  if (changelog) {
+    // The changelog collection's own schema. `title`, `order` and `group` are the docs
+    // sidebar's, and a changelog entry has none of them \u2014 requiring them here would
+    // report every entry rather than find anything.
+    for (const required of ["product", "version", "date"]) {
+      if (!field(required)) fail(rel, `frontmatter is missing required \`${required}\``);
+    }
+  } else {
+    if (!field("title")) fail(rel, "frontmatter is missing required `title`");
+    for (const optional of ["description", "order", "group"]) {
+      if (!field(optional)) warn(rel, `frontmatter has no \`${optional}\``);
+    }
   }
 
   // A folder index collapses to the folder slug, so x.mdx and x/index.mdx collide.
-  const slug = rel.replace(/\.mdx$/, "").replace(/\/index$/, "");
+  // `changelog:` cannot come out of a /docs link, so an entry is never a link target.
+  const slug = changelog ? `changelog:${rel}` : rel.replace(/\.mdx$/, "").replace(/\/index$/, "");
   if (pages.has(slug)) {
     fail(rel, `collapses to the same URL as ${pages.get(slug).file} (${DOCS_PREFIX}${slug})`);
     continue;
@@ -82,7 +106,7 @@ for (const rel of mdxFiles) {
   const anchors = new Set();
   const body = text.slice(fm[0].length).replace(/^```[\s\S]*?^```/gm, "");
   for (const m of body.matchAll(/^#{2,6}\s+(.+)$/gm)) anchors.add(slugify(m[1]));
-  if (/^#\s+/m.test(body)) {
+  if (!changelog && /^#\s+/m.test(body)) {
     warn(rel, "body starts a level-1 heading; the h1 is rendered from frontmatter `title`");
   }
   pages.set(slug, { file: rel, anchors, body });
@@ -116,9 +140,16 @@ for (const w of warnings) console.warn(`  warn  ${w}`);
 for (const e of errors) console.error(`  ERROR ${e}`);
 
 console.log(
-  `\ncheck-docs: ${mdxFiles.length} pages, ${mediaFiles.size} media files, ` +
-    `${warnings.length} warning(s), ${errors.length} error(s)`,
+  `\ncheck-docs: ${mdxFiles.length} pages, ${changelogFiles.length} changelog entries, ` +
+    `${mediaFiles.size} media files, ${warnings.length} warning(s), ${errors.length} error(s)`,
 );
-if (errors.length === 0) console.log(`  pages: ${[...pages.keys()].sort().join(", ")}`);
+if (errors.length === 0) {
+  console.log(
+    `  pages: ${[...pages.keys()]
+      .filter((s) => !s.startsWith("changelog:"))
+      .sort()
+      .join(", ")}`,
+  );
+}
 
 process.exit(errors.length > 0 ? 1 : 0);

@@ -7,6 +7,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import AdmZip from "adm-zip";
+// `stampBuildId` is not re-exported by build/index.ts, so it is taken from the
+// module itself rather than reimplemented here.
+import { BUILD_STAMP_KEY, stampBuildId } from "../../tLib/shared/ts/build/core.ts";
 import {
   mergeLicenceFiles,
   assertManifestStaged,
@@ -175,6 +178,12 @@ for (const binary of [".runtime/pocketbase-linux", ".runtime/pocketbase-win.exe"
   }
   console.log(`  ${binary} — PocketBase ${stamped}`);
 }
+
+// Last before the zip, so the id covers every staged byte. Without it two zips at
+// the same `version` are the same object to a customer and to support -- the state
+// that let one tRadio 7.0.0 ship with sv_cad.lua and one without, undetectably.
+step("Stamping the build id");
+console.log(`  ${BUILD_STAMP_KEY} '${stampBuildId(DIST)}'`);
 
 step("Packaging");
 // One merged `server/LICENSE.txt` instead of up to four legal files at the resource
